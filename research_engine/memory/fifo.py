@@ -1,0 +1,1 @@
+"""FIFO page replacement simulation."""
