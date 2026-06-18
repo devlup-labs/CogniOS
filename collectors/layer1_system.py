@@ -3,6 +3,7 @@ import time
 from datetime import datetime,timezone
 from utils.helpers import rate_mb_s
 
+# a dictionary to store previous values
 _last = {
     "time": None,
     "disk_read_bytes": None,
@@ -106,7 +107,7 @@ def collect_layer1_metrics():
     #b Load Average Metrics 
     try:
         load_avg1, load_avg5, load_avg15=psutil.getloadavg()
-        
+
     # except AttributeError: # catches specific error when getloadavg is not support 
     except Exception:
         load_avg1=load_avg5=load_avg15=None
