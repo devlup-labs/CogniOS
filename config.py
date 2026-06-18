@@ -1,1 +1,1 @@
-"""CogniOS configuration."""
+DB_PATH = "cognios_telemetry.db"
