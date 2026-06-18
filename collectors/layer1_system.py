@@ -2,8 +2,12 @@ import psutil
 import time
 from datetime import datetime,timezone
 
+# collects metriics 
+
 def collect_layer1_metrics():
     timestamp = datetime.now(timezone.utc).isoformat()
+
+
 
     cpu_usage_percent = psutil.cpu_percent(interval=None)
     cpu_times = psutil.cpu_times()
@@ -12,6 +16,8 @@ def collect_layer1_metrics():
     cpu_idle_time = cpu_times.idle
     cpu_iowait_time = getattr(cpu_times, 'iowait', None)  # iowait for Linux only
     cpu_busy_time = 100.0 - cpu_usage_percent if cpu_usage_percent is not None else None
+
+# freq , ctx_switches are not available on all systems
 
     try:
         freq = psutil.cpu_freq()
