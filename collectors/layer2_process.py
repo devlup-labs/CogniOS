@@ -46,8 +46,8 @@ def collect_process_telemetry(prev_states=None):
                 'name': info['name'] or 'Unknown',
                 'cpu_percent': round(cpu_percent, 2),
                 'memory_percent': round(mem_percent, 2),
-                'rss_memory': mem_info.rss,
-                'vms_memory': mem_info.vms,
+                'rss_memory': mem_info.rss / (1024 * 1024), # MB
+                'vms_memory': mem_info.vms / (1024 * 1024 * 1024), # GB
                 'thread_count': info['num_threads'] or 1,
                 'read_bytes_sec': round(calc_read_rate, 2),
                 'write_bytes_sec': round(calc_write_rate, 2),
