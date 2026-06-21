@@ -90,7 +90,7 @@ class MetadataCollector:
 
 
 
-def process_top_processes(top_cpu, top_mem):  
+def process_top_processes(collector, top_cpu, top_mem):  
 
    
     top_pids = set()
