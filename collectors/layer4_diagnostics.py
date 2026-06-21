@@ -26,7 +26,11 @@ class DiagnosticsCollector:
             cpu_affinity TEXT,
             io_priority INTEGER,
             nice_value INTEGER,
-            trigger_reason TEXT
+            trigger_reason TEXT,
+            net_connections_count INTEGER,
+            net_connections TEXT,       
+            net_bytes_sent INTEGER,
+            net_bytes_recv INTEGER                     
         )
         """)
         self.conn.commit()
@@ -36,6 +40,8 @@ class DiagnosticsCollector:
             p = psutil.Process(pid)
             timestamp = datetime.now().isoformat()
 
+            #open files
+
             try:
                 files = p.open_files()
                 open_files_count = len(files)
@@ -44,6 +50,7 @@ class DiagnosticsCollector:
                 open_files_count = None
                 open_files = None
 
+            #threads
             try:
                 threads = p.threads()
                 thread_count = len(threads)
@@ -55,6 +62,8 @@ class DiagnosticsCollector:
                 thread_count = None
                 thread_details = None
 
+            #ctx switches
+
             try:
                 ctx = p.num_ctx_switches()
                 vol_ctx = ctx.voluntary
@@ -62,20 +71,59 @@ class DiagnosticsCollector:
             except (psutil.AccessDenied, Exception):
                 vol_ctx, invol_ctx = None, None
 
+            #Cpu affinity
             try:
                 affinity = ",".join(str(c) for c in p.cpu_affinity())
             except (psutil.AccessDenied, AttributeError, Exception):
                 affinity = None
 
+            #I/O Priority
             try:
                 ioprio = p.ionice().value
             except (psutil.AccessDenied, AttributeError, Exception):
                 ioprio = None
 
+            # Nice value
             try:
                 nice = p.nice()
             except (psutil.AccessDenied, Exception):
                 nice = None
+
+            # Network Connections
+            try:
+                conns = p.connections(kind="all")
+                net_connections_count = len(conns)\
+                
+                conn_parts = []
+                for c in conns[:30]:
+                    if c.type == 1:
+                        proto = "tcp"
+                    elif c.type == 2:
+                        proto = "udp"
+                    else:
+                        proto = "other"
+                    
+                    local = f"{c.laddr.ip}:{c.laddr.port}" if c.laddr else "-"
+                    remote = f"{c.raddr.ip}:{c.raddr.port}" if c.raddr else "-"
+                    status = c.status if c.status else "-"
+
+                    conn_parts.append(f"{proto}|{local}|{remote}|{status}")
+            
+                net_connections = ",".join(conn_parts)
+            
+            except (psutil.AccessDenied, AttributeError,Exception):
+                net_connections_count = None
+                net_connections = None
+            
+            # Per-process Network Bytes
+            try:
+                io = p.io_counters()
+                net_bytes_sent = io.write_bytes
+                net_bytes_recv = io.read_bytes
+            except (psutil.AccessDenied, AttributeError, Exception):
+                net_bytes_sent = None
+                net_bytes_recv = None
+
 
             self.cursor.execute("""
                 INSERT INTO process_diagnostics (
@@ -83,16 +131,22 @@ class DiagnosticsCollector:
                     open_files_count, open_files,
                     thread_count, thread_details,
                     voluntary_ctx_switches, involuntary_ctx_switches,
-                    cpu_affinity, io_priority, nice_value, trigger_reason
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    cpu_affinity, io_priority, nice_value, trigger_reason,
+                    net_connections_count, net_connections,
+                    net_bytes_sent, net_bytes_recv
+
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 pid, p.name(), timestamp,
                 open_files_count, open_files,
                 thread_count, thread_details,
                 vol_ctx, invol_ctx,
-                affinity, ioprio, nice, trigger_reason
+                affinity, ioprio, nice, trigger_reason,
+                net_connections_count, net_connections,
+                net_bytes_sent, net_bytes_recv
             ))
             self.conn.commit()
+
         except (psutil.NoSuchProcess, psutil.ZombieProcess) as e:
             print(f"[LAYER4 ERROR] {e}")
 
