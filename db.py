@@ -30,7 +30,7 @@ def create_connection(db_path):
             memory_buffers INTEGER,
             swap_percent REAL,
             swap_sin INTEGER,
-            swap_sout INTEGER
+            swap_sout INTEGER,
                    
             --Disk Metrics
             disk_usage_percent REAL,
@@ -60,7 +60,7 @@ def create_connection(db_path):
             --Hardware Metrics
             avg_temp REAL,
             max_temp REAL,
-            battery_percent REAL,
+            battery_percent REAL
         )
     ''')
 
