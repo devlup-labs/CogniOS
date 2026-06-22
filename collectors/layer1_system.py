@@ -1,6 +1,11 @@
 import psutil
 import time
 from datetime import datetime,timezone
+import sys
+import os
+#adding path to locate the utils
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import utils
 from utils.helpers import rate_mb_s
 
 # a dictionary to store previous values
