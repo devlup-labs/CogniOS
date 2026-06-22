@@ -1,14 +1,21 @@
 """Layer 4 diagnostics telemetry collection."""
-import threading
-import sqlite3
-import psutil
 from datetime import datetime
+from pathlib import Path
+import socket
+import sqlite3
+import threading
+
+import psutil
 
 _layer4_running = False
 _layer4_lock = threading.Lock()
+DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "cognios.db"
 
 class DiagnosticsCollector:
-    def __init__(self, db_path="cognios_telemetry.db"):
+    def __init__(self, db_path=DEFAULT_DB_PATH):
+        db_path = Path(db_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
         self.cursor.execute("""
@@ -29,11 +36,29 @@ class DiagnosticsCollector:
             trigger_reason TEXT,
             net_connections_count INTEGER,
             net_connections TEXT,       
-            net_bytes_sent INTEGER,
-            net_bytes_recv INTEGER                     
+            io_write_bytes INTEGER,
+            io_read_bytes INTEGER                     
         )
         """)
+        self._ensure_columns(
+            {
+                "io_write_bytes": "INTEGER",
+                "io_read_bytes": "INTEGER",
+            }
+        )
         self.conn.commit()
+
+    def _ensure_columns(self, columns):
+        existing_columns = {
+            row[1]
+            for row in self.cursor.execute("PRAGMA table_info(process_diagnostics)")
+        }
+
+        for column_name, column_type in columns.items():
+            if column_name not in existing_columns:
+                self.cursor.execute(
+                    f"ALTER TABLE process_diagnostics ADD COLUMN {column_name} {column_type}"
+                )
 
     def collect_and_save(self, pid, trigger_reason="anomaly"):
         try:
@@ -91,14 +116,14 @@ class DiagnosticsCollector:
 
             # Network Connections
             try:
-                conns = p.connections(kind="all")
-                net_connections_count = len(conns)\
+                conns = p.net_connections(kind="all")
+                net_connections_count = len(conns)
                 
                 conn_parts = []
                 for c in conns[:30]:
-                    if c.type == 1:
+                    if c.type == socket.SOCK_STREAM:
                         proto = "tcp"
-                    elif c.type == 2:
+                    elif c.type == socket.SOCK_DGRAM:
                         proto = "udp"
                     else:
                         proto = "other"
@@ -115,14 +140,14 @@ class DiagnosticsCollector:
                 net_connections_count = None
                 net_connections = None
             
-            # Per-process Network Bytes
+            # Per-process disk I/O bytes.
             try:
                 io = p.io_counters()
-                net_bytes_sent = io.write_bytes
-                net_bytes_recv = io.read_bytes
+                io_write_bytes = io.write_bytes
+                io_read_bytes = io.read_bytes
             except (psutil.AccessDenied, AttributeError, Exception):
-                net_bytes_sent = None
-                net_bytes_recv = None
+                io_write_bytes = None
+                io_read_bytes = None
 
 
             self.cursor.execute("""
@@ -133,7 +158,7 @@ class DiagnosticsCollector:
                     voluntary_ctx_switches, involuntary_ctx_switches,
                     cpu_affinity, io_priority, nice_value, trigger_reason,
                     net_connections_count, net_connections,
-                    net_bytes_sent, net_bytes_recv
+                    io_write_bytes, io_read_bytes
 
                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
@@ -143,7 +168,7 @@ class DiagnosticsCollector:
                 vol_ctx, invol_ctx,
                 affinity, ioprio, nice, trigger_reason,
                 net_connections_count, net_connections,
-                net_bytes_sent, net_bytes_recv
+                io_write_bytes, io_read_bytes
             ))
             self.conn.commit()
 
@@ -181,4 +206,3 @@ def trigger_layer4(pid_list, trigger_reason="anomaly"):
         daemon=True
     )
     t.start()
-
