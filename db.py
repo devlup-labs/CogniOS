@@ -90,11 +90,10 @@ def insert_separated_telemetry(top_cpu, top_mem):
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
         
-        # Write to top_cpu_telemetry table if metrics exist
+
         if cpu_rows:
             cursor.executemany(insert_query.format("top_cpu_telemetry"), cpu_rows)
-            
-        # Write to top_ram_telemetry table if metrics exist
+        
         if ram_rows:
             cursor.executemany(insert_query.format("top_ram_telemetry"), ram_rows)
             
