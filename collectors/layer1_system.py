@@ -213,7 +213,8 @@ def collect_layer1_metrics():
         "zombie_processes":zombie_processes,
         "avg_temp":temp_avg,
         "max_temp":temp_max,
-        "battery_percent":battery_percent
+        "battery_percent":battery_percent,
+        "process_data":process_data
     }
 
 if __name__ == "__main__":
