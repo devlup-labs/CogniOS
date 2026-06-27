@@ -22,7 +22,27 @@ _last = {
 def collect_layer1_metrics():
     now = time.time()
     timestamp = datetime.now(timezone.utc).isoformat()
-
+    #process
+    try:
+        procs = {}
+        for p in psutil.process_iter(["name", "memory_percent"]):
+            try:
+                p.cpu_percent()
+                procs[p.pid] = p
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        time.sleep(0.1)
+        process_data = []
+        for pid, p in procs.items():
+            try:
+                cpu = round(p.cpu_percent(), 2)
+                mem = round(p.info.get("memory_percent") or 0.0, 2)
+                if cpu > 0.5 or mem > 0.5:
+                    process_data.append((p.info.get("name"), cpu, mem))
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except Exception:
+        process_data = []
     # CPU Metrics
     cpu_usage_percent = psutil.cpu_percent(interval=None)
     cpu_times = psutil.cpu_times()
