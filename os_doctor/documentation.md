@@ -3,24 +3,18 @@ Real-Time Intelligent Operating System Monitoring & Anomaly Detection System
 
 Project Documentation
 
-Team Members :
-Guide :
-Institute :
-Date :
-Version :
-
 1. Introduction
 
-OSDoctor is an intelligent observability system that continuously monitors operating system telemetry, detects abnormal system behavior using machine learning, identifies the likely root cause, and explains the issue in natural language. Its objective is to answer the question: “Why is my laptop slow right now?” This aligns with the project objective described in the proposal. 
+OSDoctor is an intelligent observability system that continuously monitors operating system telemetry, detects abnormal system behavior using machine learning, identifies the likely root cause, and explains the issue in natural language. Its objective is to answer the question: “Why is my laptop slow right now?”
 
 2. Objectives
 
-* Collect live OS telemetry
-* Store telemetry efficiently
-* Engineer useful features
-* Detect anomalies
-* Explain detected issues
-* Display results on dashboard
+- Monitor real-time system telemetry.
+- Detect system anomalies automatically.
+- Identify causes of performance issues.
+- Detect CPU, memory, disk, and process-related faults.
+- Explain issues in simple, human-readable language.
+- Provide actionable alerts and recommendations.
 
 
 3. System Architecture
