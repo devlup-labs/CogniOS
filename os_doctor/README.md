@@ -66,77 +66,119 @@ os_doctor/
 │── README.md          # Project overview and setup guide
 ```
 
+# `feature.py`
 
-5. Function Documentation
-6. Feature Engineering
-
-## Module Overview
-The `feature.py` script serves as the core mathematical transformation layer for the **OS Doctor Anomaly Engine**. Its primary responsibility is to bridge the gap between low-frequency/high-frequency transactional data stored in the local SQLite database and the high-dimensional, uniform matrices required by the **Isolation Forest** machine learning pipeline.
-
-The module continuously processes a rolling **2-minute sliding window** of system and process performance telemetry, cleans missing data, applies advanced statistical transformations (rolling averages, gradients, and rates of change), and generates a unified vector payload for real-time anomaly detection.
+This module bridges the gap between transactional database storage and in-memory multi-dimensional math. It queries the running SQLite database in WAL mode, extracts the latest historical sliding window, standardizes missing rows, and computes derived statistical features for the anomaly detection pipeline.
 
 ---
 
-## Libraries Used
-
-### 1 pandas
-We use pandas for faster vector calculations leveraging it's built in functions like rolling(), shift() and many more.
-
-### 2 sqlite3
-We use sqlite3 library to handle the telemetry database created prior.
-
-### 3 json
-We use json library to parse the json object created in layer2.
-
-## Core Telemetry Pipeline Alignment Matrix
-
-Because our telemetry collection infrastructure drops metrics down at asynchronous cadences, this script enforces chronological structure across distinct dimensional boundaries:
-
-| Data Layer | Source Table | DB CADENCE | Target Window Scope | Base Matrix Shape |
-| :--- | :--- | :--- | :--- | :--- |
-| **Layer 1: System-Wide** | `system_telemetry` | Every 1 Second | Last 120 Seconds | $120 \times \text{metrics}$ |
-| **Layer 2: Top Processes**| `process_telemetry`| Every 5 Seconds | Last 120 Seconds | $24 \times \text{metrics}$ |
+### 1. `extract_telemetry_window`
+* **Description:** Queries the running SQLite database safely in WAL mode to extract the latest rolling historical sliding window of system and process telemetry rows.
+* **Input:**
+  - `db_path` (str): Absolute path to the centralized SQLite database.
+  - `window_size` (int): Number of historical rows to fetch (default: 120 samples / 2 minutes).
+* **Output:**
+  - `tuple[pd.DataFrame, pd.DataFrame]`: A tuple containing the raw system telemetry DataFrame and the process telemetry DataFrame.
 
 ---
 
-## Detailed Function Breakdown
+### 2. `handle_cold_start`
+* **Description:** Preprocesses raw process telemetry and backfills missing resource values for newly active or spiking processes to prevent mathematical anomalies or NaN breaks.
+* **Input:**
+  - `df_process` (pd.DataFrame): Raw process telemetry DataFrame containing compressed or stringified JSON arrays.
+* **Output:**
+  - `pd.DataFrame`: A standardized, chronologically aligned DataFrame with missing historical process values filled with baseline thresholds (0.0).
 
-The feature engineering layer executes its operations deterministically through four functions:
+---
 
-### 1. `extract_and_engineer_system(db_path)`
-* **Intent:** Pulls the high-frequency global system indicators (Layer 1) and translates flat numbers into directional trends.
-* **Mechanism:** * Queries the last **120 rows** from the `system_telemetry` table ordered by timestamp, reversing them in memory to form a clean chronological left-to-right timeline.
-  * Utilizes `pandas` to calculate moving windows (e.g., 30-second rolling averages for CPU consumption) to smooth out short-term spikes.
-  * Calculates **I/O Storm Rates** and **Scheduler Context Switch Acceleration** by taking the difference between the most current metric entry and past rows (`df['metric'] - df['metric'].shift(1)`).
-* **Output Shape:** A flat, single-row pandas DataFrame: `[1 × num_system_features]`.
+### 3. `compute_derived_features`
+* **Description:** Transforms raw telemetry values into moving statistical fields, computing rolling averages to smooth noise and mathematical gradients (first derivatives) to capture exponential growth trends.
+* **Input:**
+  - `df_aligned` (pd.DataFrame): Aligned chronological dataframe of system and process metrics.
+* **Output:**
+  - `pd.DataFrame`: Feature-engineered DataFrame containing original metrics along with computed moving averages and velocity gradients.
 
-### 2. `extract_and_engineer_processes(db_path)`
-* **Intent:** Unpacks the denormalized JSON arrays for the Top 5 CPU and Top 5 RAM consumers, correcting the shape mismatch and handling the "cold start" baseline issue.
-* **Mechanism:**
-  * Queries the last **24 rows** (representing 120 seconds of 5-second steps) from the `process_telemetry` table.
-  * **The Chronological Upsampling Transform:** Because the database contains 24 rows but the final matrix requires a 1-second grid alignment, it upsamples the process rows into a 120-second array using forward-filling (`.ffill()`). This ensures data points match at every single second ticker.
-  * **Zero-Imputation (Cold Start Fix):** If a rogue process bursts into the Top 5 list halfway through the window, its missing history blocks are auto-populated with `0.0` instead of letting `NaN` values break the mathematical tracking loops.
-  * Computes process acceleration curves and resource gradients ($\Delta \text{Metric} / \Delta t$).
-* **Output Shape:** Two independent flat, single-row arrays: `[1 × num_cpu_features]` and `[1 × num_ram_features]`.
+---
 
-### 3. `build_unified_vector(sys_vec, cpu_vec, ram_vec)`
-* **Intent:** Combines separate feature spaces into a single high-dimensional coordinate vector.
-* **Mechanism:**
-  * Takes the horizontal outputs generated by the system and process computation layers.
-  * Executes an optimized columnar concatenation step (`pandas.concat(axis=1)`) to stitch the arrays together.
-  * Enforces a rigid, static schema definition so that column indexes never drift, ensuring the input dimensions exactly match what the downstream Isolation Forest expects.
-* **Output Shape:** A single, high-dimensional flat vector row: `[1 × total_combined_features]`.
+### 4. `prepare_inference_matrix`
+* **Description:** Flattens dimensional matrices and formats the engineered feature matrix into a structured in-memory array ready to be fed directly into the Isolation Forest algorithm.
+* **Input:**
+  - `df_engineered` (pd.DataFrame): The fully processed DataFrame containing all derived statistical features.
+* **Output:**
+  - `np.ndarray`: A stable 2D feature matrix of shape `(120, feature_count)` formatted for direct ingestion by `i_forest.py`.
 
-### 4. `get_inference_payload(db_path)`
-* **Intent:** Serves as the centralized public orchestrator function called directly by the core daemon script loop.
-* **Mechanism:**
-  * Acts as a non-blocking execution gatekeeper.
-  * First runs a safety health check on the database capacity. If the background collectors haven't yet logged the baseline buffer of 120 system records, this function gracefully exits returning `None`, preventing the ML models from calculating false positives on partial windows.
-  * Executes functions 1, 2, and 3 sequentially completely in-memory, then passes the finalized ready vector row directly down to the machine learning execution loop (`i_forest.py`).
-* **Output:** An inference-ready `pandas.DataFrame` row or `None`.
+#  `i_forest.py`
 
-7. Machine Learning Model
-8. LLM Explanation Layer
-9. Dashboard
-10. Installation
-11. Future Scope
+## 1. `initialize_model()`
+* **Input:** None (uses predefined strict configuration parameters: `n_estimators=100`, `max_samples=120`, `contamination='auto'`).
+* **Output:** An initialized and configured `IsolationForest` model instance.
+
+## 2. `evaluate_matrix(feature_matrix)`
+* **Input:** The perfectly formatted, in-memory 120-sample feature matrix passed directly from the `feature.py` layer.
+* **Output:** A numerical anomaly score (`-1` for anomalous, `1` for normal).
+
+## 3. `trigger_alert(anomaly_data)`
+* **Input:** The current anomalous system and process metrics (the relevant matrix data packaged into a Python dictionary).
+* **Output:** A database insertion (JSON payload) directly into the SQLite `alerts` table.
+
+# `llm_layer.py`
+
+## 1. `watch_alerts_table()`
+* **Input:** None (Database connection context)
+* **Output:** `anomaly_id` (Returns the ID of the new anomaly with `PENDING_LLM` status)
+
+## 2. `extract_historical_context(anomaly_id)`
+* **Input:** `anomaly_id`
+* **Output:** `telemetry_data` (The historical 120-sample sliding window matrix of the exact process that broke the system)
+
+## 3. `build_prompt_template(telemetry_data)`
+* **Input:** `telemetry_data` (Engineered anomaly vectors and historical snapshots)
+* **Output:** `prompt` (A structured JSON prompt template engineered for the LLM)
+
+## 4. `execute_llm_call(prompt)`
+* **Input:** `prompt`
+* **Output:** `explanation_text` (A specific, actionable natural language breakdown returned by the LLM API)
+
+## 5. `resolve_alert(anomaly_id, explanation_text)`
+* **Input:** `anomaly_id`, `explanation_text`
+* **Output:** Database Update (Updates SQLite row status to `RESOLVED` and appends the final explanation for the Streamlit dashboard)
+
+# `streamlit.py`
+
+# Streamlit Dashboard (`streamlit.py`) - Function Definitions
+
+This document outlines the core functions required to build the `streamlit.py` presentation layer for DoctorOS. These functions follow the passive-observer pattern, smoothly bridging the Hot Path (live system telemetry) and the Cold Path (out-of-band LLM explanations) via the centralized SQLite database.
+
+---
+
+## 1. `fetch_latest_telemetry`
+* **Input:** * `db_path` (string): The path to the centralized SQLite database.
+  * `time_window_seconds` (int, default=120): The lookback window to fetch data for the graphs.
+* **Output:** * `pandas.DataFrame`: A dataframe containing the historical time-series data for CPU, RAM, Disk I/O, and Network load over the requested window.
+
+## 2. `fetch_summary_metrics`
+* **Input:** * `db_path` (string): The path to the centralized SQLite database.
+* **Output:** * `dict`: A dictionary containing the absolute latest single-point metrics from the `system_telemetry` table (e.g., `{"cpu": 85, "ram": 72, "disk": 45, "network": 12}`).
+
+## 3. `fetch_alerts`
+* **Input:** * `db_path` (string): The path to the centralized SQLite database.
+  * `limit` (int, default=5): The maximum number of recent alerts to fetch from the `alerts` table.
+* **Output:** * `pandas.DataFrame`: A dataframe of recent anomalies flagged by the Isolation Forest. Crucially, this includes `llm_status` (e.g., `PENDING_LLM` or `RESOLVED`) and `llm_explanation` (the generated text).
+
+## 4. `render_summary_cards`
+* **Input:** * `metrics_dict` (dict): The output from `fetch_summary_metrics`.
+* **Output:** * `None`: (UI Side Effect) Uses `st.columns` and `st.metric` to render the high-level gauge cards at the very top of the dashboard.
+
+## 5. `render_resource_graphs`
+* **Input:** * `telemetry_df` (pandas.DataFrame): The time-series data output from `fetch_latest_telemetry`.
+* **Output:** * `None`: (UI Side Effect) Renders live updating line charts (via `st.line_chart` or a Plotly equivalent) for system resources mapped to the FocusOS visual footprint.
+
+## 6. `render_alerts_panel`
+* **Input:** * `alerts_df` (pandas.DataFrame): The anomaly data output from `fetch_alerts`.
+* **Output:** * `None`: (UI Side Effect) Iterates through the alerts. 
+    * If `llm_status == 'PENDING_LLM'`, it renders an `st.spinner` or loading state ("Analyzing anomaly..."). 
+    * If `llm_status == 'RESOLVED'`, it renders an `st.expander` containing the LLM's natural language explanation and suggested actions.
+
+## 7. `main`
+* **Input:** * `None`
+* **Output:** * `None`: (Execution) Acts as the entry point. Orchestrates the dashboard layout, manages the `st_autorefresh` (or polling loop), calls the fetching functions, and passes the retrieved data to the rendering functions.

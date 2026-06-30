@@ -1,6 +1,6 @@
 """Layer 2 process telemetry collection."""
 import time
-import psutil
+import psutil 
 
 
 def collect_process_telemetry(prev_states=None):
