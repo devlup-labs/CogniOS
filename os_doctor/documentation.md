@@ -56,6 +56,7 @@ Isolation Forest
 
 4. File Structure
 
+```text
 os_doctor/
 │── _init_.py             # Marks the directory as a Python package
 │── featuring.py           # Feature engineering and preprocessing
@@ -63,7 +64,7 @@ os_doctor/
 │── llm_layer.py           # LLM integration and response generation
 │── streamlit.py           # Streamlit web application
 │── README.md          # Project overview and setup guide
-
+```
 
 
 5. Function Documentation
