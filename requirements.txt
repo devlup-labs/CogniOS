@@ -1,1 +1,1 @@
-# Project dependencies go here.
+psutil>=6.0
