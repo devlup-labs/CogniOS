@@ -1,5 +1,48 @@
+"""Shared database schema and read/write interface."""
+import json
 import sqlite3
+import time
 from config import DB_PATH
+
+# layer 2 db code starts here
+
+
+def init_db():
+    """Initializes the unified process_snapshot table for Layer 2 telemetry."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS process_snapshot (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp           REAL    NOT NULL,
+                top_cpu_processes   TEXT    NOT NULL,
+                top_ram_processes   TEXT    NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_snapshot_ts
+            ON process_snapshot (timestamp)
+        """)
+        conn.commit()
+
+
+def insert_process_snapshot(top_cpu, top_ram):
+    """Writes one unified row per 5-second poll — timestamp + two compact JSON arrays."""
+    row = (
+        time.time(),
+        json.dumps(top_cpu, separators=(',', ':')),
+        json.dumps(top_ram, separators=(',', ':'))
+    )
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO process_snapshot (timestamp, top_cpu_processes, top_ram_processes) VALUES (?, ?, ?)",
+            row
+        )
+        conn.commit()
+
+# layer 2 db code ends here
+
+# layer 1 db code starts here
+
 
 db_path = DB_PATH
 
