@@ -7,13 +7,20 @@ __pycache__/
 .venv/
 venv/
 
+# Environment & Config (IMPORTANT)
+.env
+config.ini
+
 # Local data and generated artifacts
-data/cognios.db
+cognios_telemetry.db
+*.db
 data/models/*.pt
 data/traces/*
 
 # Keep data directories present in git if marker files are added.
-!data/models/.gitkeep
 !data/traces/.gitkeep
+
+# OS / IDE
 .DS_Store
-*.db
+.vscode/
+.idea/
