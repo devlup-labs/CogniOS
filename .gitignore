@@ -16,3 +16,4 @@ data/traces/*
 !data/models/.gitkeep
 !data/traces/.gitkeep
 .DS_Store
+*.db
