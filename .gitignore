@@ -15,3 +15,4 @@ data/traces/*
 # Keep data directories present in git if marker files are added.
 !data/models/.gitkeep
 !data/traces/.gitkeep
+cognios_telemetry.db

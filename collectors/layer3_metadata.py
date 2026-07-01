@@ -2,10 +2,12 @@
 import sqlite3
 from datetime import datetime
 import psutil 
+from config import DB_PATH 
+db_path = DB_PATH
 
 class MetadataCollector:
 
-    def __init__(self, db_path="cognios_telemetry.db"):
+    def __init__(self, db_path):
 
         self.conn = sqlite3.connect(db_path, check_same_thread = False)
         self.cursor = self.conn.cursor()

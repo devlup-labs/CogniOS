@@ -4,15 +4,16 @@ from pathlib import Path
 import socket
 import sqlite3
 import threading
-
 import psutil
+
+from config import DB_PATH 
+db_path = DB_PATH
 
 _layer4_running = False
 _layer4_lock = threading.Lock()
-DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "cognios.db"
 
 class DiagnosticsCollector:
-    def __init__(self, db_path=DEFAULT_DB_PATH):
+    def __init__(self, db_path):
         db_path = Path(db_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
