@@ -6,7 +6,7 @@ import sqlite3
 import threading
 import psutil
 
-from config import DB_PATH 
+from CogniOS.utils.config import DB_PATH 
 db_path = DB_PATH
 
 _layer4_running = False
