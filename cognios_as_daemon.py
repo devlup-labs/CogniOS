@@ -61,7 +61,8 @@ def run_daemon():
                     metrics['net_packets_received'],
                     metrics['net_errs'],
                     metrics['net_drops'],
-                    json.dumps(metrics['process_data'])
+                    json.dumps(metrics['process_data']),
+                    json.dumps(metrics['num_threads'])
                 )
                 logging.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
                 
