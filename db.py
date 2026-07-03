@@ -14,8 +14,8 @@ def init_db():
             CREATE TABLE IF NOT EXISTS process_snapshot (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp           REAL    NOT NULL,
-                top_cpu_processes   TEXT    NOT NULL,
-                top_ram_processes   TEXT    NOT NULL
+                top_cpu_json        TEXT    NOT NULL,
+                top_ram_json        TEXT    NOT NULL
             )
         """)
         conn.execute("""
@@ -34,7 +34,7 @@ def insert_process_snapshot(top_cpu, top_ram):
     )
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "INSERT INTO process_snapshot (timestamp, top_cpu_processes, top_ram_processes) VALUES (?, ?, ?)",
+            "INSERT INTO process_snapshot (timestamp, top_cpu_json, top_ram_json) VALUES (?, ?, ?)",
             row
         )
         conn.commit()

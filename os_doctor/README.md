@@ -72,44 +72,49 @@ This module bridges the gap between transactional database storage and in-memory
 
 ---
 
-### 1. `extract_telemetry_window`
+### 1. `extract_and_engineer_system`
 
-- **Description:** Queries the running SQLite database safely in WAL mode to extract the latest rolling historical sliding window of system and process telemetry rows.
+- **Description:** Queries the running SQLite database safely in WAL mode to extract the latest rolling historical sliding window of process telemetry rows.
 - **Input:**
-  - `db_path` (str): Absolute path to the centralized SQLite database.
+  - `DB_PATH` (str): Absolute path to the centralized SQLite database.
   - `window_size` (int): Number of historical rows to fetch (default: 120 samples / 2 minutes).
 - **Output:**
-  - `tuple[pd.DataFrame, pd.DataFrame]`: A tuple containing the raw system telemetry DataFrame and the process telemetry DataFrame.
+  - `sys_vec`: One single-rowed vector containing feature-engineered data of rolling 2-min window with gradients and rolling averages of system telemetry collection.
+
+  ---
+
+
+### 2. `extract_and_engineer_processes`
+
+- **Description:** Queries the running SQLite database safely in WAL mode to extract the latest rolling historical sliding window of process telemetry rows.
+- **Input:**
+  - `DB_PATH` (str): Absolute path to the centralized SQLite database.
+  - `window_size` (int): Number of historical rows to fetch (default: 24 samples / 2 minutes).
+- **Output:**
+  - `cpu_vec and ram_vec`: Two single-rowed vectors containing feature-engineered data of rolling 2-min window with gradients and rolling averages.
 
 ---
 
-### 2. `handle_cold_start`
+### 3. `build_unified_vectors`
 
-- **Description:** Preprocesses raw process telemetry and backfills missing resource values for newly active or spiking processes to prevent mathematical anomalies or NaN breaks.
+- **Description:** Combines the three individual vectors recieved above and handles what to feed into i_forest.py and what to feed to llm_layer.
 - **Input:**
-  - `df_process` (pd.DataFrame): Raw process telemetry DataFrame containing compressed or stringified JSON arrays.
+  - `sys_vec, ram_vec, cpu_vec` (pd.DataFrame): Raw process telemetry DataFrame containing compressed or stringified JSON arrays.
 - **Output:**
-  - `pd.DataFrame`: A standardized, chronologically aligned DataFrame with missing historical process values filled with baseline thresholds (0.0).
+  - `i_forest_features_df, metadata_payload`: i_forest_features_df is the pd DataFrame that goes into the i_forest model
+  metadata_payload is the metadata of processes such as 'pid', 'name', 'ppid' etc
+---
+
+### 4. `get_inference_payload`
+
+- **Description:** It ties the entire file together, it handles safety buffer checks (ensuring we have enough database entries before calculating metrics) and orchestrates Functions 1, 2, and 3 in sequence.
+- **Input:**
+  - `DB_PATH` (str): Absolute path to the centralized SQLite database.
+- **Output:**
+  - `i_forest_features_df, metadata_payload`: smoothly executes featuring.py and outputs same as 'build_unified_vectors'
 
 ---
 
-### 3. `compute_derived_features`
-
-- **Description:** Transforms raw telemetry values into moving statistical fields, computing rolling averages to smooth noise and mathematical gradients (first derivatives) to capture exponential growth trends.
-- **Input:**
-  - `df_aligned` (pd.DataFrame): Aligned chronological dataframe of system and process metrics.
-- **Output:**
-  - `pd.DataFrame`: Feature-engineered DataFrame containing original metrics along with computed moving averages and velocity gradients.
-
----
-
-### 4. `prepare_inference_matrix`
-
-- **Description:** Flattens dimensional matrices and formats the engineered feature matrix into a structured in-memory array ready to be fed directly into the Isolation Forest algorithm.
-- **Input:**
-  - `df_engineered` (pd.DataFrame): The fully processed DataFrame containing all derived statistical features.
-- **Output:**
-  - `np.ndarray`: A stable 2D feature matrix of shape `(120, feature_count)` formatted for direct ingestion by `i_forest.py`.
 
 # `i_forest.py`
 

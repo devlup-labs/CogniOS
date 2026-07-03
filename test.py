@@ -2,8 +2,10 @@
 import time
 from collectors.layer2_process import collect_process_telemetry
 from db import init_db, insert_process_snapshot
+from config import DB_PATH
+from os_doctor.featuring import get_inference_payload
 
-if __name__ == "__main__":
+def run_layer2_telemetry():
     init_db()
     baselines = {}
     print("CogniOS Telemetry Daemon started. Press Ctrl+C to stop.")
@@ -19,3 +21,10 @@ if __name__ == "__main__":
             )
     except KeyboardInterrupt:
         print("\nDaemon safely terminated.")
+
+if __name__ == "__main__":
+
+    i_forest_input, proc_metadata = get_inference_payload(DB_PATH)
+
+    print(i_forest_input)
+    print(proc_metadata)
