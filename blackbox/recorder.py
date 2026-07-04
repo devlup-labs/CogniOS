@@ -26,6 +26,11 @@ def create_blackbox_table(conn):
             cpu_ctx_switches    REAL,
             cpu_busy_time       REAL,
             cpu_iowait_time     REAL,
+                 
+            -- Memory Metrics  
+            memory_percent      REAL,
+            memory_used         INTEGER,
+            swap_percent        REAL,
 
             -- Disk Metrics
             disk_read           REAL,
