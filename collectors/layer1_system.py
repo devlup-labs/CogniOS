@@ -16,8 +16,6 @@ _last = {
     "net_bytes_sent": None,
     "net_bytes_recv": None,
 }
-
-
 # collects metriics 
 def collect_layer1_metrics():
     now = time.time()
@@ -197,6 +195,7 @@ def collect_layer1_metrics():
         "disk_read_time":disk_read_time,
         "disk_write_time":disk_write_time,
 
+        "net_rate_mb_s":net_rate_mb_s,
         "net_bytes_sent":net_bytes_sent,
         "net_bytes_received":net_bytes_received,
         "net_packets_sent":net_packets_sent,
@@ -219,5 +218,59 @@ def collect_layer1_metrics():
 
 if __name__ == "__main__":
     import json
+    from db import create_connection, write_layer1
+    from config import DB_PATH
+
     metrics = collect_layer1_metrics()
+    print("Gathered metrics:")
     print(json.dumps(metrics, indent=4))
+
+    print("\nSaving metrics to database...")
+    try:
+        conn = create_connection(DB_PATH)
+        write_layer1(
+            conn, 
+            metrics['timestamp'], 
+            metrics['cpu_usage_percent'], 
+            metrics['cpu_current_freq'], 
+            metrics['cpu_user_time'], 
+            metrics['cpu_system_time'], 
+            metrics['cpu_idle_time'], 
+            metrics['cpu_iowait_time'], 
+            metrics['cpu_busy_time'], 
+            metrics['cpu_ctx_switches'], 
+            metrics['memory_percent'], 
+            metrics['memory_used'], 
+            metrics['memory_available'], 
+            metrics['memory_cached'], 
+            metrics['memory_buffers'], 
+            metrics['swap_percent'], 
+            metrics['swap_sin'], 
+            metrics['swap_sout'], 
+            metrics['disk_usage_percent'], 
+            metrics['disk_read'], 
+            metrics['disk_write'], 
+            metrics['disk_read_time'], 
+            metrics['disk_write_time'], 
+            metrics['load_avg1'], 
+            metrics['load_avg5'], 
+            metrics['load_avg15'], 
+            metrics['total_processes'], 
+            metrics['running_processes'], 
+            metrics['sleeping_processes'], 
+            metrics['zombie_processes'], 
+            metrics['avg_temp'], 
+            metrics['max_temp'], 
+            metrics['battery_percent'],
+            metrics['net_rate_mb_s'],
+            metrics['net_bytes_sent'],
+            metrics['net_bytes_received'],
+            metrics['net_packets_sent'],
+            metrics['net_packets_received'],
+            metrics['net_errs'],
+            metrics['net_drops'],
+            json.dumps(metrics['process_data'])
+        )
+        print(f"Successfully saved Layer 1 metrics to database table 'layer1_sys' in {DB_PATH}!")
+    except Exception as e:
+        print(f"Error saving to database: {e}")
