@@ -80,7 +80,7 @@ def write_telemetry(conn, metrics: dict) -> None
 Calls `prune_old_records()` after every write to enforce the 30-minute window.
 
 ```python
-def rm_old_records(conn) -> None
+def prune_old_records(conn) -> None
 ```
 
 **Purpose:** Deletes rows older than `BLACKBOX_WINDOW_SEC` (default 1800s).
@@ -101,11 +101,13 @@ def update_heartbeat(conn) -> None
 If the daemon crashes, the last saved timestamp persists in SQLite.
 
 ```python
-def check_crash_on_startup(conn) -> bool
+def check_crash_on_startup(conn) -> tuple[bool, float]
 ```
 
 **Purpose:** Called once at daemon startup. Reads last heartbeat timestamp.
-If `time.time() - last_beat > 10`, returns `True` → crash/freeze was detected.
+Returns `(crash_detected: bool, gap_seconds: float)`.
+If `graceful_shutdown = 0` AND `gap > BLACKBOX_CRASH_GAP_SEC` → crash was detected.
+Note: Uses graceful shutdown flag approach (not hardcoded gap > 10s — that was arbitrary).
 Triggers `replay.py` to reconstruct the pre-crash timeline.
 
 ---
@@ -421,3 +423,286 @@ No labeled anomaly dataset exists initially. IF is unsupervised — trained on n
 
 **Why Z-score threshold 2.8 and not 3.0?**
 3.0 is the classic threshold but at 3.0, a developer's laptop (higher baseline CPU) barely crossed the threshold for genuine spikes. 2.8 gives slightly better sensitivity while keeping false positives low with the sustained filter.
+
+---
+
+## 6. Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Linux System (laptop)                     │
+└─────────────────────┬───────────────────────────────────────┘
+                      │ psutil + /proc
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Telemetry Collector — collectors/layer1_system.py   │
+│                      every 1 second                          │
+└──────────────┬──────────────────────┬───────────────────────┘
+               │                      │
+               ▼                      ▼
+┌──────────────────────┐   ┌──────────────────────────────────┐
+│  cognios_telemetry   │   │     blackbox/blackbox.db          │
+│  .db  (permanent)    │   │   (rolling 30-min window only)    │
+│                      │   │                                   │
+│  layer1_sys          │   │   blackbox_telemetry              │
+│  top_cpu_telemetry   │   │   blackbox_heartbeat              │
+│  top_ram_telemetry   │   └──────────────┬─────────────────── ┘
+│  process_metadata    │                  │
+│  process_diagnostics │                  ▼
+│                      │   ┌──────────────────────────────────┐
+│  OS Doctor ──────────┤   │        BlackBox Module            │
+│  FocusOS ────────────┤   │                                   │
+│  Research Engine ────┘   │  recorder.py                      │
+│                           │  heartbeat.py                     │
+└──────────────────────┘   │  feature_engineering.py           │
+                           │  zscore_detector.py               │
+                           │  rule_engine.py                   │
+                           │  anomaly_model.py                 │
+                           │  correlation.py                   │
+                           │  replay.py                        │
+                           └──────────────┬─────────────────── ┘
+                                          │
+                                          ▼
+                           ┌──────────────────────────────────┐
+                           │       Streamlit Dashboard         │
+                           │  Timeline · Alerts · NL Query     │
+                           └──────────────────────────────────┘
+```
+
+### Why two separate databases?
+
+| `cognios_telemetry.db`                      | `blackbox/blackbox.db`                |
+| ------------------------------------------- | ------------------------------------- |
+| Permanent — never pruned                    | Rolling window — last 30 min only     |
+| All Layer 1/2/3/4 data                      | Only BlackBox-relevant metrics        |
+| Read by OS Doctor, FocusOS, Research Engine | Read only by BlackBox                 |
+| Grows indefinitely                          | Max ~1800 rows (1 per second × 1800s) |
+
+---
+
+## 7. Missing + Updated Function Definitions
+
+### `recorder.py` — additional functions
+
+```python
+def get_blackbox_conn() -> sqlite3.Connection
+```
+
+**Purpose:** Opens and returns a connection to `blackbox/blackbox.db` with WAL mode for crash-safe writes.  
+**Input:** None  
+**Output:** `sqlite3.Connection`
+
+```python
+def get_recent_rows(conn, n: int = 120) -> list[dict]
+```
+
+**Purpose:** Returns last `n` rows from `blackbox_telemetry`, ordered oldest-first.  
+**Input:** `conn`, `n` (default 120 = last 2 minutes)  
+**Output:** `list[dict]` — each dict has column names as keys  
+**Used by:** `feature_engineering.py`, `correlation.py`
+
+```python
+def get_window_rows(conn, start_time: float, end_time: float) -> list[dict]
+```
+
+**Purpose:** Returns all rows between two Unix timestamps for crash replay.  
+**Input:** `conn`, `start_time` (Unix float), `end_time` (Unix float)  
+**Output:** `list[dict]` ordered by timestamp ASC  
+**Used by:** `replay.py`
+
+```python
+def row_count(conn) -> int
+```
+
+**Purpose:** Returns total number of rows currently in `blackbox_telemetry`.  
+**Input:** `conn`  
+**Output:** `int`
+
+---
+
+### `heartbeat.py` — updated with graceful shutdown flag
+
+> **Mentor feedback:** "Why should we have gap only 10 seconds?"
+>
+> Hardcoded `gap > 10s` was arbitrary — HDD systems take 20+ seconds to reboot causing false positives. We use a **graceful shutdown flag** instead. Gap is only a fallback for SIGKILL/power cuts.
+
+```python
+def mark_graceful_shutdown(conn) -> None
+```
+
+**Purpose:** Sets `graceful_shutdown = 1` flag. Must be called in daemon's SIGTERM/SIGINT handler.  
+**Input:** `conn`  
+**Output:** None  
+**Note:** If NOT called (crash/SIGKILL/power cut), flag stays 0 → crash detected on next startup.
+
+```python
+def check_crash_on_startup(conn) -> tuple[bool, float]
+```
+
+**Purpose:** Called once on daemon startup to detect whether previous session ended in a crash.  
+**Input:** `conn`  
+**Output:** `(crash_detected: bool, gap_seconds: float)`
+
+**Detection logic (priority order):**
+
+1. `graceful_shutdown = 1` → normal shutdown, no crash
+2. `graceful_shutdown = 0` AND `gap > BLACKBOX_CRASH_GAP_SEC` → crash detected
+3. Always resets flag to 0 for the next session
+
+**In daemon signal handler:**
+
+```python
+def handle_signal(sig, frame):
+    global running
+    running = False
+    mark_graceful_shutdown(bb_conn)   # ← required for correct crash detection
+    print("[CogniOS] Graceful shutdown.")
+```
+
+---
+
+### `anomaly_model.py` — additional functions
+
+```python
+def anomaly_severity(score: float) -> int
+```
+
+**Purpose:** Converts raw Isolation Forest `decision_function` score to a 0–100 severity integer for dashboard.  
+**Input:** `score` (float — more negative = more anomalous)  
+**Output:** `int` between 0 and 100  
+**Example:** score=-0.3 → severity=80
+
+```python
+def save_model(model: IsolationForest, path: str = "blackbox/if_model.pkl") -> None
+```
+
+**Purpose:** Saves trained model to disk using pickle.  
+**Input:** trained `IsolationForest`, file path  
+**Output:** None
+
+```python
+def load_model(path: str = "blackbox/if_model.pkl") -> IsolationForest
+```
+
+**Purpose:** Loads a previously saved model from disk.  
+**Input:** file path  
+**Output:** `IsolationForest`
+
+---
+
+## 8. How to Run
+
+### Prerequisites
+
+```bash
+pip install psutil numpy scikit-learn
+```
+
+### First time setup
+
+```bash
+cd CogniOS
+
+python3 -c "
+import sys
+sys.path.insert(0, '.')
+from blackbox.recorder import get_blackbox_conn, create_blackbox_table
+from blackbox.heartbeat import create_heartbeat_table
+
+conn = get_blackbox_conn()
+create_blackbox_table(conn)
+create_heartbeat_table(conn)
+print('BlackBox DB initialised at blackbox/blackbox.db')
+"
+```
+
+### Run full daemon
+
+```bash
+python3 cognios_as_daemon.py
+```
+
+### Run BlackBox integration test only
+
+```bash
+python3 -c "
+import sys, time
+sys.path.insert(0, '.')
+from collectors.layer1_system import collect_layer1_metrics
+from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_telemetry, row_count
+from blackbox.heartbeat import create_heartbeat_table, update_heartbeat
+from blackbox.zscore_detector import ZScoreDetector
+from blackbox.rule_engine import check_rules
+
+conn = get_blackbox_conn()
+create_blackbox_table(conn)
+create_heartbeat_table(conn)
+detector = ZScoreDetector()
+
+for i in range(40):
+    m = collect_layer1_metrics()
+    write_telemetry(conn, m)
+    update_heartbeat(conn)
+    detector.update(m.get('cpu_usage_percent', 0))
+    check_rules(m)
+    time.sleep(0.1)
+
+print('Rows in blackbox.db:', row_count(conn))
+print('Integration test PASSED ✅')
+"
+```
+
+### Generate Isolation Forest training data
+
+```bash
+sudo apt install stress-ng
+python3 cognios_as_daemon.py &
+
+stress-ng --cpu 8 --timeout 60s              # cpu_overload
+sleep 30
+stress-ng --vm 4 --vm-bytes 80% --timeout 60s   # memory_pressure
+sleep 30
+stress-ng --hdd 4 --timeout 60s             # disk_io_stress
+sleep 30
+stress-ng --pthread 100 --timeout 60s       # thread_explosion
+```
+
+---
+
+## 9. Improvements & Future Work
+
+### High priority (low effort)
+
+**WAL mode for crash-safe writes** (2 lines of code):
+
+```python
+conn.execute("PRAGMA journal_mode=WAL")
+conn.execute("PRAGMA synchronous=NORMAL")
+```
+
+Default SQLite write mode can lose the last few seconds of telemetry if daemon crashes mid-write. WAL mode writes to a separate file first — crash during write means no data loss.
+
+**Continuous anomaly severity score:**
+Replace binary `-1/1` output with 0–100 score using `decision_function()`. Dashboard can show gradual escalation (40→60→80→100) instead of a sudden binary alert.
+
+### Medium priority
+
+**Per-metric Isolation Forest models:**
+One combined model learns a confused boundary across all metrics. Separate models per metric with different `contamination` rates give better detection accuracy.
+
+**Exponential Moving Average (EMA) baseline:**
+Replace simple rolling mean with EMA for faster adaptation to regime changes, reducing false positives when user starts a new heavy workload.
+
+### Low priority (research phase)
+
+**LSTM Autoencoder hybrid:**
+LSTM captures temporal dependencies that Isolation Forest cannot — sequential patterns like memory growing over 2 hours. A hybrid approach (LSTM reconstruction error fed into Isolation Forest) significantly improves detection. Requires TensorFlow and more training data.
+
+### Known limitations
+
+| Limitation                             | Impact                                     | Workaround                              |
+| -------------------------------------- | ------------------------------------------ | --------------------------------------- |
+| Z-score slow drift blind spot          | Memory leaks over 2+ hours may not trigger | Slope detector partially covers this    |
+| IF needs warmup data                   | No anomaly detection for first 60s         | Rule Engine covers warmup period        |
+| `stress-ng` training data is synthetic | Real anomalies may differ                  | Collect real anomaly data and retrain   |
+| SIGKILL bypasses graceful flag         | Gap fallback may miss very fast restarts   | `BLACKBOX_CRASH_GAP_SEC = 30` as buffer |
