@@ -1,7 +1,7 @@
 """Shared database schema and read/write interface."""
 import sqlite3 # for both layers
 import time # for layer 2
-from CogniOS.utils.config import DB_PATH 
+from config import DB_PATH 
 
 # layer 1 db code starts here
 db_path = DB_PATH
