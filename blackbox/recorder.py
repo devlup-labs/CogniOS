@@ -1,7 +1,7 @@
 """Rolling 30-minute telemetry recorder."""
 import time
 import sqlite3
-from utils.config import BLACKBOX_DB_PATH, BLACKBOX_WINDOW_SEC
+from config import BLACKBOX_DB_PATH, BLACKBOX_WINDOW_SEC
 from pathlib import Path
 
 

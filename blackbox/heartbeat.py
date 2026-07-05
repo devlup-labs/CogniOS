@@ -2,7 +2,7 @@
 
 import sqlite3
 import time
-from utils.config import BLACKBOX_CRASH_GAP_SEC
+from config import BLACKBOX_CRASH_GAP_SEC
 
 def create_heartbeat_table(conn: sqlite3.Connection) -> None:
 
