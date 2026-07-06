@@ -3,11 +3,11 @@ import time
 import psutil 
 
 
-def collect_process_telemetry(prev_states=None):
+def collect_layer2_metrics(prev_states=None):
     if prev_states is None:
         prev_states = {}
 
-    # --- Phase 0: CPU prime pass (t=0) ---
+    # CPU prime pass (t=0)
     # First cpu_percent call per Process object always returns 0.0 or a stale
     # cumulative rate. Discarding it gives the 5 sampling passes a clean 1-second
     # baseline each.
@@ -17,7 +17,7 @@ def collect_process_telemetry(prev_states=None):
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
 
-    # --- Phase 1: 5 × 1-second CPU + RAM sampling ---
+    # 5 × 1-second CPU + RAM sampling
     cpu_samples = {}  # pid -> [cpu_percent, ...]
     ram_samples = {}  # pid -> [rss_mb, ...]
     for _ in range(5):
@@ -35,7 +35,7 @@ def collect_process_telemetry(prev_states=None):
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
 
-    # --- Phase 2: Full metadata pass + aggregation ---
+    # Phase 2: Full metadata pass + aggregation
     current_time = time.time()
     current_states = {}
     processed_snapshots = []

@@ -2,15 +2,69 @@
 import sqlite3
 import json
 import pandas as pd 
-from config import DB_PATH 
 
-# This function extracts data of 24 rows stored in json string and converts them into a pd DataFrame
+def extract_and_engineer_sys(db_path, window_size=120):
+    query = """
+        SELECT
+            timestamp, 
+            cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time,
+            cpu_ctx_switches,
+            memory_percent, memory_used, memory_available,
+            memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout,
+            disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time,
+            disk_write_time, net_rate_mb_s, net_bytes_sent,
+            net_bytes_recv, net_packets_sent, net_packets_recv,
+            net_errs, net_drops, load_avg_1, load_avg_5, load_avg_15, total_processes,
+            running_processes, sleeping_processes, zombie_processes, avg_temp,
+            max_temp, battery_percent,  process_data
+        FROM layer1_sys
+        ORDER BY timestamp DESC
+        LIMIT ?
+    """
 
-def fetch_and_parse(db_path, window_size_rows=24):
+    with sqlite3.connect(db_path) as conn:
+
+        conn.execute("PRAGMA journal_mode=WAL")
+
+        df_sys = pd.read_sql_query(query, conn, params=(window_size,))
+
+    # Data comes back newest-first (DESC); flip to chronological order so
+    # diff()/rolling() see the correct time direction and .iloc[-1] is "now".
+    df_sys = df_sys.iloc[::-1].reset_index(drop=True)
+
+    # timestamp/process_data aren't numeric features for the model
+    df_sys_numeric = df_sys.drop(columns=['timestamp', 'process_data'])
+
+    # Columns that are all-NULL in sqlite (e.g. temp/iowait/cached on platforms
+    # that don't report them) load as dtype=object with None, not NaN, which
+    # breaks diff()'s subtraction. Coerce to numeric so missing sensors = 0.0.
+    df_sys_numeric = df_sys_numeric.apply(pd.to_numeric, errors='coerce').fillna(0.0)
+
+    df_sys_gradients = df_sys_numeric.diff(periods=1).fillna(0.0)
+    df_sys_rolling_avg = df_sys_numeric.rolling(window=window_size, min_periods=1).mean()
+
+    flat_sys_dict = {}
+
+    for col in df_sys_numeric.columns:
+        flat_sys_dict[f'sys_{col}'] = df_sys_numeric[col].iloc[-1]
+        flat_sys_dict[f'sys_{col}_gradient'] = df_sys_gradients[col].iloc[-1]
+        flat_sys_dict[f'sys_{col}_rolling_avg'] = df_sys_rolling_avg[col].iloc[-1]
+
+    # Convert to a single-row 2D DataFrame [1, num_sys_features]
+    sys_vec = pd.DataFrame([flat_sys_dict])
+    return sys_vec
+
+    
+# This function converts json formatted string to a Pandas' Long-Form DataFrame
+# Resamples the data and finally returns two vectors cpu_vec and ram_vec
+
+# Flow of our data: sql table + Json -> list of dict -> sep lists -> stretched df -> single-row vector
+
+def extract_and_engineer_processes(db_path, window_size=24):
 
     query = """
             SELECT timestamp, top_cpu_json, top_ram_json
-            FROM process_snapshot
+            FROM layer2_proc
             ORDER BY timestamp DESC
             LIMIT ?
         """
@@ -19,18 +73,10 @@ def fetch_and_parse(db_path, window_size_rows=24):
 
         conn.execute("PRAGMA journal_mode=WAL")
 
-        df_raw = pd.read_sql_query(query, conn, params=(window_size_rows,))
+        df_raw = pd.read_sql_query(query, conn, params=(window_size,))
 
     df_raw = df_raw.iloc[::-1].reset_index(drop=True)
 
-    return df_raw
-
-# This function converts df_raw's json formatted string to a Pandas' Long-Form DataFrame
-# Resamples the data and finally returns two vectors cpu_vec and ram_vec
-
-# Flow of our data: Json -> list of dict -> sep lists -> stretched df -> single-row vector
-
-def extract_and_engineer_processes(df_raw):
     parsed_snapshots = []
 
     # In this block: extracting the json strings into a list of dicts
@@ -235,49 +281,52 @@ def build_unified_vector(sys_vec, cpu_vec, ram_vec):
     
     metadata_payload = df_unified[metadata_cols].iloc[0].to_dict()
     
-    i_forest_features_df = df_unified.drop(columns=metadata_cols)
+    ml_features_df = df_unified.drop(columns=metadata_cols)
     
-    i_forest_features_df = ml_features_df.reindex(sorted(ml_features_df.columns), axis=1)
+    ml_features_df = ml_features_df.reindex(sorted(ml_features_df.columns), axis=1)
     
-    return i_forest_features_df, metadata_payload
+    return ml_features_df, metadata_payload
 
 def get_inference_payload(db_path):
     """
     Centralized orchestration function called by the main daemon loop.
     Enforces data safety buffers and executes functions 1, 2, and 3 sequentially.
     """
-    # Step 1: Run safety check to ensure database has enough historical data
+    # Run safety check to ensure database has enough historical data
     # We need a minimum of 120 rows (120 seconds) of system metrics to build our vectors
     try:
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM system_telemetry;")
-            row_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM layer2_proc;")
+            row_count_layer2 = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM layer1_sys;")
+            row_count_layer1 = cursor.fetchone()[0]
             
-        if row_count < 120:
+        if row_count_layer1 < 120 or row_count_layer2 < 24:
             # System is still warming up; return None to skip this execution tick safely
-            print(f"Pipeline Warm-up Phase: {row_count}/120 records collected. Skipping tick.")
+            print(f"Pipeline Warm-up Phase: {row_count_layer1}/120 records collected. Skipping tick.")
+            print(f"Pipeline Warm-up Phase: {row_count_layer2}/24 records collected. Skipping tick.")
             return None, None
             
     except sqlite3.Error as e:
         print(f"Database error during warm-up check: {e}")
         return None, None
 
-    # Step 2: Sequential execution cascade
+    # Sequential execution 
     try:
-        # 1. Fetch system vector (Function 1)
-        sys_vec = extract_and_engineer_system(DB_PATH)
+        # 1. Fetch system vector
+        sys_vec = extract_and_engineer_sys(db_path)
         
-        # 2. Fetch process vectors (Function 2)
-        cpu_vec, ram_vec = extract_and_engineer_processes(DB_PATH)
+        # 2. Fetch process vectors 
+        cpu_vec, ram_vec = extract_and_engineer_processes(db_path)
         
         # 3. Check for empty payloads before stitching to prevent concat failures
         if sys_vec.empty or cpu_vec.empty or ram_vec.empty:
             print("Warning: One of the sub-vectors returned an empty frame. Skipping inference.")
             return None, None
             
-        # 4. Consolidate and strip metadata (Function 3)
+        # 4. Consolidate and strip metadata 
         ml_features_df, metadata_payload = build_unified_vector(sys_vec, cpu_vec, ram_vec)
         
         # Return the clean tuple directly down to the ML execution loop!
