@@ -1,29 +1,21 @@
-"Testing Document"
+"""CogniOS Layer 2 telemetry daemon entry point."""
 import time
 from collectors.layer2_process import collect_process_telemetry
-from db import init_db, insert_separated_telemetry
-
-def test_layer2_pipeline():
-    print("Initializing CogniOS Test Database...")
-    init_db()
-    
-    baselines = {}
-    print("Running initial telemetry sweep (Baseline generation)...")
-    top_cpu, top_mem, baselines = collect_process_telemetry(baselines)
-    
-    # Wait 5 seconds to simulate a real monitoring pulse
-    print("Pacing for 5 seconds to calculate real delta rates...")
-    time.sleep(5)
-    
-    print("Running second telemetry sweep...")
-    top_cpu, top_mem, baselines = collect_process_telemetry(baselines)
-    
-    print(f"Top CPU Process Count: {len(top_cpu)}")
-    print(f"Top RAM Process Count: {len(top_mem)}")
-    
-    print("Writing captured data to separate SQLite tables...")
-    insert_separated_telemetry(top_cpu, top_mem)
-    print("Success! Check your root directory for 'cognios_telemetry.db'.")
+from db import init_db, insert_process_snapshot
 
 if __name__ == "__main__":
-    test_layer2_pipeline()
+    init_db()
+    baselines = {}
+    print("CogniOS Telemetry Daemon started. Press Ctrl+C to stop.")
+
+    try:
+        while True:
+            top_cpu, top_mem, baselines = collect_process_telemetry(baselines)
+            insert_process_snapshot(top_cpu, top_mem)
+            print(
+                f"Snapshot committed at t={time.time():.0f} | "
+                f"top_cpu={top_cpu[0]['name']} score={top_cpu[0]['cpu_score']} | "
+                f"top_ram={top_mem[0]['name']} score={top_mem[0]['ram_score']}"
+            )
+    except KeyboardInterrupt:
+        print("\nDaemon safely terminated.")

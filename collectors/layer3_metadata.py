@@ -2,7 +2,7 @@
 import sqlite3
 from datetime import datetime
 import psutil 
-from CogniOS.utils.config import DB_PATH 
+from config import DB_PATH 
 db_path = DB_PATH
 
 class MetadataCollector:

@@ -6,7 +6,7 @@ import sqlite3
 import threading
 import psutil
 
-from CogniOS.utils.config import DB_PATH 
+from config import DB_PATH 
 db_path = DB_PATH
 
 _layer4_running = False
@@ -183,7 +183,7 @@ class DiagnosticsCollector:
 
 def _run_diagnostics(pid_list, trigger_reason):
     global _layer4_running
-    collector = DiagnosticsCollector()
+    collector = DiagnosticsCollector(db_path)
     try:
         for pid in pid_list:
             collector.collect_and_save(pid, trigger_reason)

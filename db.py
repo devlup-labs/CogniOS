@@ -1,13 +1,48 @@
 """Shared database schema and read/write interface."""
-import sqlite3 # for both layers
-import time # for layer 2
-from config import DB_PATH 
+import json
+import sqlite3
+import time
+from config import DB_PATH
+
+# layer 2 db code starts here
+
+def init_db():
+    """Initializes the unified process_snapshot table for Layer 2 telemetry."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS process_snapshot (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp           REAL    NOT NULL,
+                top_cpu_processes   TEXT    NOT NULL,
+                top_ram_processes   TEXT    NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_snapshot_ts
+            ON process_snapshot (timestamp)
+        """)
+        conn.commit()
+
+
+def insert_process_snapshot(top_cpu, top_ram):
+    """Writes one unified row per 5-second poll — timestamp + two compact JSON arrays."""
+    row = (
+        time.time(),
+        json.dumps(top_cpu, separators=(',', ':')),
+        json.dumps(top_ram, separators=(',', ':'))
+    )
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO process_snapshot (timestamp, top_cpu_processes, top_ram_processes) VALUES (?, ?, ?)",
+            row
+        )
+        conn.commit()
+
+# layer 2 db code ends here
 
 # layer 1 db code starts here
+
 db_path = DB_PATH
-
-
-# Creating table for all the metrics collected from the system
 
 def create_connection(db_path):
     conn = sqlite3.connect(db_path)
@@ -17,7 +52,7 @@ def create_connection(db_path):
             timestamp TEXT NOT NULL,
 
             cpu_usage_percent REAL,
-            cpu_current_freq REAL,
+            cpu_freq REAL,
             cpu_user_time REAL,
             cpu_system_time REAL,
             cpu_idle_time REAL,
@@ -35,22 +70,22 @@ def create_connection(db_path):
             swap_sout INTEGER,
 
             disk_usage_percent REAL,
-            disk_read REAL,
-            disk_write REAL,
+            disk_read_mb_s REAL,
+            disk_write_mb_s REAL,
             disk_read_time INTEGER,
             disk_write_time INTEGER,
 
+            net_rate_mb_s REAL,
             net_bytes_sent INTEGER,
-            net_bytes_received INTEGER,
+            net_bytes_recv INTEGER,
             net_packets_sent INTEGER,
-            net_packets_received INTEGER,
+            net_packets_recv INTEGER,
             net_errs INTEGER,
             net_drops INTEGER,
-            net_rate_mb_s REAL,
 
-            load_avg1 REAL,
-            load_avg5 REAL,
-            load_avg15 REAL,
+            load_avg_1 REAL,
+            load_avg_5 REAL,
+            load_avg_15 REAL,
             total_processes INTEGER,
             running_processes INTEGER,
             sleeping_processes INTEGER,
@@ -58,123 +93,18 @@ def create_connection(db_path):
 
             avg_temp REAL,
             max_temp REAL,
-            battery_percent REAL
+            battery_percent REAL,
+            process_data TEXT
         )
     ''')
 
     conn.commit()
     return conn
 
-# Function to write the collected metrics into the database
-# removed hardcoded keys and added a skip_keys set to avoid storing unnecessary data in the database
-def write_layer1(conn, data: dict):
-    skip_keys = {'process_data'}  # DB mein store nahi karna
-    data_to_store = {k: v for k, v in data.items() if k not in skip_keys}
-    
-    cols         = ", ".join(data_to_store.keys())
-    placeholders = ", ".join("?" for _ in data_to_store)
-    conn.execute(
-        f"INSERT INTO layer1_sys ({cols}) VALUES ({placeholders})",
-        list(data_to_store.values())
-    )
+def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, process_data):
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO layer1_sys (timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, process_data)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, process_data))
     conn.commit()
-
-# layer 2 db code starts here 
-
-
-def init_db():
-    """Initializes separate structural tables for CPU and Memory metrics."""
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        
-        # Table 1: Dedicated CPU telemetry
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS top_cpu_telemetry (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp REAL NOT NULL,
-                pid INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                cpu_percent REAL NOT NULL,
-                memory_percent REAL NOT NULL,
-                rss_memory INTEGER NOT NULL,
-                vms_memory INTEGER NOT NULL,
-                thread_count INTEGER NOT NULL,
-                read_bytes_sec REAL NOT NULL,
-                write_bytes_sec REAL NOT NULL,
-                status TEXT NOT NULL
-            )
-        """)
-        
-        # Table 2: Dedicated RAM telemetry
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS top_ram_telemetry (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp REAL NOT NULL,
-                pid INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                cpu_percent REAL NOT NULL,
-                memory_percent REAL NOT NULL,
-                rss_memory INTEGER NOT NULL,
-                vms_memory INTEGER NOT NULL,
-                thread_count INTEGER NOT NULL,
-                read_bytes_sec REAL NOT NULL,
-                write_bytes_sec REAL NOT NULL,
-                status TEXT NOT NULL
-            )
-        """)
-        conn.commit()
-
-
-def _map_to_rows(process_list, current_timestamp):
-    """Helper function to transform list of dicts to flat tuples for SQLite."""
-    return [
-        (
-            current_timestamp,
-            p['pid'],
-            p['name'],
-            p['cpu_percent'],
-            p['memory_percent'],
-            p['rss_memory'],
-            p['vms_memory'],
-            p['thread_count'],
-            p['read_bytes_sec'],
-            p['write_bytes_sec'],
-            p['status']
-        )
-        for p in process_list
-    ]
-
-
-def insert_separated_telemetry(top_cpu, top_mem):
-    """
-    Inserts data cleanly into their respective tables.
-    Even if a process exists in both lists, it is safely recorded 
-    in both metrics tables under the same time block window.
-    """
-    current_timestamp = time.time()
-    
-    # Map the dictionaries into raw tuple rows
-    cpu_rows = _map_to_rows(top_cpu, current_timestamp)
-    ram_rows = _map_to_rows(top_mem, current_timestamp)
-
-    insert_query = """
-        INSERT INTO {} (
-            timestamp, pid, name, cpu_percent, memory_percent, 
-            rss_memory, vms_memory, thread_count, read_bytes_sec, 
-            write_bytes_sec, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """
-
-    with sqlite3.connect(db_path) as conn:
-        cursor = conn.cursor()
-        
-        if cpu_rows:
-            cursor.executemany(insert_query.format("top_cpu_telemetry"), cpu_rows)
-        
-        if ram_rows:
-            cursor.executemany(insert_query.format("top_ram_telemetry"), ram_rows)
-            
-        conn.commit()
-        
-# layer 2 db code ends here       
-
