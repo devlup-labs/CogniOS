@@ -13,6 +13,7 @@
 5. [Useful Telemetry Data](#5-useful-telemetry-data)
 6. [Additional Information](#6-additional-information)
 7. [Module Diagram](#7-module-diagram)
+8. [Limitations](#8-limitations)
 
 ---
 
@@ -533,4 +534,14 @@ graph TD
         V1 --> W1["Streamlit Dashboard Display"]
         R1 --> W1
         R2 --> W1
-    end```
+    end
+```
+
+### 8. Limitations
+
+| Limitation | Description |
+|------------|------------|
+| **Optimisation Delay** | FocusOS relies on a 120 sample buffer to represent the last 2 minutes performance as a single feature vector. The module may not be able to apply optimisations for the the first 120 seconds after the dameon starts. |
+| **Rigidity with Labels** | The pseudo labelling structure maps the system state from cluster numbers to definite workload categories. In case of complex or mixed workflows, system metrics may not fit one particular category, which may get misclassified or classified as “unknown”. |
+| **Threshold for Optimisation** | If the confidence for a particular workload category is more than 80%, the optimisation layer is deployed. In case of a mixed workload, such as 55% compiling and 35% coding, the threshold will not be met, and the optimisation layer will be skipped. |
+| **Dependence on OS Doctor for Anomaly Detection** | FocusOS is not able to distinguish between heavy workload and a broken application that is monopolising a core. If OS Doctor is unable to detect the anomaly, FocusOS may incorrectly prioritise this rogue application with system hardware. |
