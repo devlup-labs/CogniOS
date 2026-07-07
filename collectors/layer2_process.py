@@ -1,13 +1,13 @@
 """Layer 2 process telemetry collection."""
 import time
-import psutil
+import psutil 
 
 
-def collect_process_telemetry(prev_states=None):
+def collect_layer2_metrics(prev_states=None):
     if prev_states is None:
         prev_states = {}
 
-    # --- Phase 0: CPU prime pass (t=0) ---
+    # CPU prime pass (t=0)
     # First cpu_percent call per Process object always returns 0.0 or a stale
     # cumulative rate. Discarding it gives the 5 sampling passes a clean 1-second
     # baseline each.
@@ -17,7 +17,7 @@ def collect_process_telemetry(prev_states=None):
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
 
-    # --- Phase 1: 5 × 1-second CPU + RAM sampling ---
+    # 5 × 1-second CPU + RAM sampling
     cpu_samples = {}  # pid -> [cpu_percent, ...]
     ram_samples = {}  # pid -> [rss_mb, ...]
     for _ in range(5):
@@ -35,12 +35,12 @@ def collect_process_telemetry(prev_states=None):
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
 
-    # --- Phase 2: Full metadata pass + aggregation ---
+    # Phase 2: Full metadata pass + aggregation
     current_time = time.time()
     current_states = {}
     processed_snapshots = []
 
-    for proc in psutil.process_iter(['pid', 'name', 'num_threads', 'status', 'create_time']):
+    for proc in psutil.process_iter(['pid', 'ppid', 'name', 'num_threads', 'status', 'create_time']):
         try:
             info = proc.info
             pid = info['pid']
@@ -65,6 +65,12 @@ def collect_process_telemetry(prev_states=None):
                 ctx_vol, ctx_invol = 0, 0
 
             try:
+                times = proc.cpu_times()
+                user_time, system_time = times.user, times.system
+            except (psutil.AccessDenied, AttributeError):
+                user_time, system_time = 0.0, 0.0
+
+            try:
                 open_fds = proc.num_fds()
             except (psutil.AccessDenied, AttributeError):
                 open_fds = 0
@@ -76,16 +82,16 @@ def collect_process_telemetry(prev_states=None):
 
             calc_read_rate = 0.0
             calc_write_rate = 0.0
-            calc_ctx_vol_sec = 0.0
-            calc_ctx_invol_sec = 0.0
+            calc_ctx_vol_rate = 0.0
+            calc_ctx_invol_rate = 0.0
             if pid in prev_states:
                 prev = prev_states[pid]
                 dt = current_time - prev['timestamp']
                 if dt > 0:
                     calc_read_rate = max(0.0, (read_bytes - prev['read_bytes']) / dt)
                     calc_write_rate = max(0.0, (write_bytes - prev['write_bytes']) / dt)
-                    calc_ctx_vol_sec = max(0.0, (ctx_vol - prev['ctx_vol']) / dt)
-                    calc_ctx_invol_sec = max(0.0, (ctx_invol - prev['ctx_invol']) / dt)
+                    calc_ctx_vol_rate = max(0.0, (ctx_vol - prev['ctx_vol']) / dt)
+                    calc_ctx_invol_rate = max(0.0, (ctx_invol - prev['ctx_invol']) / dt)
 
             current_states[pid] = {
                 'read_bytes': read_bytes,
@@ -112,6 +118,7 @@ def collect_process_telemetry(prev_states=None):
 
             processed_snapshots.append({
                 'pid': pid,
+                'ppid': info['ppid'],
                 'name': info['name'] or 'Unknown',
                 'cpu_percent': round(cpu_s[-1], 2),
                 'cpu_avg': cpu_avg,
@@ -124,13 +131,15 @@ def collect_process_telemetry(prev_states=None):
                 'ram_score': ram_score,
                 'vms_gb': round(mem_info.vms / (1024 * 1024 * 1024), 4),
                 'thread_count': info['num_threads'] or 1,
-                'read_bytes_sec': round(calc_read_rate, 2),
-                'write_bytes_sec': round(calc_write_rate, 2),
+                'user_time': round(user_time, 2),
+                'system_time': round(system_time, 2),
+                'read_bytes_rate': round(calc_read_rate, 2),
+                'write_bytes_rate': round(calc_write_rate, 2),
                 'status': info['status'] or 'unknown',
                 'age_sec': round(current_time - (info['create_time'] or current_time), 1),
                 'open_fds': open_fds,
-                'ctx_vol_sec': round(calc_ctx_vol_sec, 2),
-                'ctx_invol_sec': round(calc_ctx_invol_sec, 2),
+                'ctx_vol_rate': round(calc_ctx_vol_rate, 2),
+                'ctx_invol_rate': round(calc_ctx_invol_rate, 2),
                 'net_conn_count': net_conn_count,
             })
 
@@ -141,19 +150,3 @@ def collect_process_telemetry(prev_states=None):
     top_mem = sorted(processed_snapshots, key=lambda x: x['ram_score'], reverse=True)[:5]
 
     return top_cpu, top_mem, current_states
-
-
-if __name__ == '__main__':
-    from db import init_db, insert_process_snapshot
-
-    init_db()
-    baselines = {}
-    print("CogniOS Telemetry Daemon started. Press Ctrl+C to stop.")
-
-    try:
-        while True:
-            top_cpu, top_mem, baselines = collect_process_telemetry(baselines)
-            insert_process_snapshot(top_cpu, top_mem)
-            print(f"Snapshot committed at t={time.time():.0f} | top_cpu={top_cpu[0]['name']} score={top_cpu[0]['cpu_score']}")
-    except KeyboardInterrupt:
-        print("\nDaemon safely terminated.")

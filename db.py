@@ -6,25 +6,25 @@ from config import DB_PATH
 
 # layer 2 db code starts here
 
-def init_db():
-    """Initializes the unified process_snapshot table for Layer 2 telemetry."""
+def init_layer2_db():
+    """Initializes the unified layer2_proc table for Layer 2 telemetry."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS process_snapshot (
+            CREATE TABLE IF NOT EXISTS layer2_proc (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp           REAL    NOT NULL,
-                top_cpu_processes   TEXT    NOT NULL,
-                top_ram_processes   TEXT    NOT NULL
+                top_cpu_json        TEXT    NOT NULL,
+                top_ram_json        TEXT    NOT NULL
             )
         """)
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_snapshot_ts
-            ON process_snapshot (timestamp)
+            ON layer2_proc (timestamp)
         """)
         conn.commit()
 
 
-def insert_process_snapshot(top_cpu, top_ram):
+def write_layer2(top_cpu, top_ram):
     """Writes one unified row per 5-second poll — timestamp + two compact JSON arrays."""
     row = (
         time.time(),
@@ -33,7 +33,7 @@ def insert_process_snapshot(top_cpu, top_ram):
     )
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "INSERT INTO process_snapshot (timestamp, top_cpu_processes, top_ram_processes) VALUES (?, ?, ?)",
+            "INSERT INTO layer2_proc (timestamp, top_cpu_json, top_ram_json) VALUES (?, ?, ?)",
             row
         )
         conn.commit()
