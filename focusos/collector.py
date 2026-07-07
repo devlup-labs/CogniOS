@@ -4,6 +4,7 @@ from utils import helpers
 import db
 import sqlite3
 import subprocess
+import json
 
 DB_PATH = "cognios_telemetry.db"
 conn = db.create_connection(DB_PATH)
@@ -13,12 +14,32 @@ def collect_snapshot(conn):
 	conn.row_factory = sqlite3.Row
 	cursor = conn.cursor()
 	
-	cursor.execute("SELECT timestamp, cpu_usage_percent, memory_percent, net_rate_mb_s, total_processes FROM layer1_sys ORDER BY timestamp DESC LIMIT 1")
+	cursor.execute("SELECT timestamp, cpu_usage_percent, memory_percent, net_rate_mb_s, total_processes, process_data, num_threads FROM layer1_sys ORDER BY timestamp DESC LIMIT 1")
 	row = cursor.fetchone()
-	
 	result_dict = {}
 	if row is not None:
 		result_dict = dict(row)
+		
+		# 1. Safely decode the JSON string from SQLite into a Python list
+		if result_dict.get('process_data'):
+			try:
+				processes = json.loads(result_dict['process_data'])
+				
+				#Sorting the list and retaining top 5 entries
+				result_dict['process_data'] = sorted(processes, key=lambda x: x['cpu'], reverse=True)[:5]
+			except (json.JSONDecodeError, TypeError):
+				result_dict['process_data'] = []
+		else:
+			result_dict['process_data'] = []
+
+		if result_dict.get('num_threads'):
+			try:
+				result_dict['num_threads'] = json.loads(result_dict['num_threads'])
+			except (json.JSONDecodeError, TypeError):
+				result_dict['num_threads'] = []
+		else:
+			result_dict['num_threads'] = []	
+			
 	return result_dict
 
 	
@@ -69,10 +90,10 @@ if __name__ == "__main__":
                 foreground_app = get_foreground_app()
                 print(foreground_app)
                 
-                if count%5 == 0:
+                """if count%5 == 0:
                     top_cpu, top_mem = get_top_processes(n = 5)
                     print(top_cpu)
-                    print(top_mem)
+                    print(top_mem)"""
                     
                 print("_"*30)
                 execution_time = asyncio.get_event_loop().time() - start_time
