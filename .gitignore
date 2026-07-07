@@ -15,4 +15,8 @@ data/traces/*
 # Keep data directories present in git if marker files are added.
 !data/models/.gitkeep
 !data/traces/.gitkeep
-.DS_Store
+
+# Ignore SQLite database files
+*.db
+*.sqlite3
+*.sqlite

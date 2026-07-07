@@ -1,0 +1,1 @@
+#z-score and slope(trend)
