@@ -1,303 +1,94 @@
-# CogniOS
+# CogniOS  Tasks
 
-### Intelligent OS Observability & Adaptive Workload Optimization Platform
+Welcome to the **Tasks** branch of CogniOS!
 
-> **CogniOS** is an AI-assisted Linux system observability and workload optimization platform that combines operating systems, machine learning, and systems engineering to provide intelligent performance monitoring, anomaly detection, workload-aware optimization, crash analysis, and scheduling research—all without modifying the Linux kernel.
+This branch is dedicated to mentorship activities and learning assignments. It is separate from the main development branch so that mentees can work on independent tasks without affecting the core project.
 
----
+## Purpose
 
-## Overview
+The objective of this branch is to help contributors:
 
-Modern operating systems expose a large amount of telemetry, but existing monitoring tools often present only raw statistics, leaving users to determine the root cause of performance issues themselves.
+- Learn concepts required for the project
+- Gain hands-on experience with Machine Learning and Operating Systems
+- Practice Git and GitHub workflows
+- Write clean, well-documented code
+- Collaborate through Pull Requests and code reviews
 
-CogniOS bridges this gap by collecting real-time system telemetry, analyzing workload behavior, detecting anomalies, recommending optimizations, and enabling post-crash analysis through an integrated and modular architecture.
-
-The project is designed as both:
-
-* A practical system observability platform for Linux
-* A research framework for experimenting with AI-assisted operating system scheduling
-
----
-
-## Key Features
-
-* 📊 Real-time Linux system telemetry collection
-* 🩺 Intelligent anomaly detection for performance degradation
-* 🎯 AI-based workload classification and optimization
-* 📦 Rolling telemetry recording for crash replay
-* 🔬 Scheduling algorithm benchmarking and research
-* 📈 Interactive Streamlit dashboard
-* 🗄️ Centralized SQLite telemetry database
-* 🧩 Modular architecture for independent development and testing
+These tasks are designed to build the skills needed before contributing to the main CogniOS codebase.
 
 ---
 
-# Architecture
+## Workflow
 
-```
-                Linux System
-                     │
-                     ▼
-          Telemetry Collectors
-       (/proc, psutil, process APIs)
-                     │
-                     ▼
-             SQLite Database
-                     │
-     ┌───────────────┼────────────────┐
-     │               │                │
-     ▼               ▼                ▼
- OS Doctor       FocusOS         BlackBox
-     │               │                │
-     └───────────────┼────────────────┘
-                     ▼
-             Research Engine
-                     │
-                     ▼
-          Streamlit Dashboard
-```
+1. Pick or get assigned a GitHub Issue.
+2. Create a new branch from the **Tasks** branch.
 
----
-
-# Core Modules
-
-## 🩺 OS Doctor
-
-OS Doctor continuously monitors the system for abnormal behavior using machine learning–based anomaly detection techniques.
-
-### Objective
-
-* Detect abnormal CPU, memory and I/O behavior
-* Explain possible reasons for system slowdowns
-* Identify unusual workload patterns
-* Provide interpretable diagnostics from live telemetry
-
----
-
-## 🎯 FocusOS
-
-FocusOS is responsible for intelligent workload classification and adaptive system optimization.
-
-### Objective
-
-* Classify the current workload using machine learning
-* Optimize process priorities
-* Modify Linux scheduling parameters
-* Improve overall system responsiveness
-
-Future versions may also support dynamic CPU affinity optimization and workload-aware scheduling.
-
----
-
-## 📦 BlackBox
-
-BlackBox acts as the system's flight recorder.
-
-It continuously stores recent telemetry in a rolling buffer, allowing developers to replay system activity after crashes or freezes.
-
-### Objective
-
-* Record recent system telemetry
-* Preserve crash history
-* Replay workload traces
-* Assist in post-mortem debugging
-
----
-
-## 🔬 Research Engine
-
-The Research Engine provides an experimentation platform for scheduling algorithms.
-
-### Objective
-
-* Compare classical scheduling algorithms
-* Evaluate AI-based schedulers
-* Replay collected workloads
-* Benchmark scheduling performance
-* Support reinforcement learning experiments
-
-Supported scheduling algorithms include:
-
-* FCFS
-* Shortest Job First
-* Round Robin
-* Priority Scheduling
-
-Future versions may include reinforcement learning schedulers.
-
----
-
-## 📊 Dashboard
-
-The Streamlit dashboard serves as the unified visualization layer of CogniOS.
-
-### Objective
-
-* Visualize system telemetry
-* Display anomaly alerts
-* Monitor workload classifications
-* Compare scheduling results
-* Provide a centralized monitoring interface
-
----
-
-## 📡 Collectors
-
-Collectors gather telemetry directly from Linux using lightweight system interfaces.
-
-### Objective
-
-* CPU monitoring
-* Memory monitoring
-* Disk monitoring
-* Process monitoring
-* Network statistics
-* I/O statistics
-
-These collectors act as the data source for every other module.
-
----
-
-## 🗄️ Data Layer
-
-The data layer stores all telemetry generated by the collectors.
-
-### Responsibilities
-
-* Store real-time telemetry
-* Maintain workload traces
-* Persist crash recordings
-* Provide data for ML training
-* Support benchmarking experiments
-
-SQLite is used as the centralized storage backend.
-
----
-
-# Repository Structure
-
-```
-CogniOS/
-│
-├── blackbox/               # Rolling telemetry recorder and crash replay engine
-├── collectors/             # System telemetry collectors using /proc and psutil
-├── dashboard/              # Streamlit-based monitoring dashboard
-├── data/
-│   ├── datasets/           # Labeled workload datasets for ML training
-│   ├── telemetry/          # Raw telemetry snapshots
-│   └── sqlite/             # SQLite database files
-├── focusos/                # AI workload classifier and adaptive optimization engine
-├── os_doctor/              # Real-time anomaly detection module
-├── research_engine/        # Scheduling simulator and benchmarking framework
-├── utils/                  # Shared helper utilities used across modules
-│
-├── cognios_as_daemon.py    # Runs CogniOS as a background monitoring daemon
-├── config.py               # Global project configuration
-├── db.py                   # SQLite database interface and helper functions
-├── main.py                 # Main application entry point
-├── overhead.py             # Measures runtime overhead introduced by monitoring
-├── requirements.txt        # Python dependencies
-└── README.md
-```
-
----
-
-# Technology Stack
-
-| Category               | Technology                      |
-| ---------------------- | ------------------------------- |
-| Language               | Python                          |
-| System Monitoring      | psutil, Linux `/proc`           |
-| Database               | SQLite                          |
-| Machine Learning       | PyTorch                         |
-| Data Processing        | NumPy, Pandas                   |
-| Anomaly Detection      | Isolation Forest (scikit-learn) |
-| Reinforcement Learning | Stable-Baselines3               |
-| Dashboard              | Streamlit                       |
-
----
-
-# Getting Started
-
-## Clone the Repository
+Example:
 
 ```bash
-git clone https://github.com/<your-org>/CogniOS.git
-cd CogniOS
+git checkout Tasks
+git pull origin Tasks
+
+git checkout -b task/isolation-forest
 ```
 
-## Install Dependencies
+3. Complete the assigned task.
+4. Commit your changes with meaningful commit messages.
+5. Push your branch.
+6. Open a Pull Request against the **Tasks** branch.
+7. Mention the issue in your PR using:
 
-```bash
-pip install -r requirements.txt
 ```
-
-## Launch CogniOS
-
-```bash
-python main.py
-```
-
-To run CogniOS as a background service:
-
-```bash
-python cognios_as_daemon.py
+Closes #<issue_number>
 ```
 
 ---
 
-# Development Philosophy
+## Pull Request Guidelines
 
-Each major subsystem is designed as an independent module with its own documentation, enabling contributors to work on individual components without affecting the rest of the project.
+Your PR should include:
 
-Every module contains its own dedicated `README.md` describing:
+- Brief summary of your implementation
+- Dataset used
+- Important hyperparameters
+- Evaluation metrics
+- At least **2 plots** demonstrating your analysis
+- Key observations and conclusions
 
-* Module architecture
-* Directory structure
-* Components
-* APIs
-* Data flow
-* Usage
-* Future work
+Example plots:
 
----
-
-# Roadmap
-
-* Real-time Linux telemetry collection
-* Intelligent anomaly detection
-* AI-assisted workload optimization
-* Crash replay and forensic analysis
-* Scheduling benchmark suite
-* Reinforcement learning scheduler
-* GPU telemetry support
-* Windows and macOS support
+- PCA visualization
+- Confusion Matrix
+- Anomaly score distribution
+- Correlation Heatmap
+- Feature distributions
+- Performance comparison across different hyperparameters
 
 ---
 
-# Contributing
+## Code Guidelines
 
-We welcome contributions from developers interested in:
-
-* Operating Systems
-* Machine Learning
-* Systems Programming
-* Linux Internals
-* Performance Engineering
-* Data Engineering
-
-Before contributing, please read the documentation for the module you wish to work on.
+- Write clean and readable code.
+- Use meaningful variable and function names.
+- Add comments where necessary.
+- Keep functions modular.
+- Follow Python best practices.
 
 ---
 
-# License
+## Learning Philosophy
 
-This project is released under the MIT License.
+The objective is **not** to achieve the highest score.
+
+Instead, focus on:
+
+- Understanding the algorithm
+- Experimenting with different approaches
+- Analyzing your observations
+- Learning from the implementation process
+
+Curiosity and experimentation are encouraged.
 
 ---
 
-# Acknowledgements
-
-CogniOS is developed as an educational and research-focused project exploring the intersection of **Operating Systems**, **Artificial Intelligence**, and **Systems Engineering**.
-
-The project aims to provide a modular platform for learning, experimentation, and innovation in intelligent system observability and workload optimization.
+Happy Learning! 

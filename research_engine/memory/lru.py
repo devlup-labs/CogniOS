@@ -1,1 +1,0 @@
-"""LRU page replacement simulation."""

@@ -1,1 +1,0 @@
-"""Daemon entry point for CogniOS."""
