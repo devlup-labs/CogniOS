@@ -1,7 +1,16 @@
 """ featuring raw data to useful data."""
 import sqlite3
 import json
-import pandas as pd 
+import os
+import pandas as pd
+
+#scaling
+from sklearn.preprocessing import RobustScaler
+import joblib
+
+#  single source of truth for where the fitted scaler lives 
+SCALER_PATH = os.path.join(os.path.dirname(__file__), "models", "robust_scaler.joblib")
+
 
 def extract_and_engineer_sys(db_path, window_size=120):
     query = """
@@ -38,6 +47,7 @@ def extract_and_engineer_sys(db_path, window_size=120):
     # Columns that are all-NULL in sqlite (e.g. temp/iowait/cached on platforms
     # that don't report them) load as dtype=object with None, not NaN, which
     # breaks diff()'s subtraction. Coerce to numeric so missing sensors = 0.0.
+   
     df_sys_numeric = df_sys_numeric.apply(pd.to_numeric, errors='coerce').fillna(0.0)
 
     df_sys_gradients = df_sys_numeric.diff(periods=1).fillna(0.0)
@@ -287,10 +297,105 @@ def build_unified_vector(sys_vec, cpu_vec, ram_vec):
     
     return ml_features_df, metadata_payload
 
-def get_inference_payload(db_path):
+
+
+# NEW: FEATURE SCALING LAYER
+
+# Placement in the pipeline (see docstrings below):
+
+#   raw telemetry -> extract features -> gradients -> rolling averages ->
+#   build_unified_vector() [concatenation + metadata removal] ->
+#   >>> SCALING HAPPENS HERE <<< -> Isolation Forest
+#
+# RobustScaler is used (median/IQR-based) instead of StandardScaler or
+
+# Metadata (PID, PPID, process name) is never touched — it was already stripped out by build_unified_vector() before this stage runs.
+
+
+def fit_and_save_scaler(ml_features_df, scaler_path=SCALER_PATH):
+    """
+    OFFLINE TRAINING ONLY.
+
+    Fits a RobustScaler on the historical/offline training feature matrix
+    and persists it to disk with joblib. This is the ONLY place in the
+    codebase where `.fit()` / `.fit_transform()` is called on the scaler.
+
+    Parameters
+    ----------
+    ml_features_df : pd.DataFrame
+        The full training-set numerical feature matrix (metadata already
+        removed, as produced by build_unified_vector / concatenation of
+        many historical ticks).
+    scaler_path : str
+        Where to persist the fitted scaler.
+
+    Returns
+    -------
+    scaler : RobustScaler (fitted)
+    ml_features_scaled_df : pd.DataFrame (scaled training features)
+    """
+    scaler = RobustScaler()
+
+    scaled_array = scaler.fit_transform(ml_features_df.values)  # fit ONLY here
+
+    ml_features_scaled_df = pd.DataFrame(
+        scaled_array,
+        columns=ml_features_df.columns,
+        index=ml_features_df.index,
+    )
+
+    os.makedirs(os.path.dirname(scaler_path), exist_ok=True)
+    joblib.dump(scaler, scaler_path)
+
+    return scaler, ml_features_scaled_df
+
+
+def load_scaler(scaler_path=SCALER_PATH):
+    """
+    INFERENCE / RUNTIME ONLY.
+
+    Loads the previously fitted RobustScaler from disk. Never fits.
+    Raises a clear error if training hasn't happened yet, rather than
+    silently falling back to an unfitted scaler.
+    """
+    if not os.path.exists(scaler_path):
+        raise FileNotFoundError(
+            f"No fitted scaler found at '{scaler_path}'. "
+            "Run offline training (fit_and_save_scaler) before starting "
+            "real-time inference."
+        )
+    return joblib.load(scaler_path)
+
+
+def scale_features(ml_features_df, scaler):
+    """
+    Applies an already-fitted scaler to a feature matrix. Used both at the
+    end of training (on validation data) and at every inference tick.
+    Only ever calls `.transform()` — never `.fit()` or `.fit_transform()`.
+
+    Metadata columns are never passed into this function; the caller is
+    expected to pass only the output of build_unified_vector()'s
+    ml_features_df, which already excludes PID/PPID/name columns.
+    """
+    scaled_array = scaler.transform(ml_features_df.values)
+
+    return pd.DataFrame(
+        scaled_array,
+        columns=ml_features_df.columns,
+        index=ml_features_df.index,
+    )
+
+
+def get_inference_payload(db_path, scaler=None):
     """
     Centralized orchestration function called by the main daemon loop.
     Enforces data safety buffers and executes functions 1, 2, and 3 sequentially.
+
+    NEW: accepts a pre-loaded `scaler` (RobustScaler, already fitted and
+    loaded via load_scaler() at service startup). If provided, the returned
+    ml_features_df is scaled (transform-only, no fitting) before being handed
+    to the Isolation Forest for prediction. Metadata is returned unscaled
+    and untouched, exactly as before.
     """
     # Run safety check to ensure database has enough historical data
     # We need a minimum of 120 rows (120 seconds) of system metrics to build our vectors
@@ -303,8 +408,9 @@ def get_inference_payload(db_path):
             cursor.execute("SELECT COUNT(*) FROM layer1_sys;")
             row_count_layer1 = cursor.fetchone()[0]
             
+        
         if row_count_layer1 < 120 or row_count_layer2 < 24:
-            # System is still warming up; return None to skip this execution tick safely
+           
             print(f"Pipeline Warm-up Phase: {row_count_layer1}/120 records collected. Skipping tick.")
             print(f"Pipeline Warm-up Phase: {row_count_layer2}/24 records collected. Skipping tick.")
             return None, None
@@ -328,10 +434,17 @@ def get_inference_payload(db_path):
             
         # 4. Consolidate and strip metadata 
         ml_features_df, metadata_payload = build_unified_vector(sys_vec, cpu_vec, ram_vec)
-        
+
+        # --- NEW: 5. Scale numerical features only (transform-only, no fit) ---
+        if scaler is not None:
+            ml_features_df = scale_features(ml_features_df, scaler)
+        # metadata_payload is untouched — PID/PPID/name never enter the scaler
+        # -----------------------------------------------------------------------
+
         # Return the clean tuple directly down to the ML execution loop!
         return ml_features_df, metadata_payload
 
     except Exception as e:
         print(f"Critical error during feature engineering pipeline orchestration: {e}")
         return None, None
+
