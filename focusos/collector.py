@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import collectors.layer1_system as layer1_system
 import collectors.layer2_process as layer2_process
 from utils import helpers
