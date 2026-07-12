@@ -21,7 +21,7 @@ Provide a brief overview of your implementation.
 ## Dataset
 
 - [ ] Mammography
-- [ ] Shuttle
+- [x] Shuttle
 
 Dataset Source:
 
@@ -44,11 +44,11 @@ List the important hyperparameters used.
 
 | Hyperparameter | Value |
 |---------------|-------|
-| n_estimators | |
-| contamination | |
-| max_samples | |
-| max_features | |
-| random_state | |
+| n_estimators |100|
+| contamination |0.075|
+| max_samples |256|
+| max_features |1|
+| random_state |42|
 
 ---
 
@@ -56,10 +56,10 @@ List the important hyperparameters used.
 
 | Metric | Value |
 |--------|-------|
-| Precision | |
-| Recall | |
-| F1-score | |
-| ROC-AUC (Optional) | |
+| Precision |0.9332|
+| Recall |0.9789|
+| F1-score |0.955|
+| ROC-AUC (Optional) |0.9975|
 
 ---
 
@@ -67,10 +67,10 @@ List the important hyperparameters used.
 
 Attach **at least 2 plots** from your analysis.
 
-<img width="346" height="333" alt="Screenshot From 2026-07-13 01-02-23" src="https://github.com/user-attachments/assets/1881f2dd-a619-4670-b601-6e4a9071c814" />
-<img width="182" height="160" alt="Screenshot From 2026-07-13 01-02-34" src="https://github.com/user-attachments/assets/2912244b-f897-4319-a244-05c6abf86acc" />
-<img width="219" height="161" alt="Screenshot From 2026-07-13 01-02-46" src="https://github.com/user-attachments/assets/2564afe3-2768-48dd-9927-238c6d3a050b" />
-<img width="343" height="168" alt="Screenshot From 2026-07-13 01-02-58" src="https://github.com/user-attachments/assets/04a2a0af-6ddf-4fed-ac2f-12e3609b71af" />
+<img width="3063" height="2957" alt="anomalyscore" src="https://github.com/user-attachments/assets/435f65ba-3713-4eee-a5f8-229dcdef624f" />
+<img width="1591" height="1403" alt="confusionmatrix" src="https://github.com/user-attachments/assets/54dbf8b6-1e82-4dab-97b6-4145b6f24558" />
+<img width="1872" height="1403" alt="roc_auc_curve" src="https://github.com/user-attachments/assets/c5072c8e-060b-46ea-9f78-674df0df1436" />
+<img width="1191" height="180" alt="Screenshot From 2026-07-13 02-28-36" src="https://github.com/user-attachments/assets/7cacdab4-2405-4c2f-97e0-99eb5f9eb483" />
 
 
 ---
@@ -90,9 +90,9 @@ Briefly summarize:
 
 ## Checklist
 
-- [ ] Code runs successfully
-- [ ] Notebook (`.ipynb`) included
-- [ ] Code is well-commented
-- [ ] README/documentation updated
-- [ ] At least **2 plots** included
+- [x] Code runs successfully
+- [x] Notebook (`.ipynb`) included
+- [x] Code is well-commented
+- [x] README/documentation updated
+- [x] At least **2 plots** included
 - [ ] PR is linked to the corresponding issue
