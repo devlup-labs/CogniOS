@@ -95,4 +95,4 @@ Briefly summarize:
 - [x] Code is well-commented
 - [x] README/documentation updated
 - [x] At least **2 plots** included
-- [ ] PR is linked to the corresponding issue
+- [x] PR is linked to the corresponding issue
