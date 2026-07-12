@@ -6,6 +6,8 @@ from collections import deque
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH
 from config import SLIDING_WIND_N
+#commenting some part of the sliding window file
+#other modules will suffer because as buffer implementation will cause other modules to work on the stale 
 # class SlidingWindowBuffer:
 #     def __init__(self, maxlen: int = SLIDING_WIND_N):
 #        # it initialises the deque with a maxlen=SLIDING_WIND_N
