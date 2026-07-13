@@ -14,8 +14,8 @@ def extract_features(df: pd.DataFrame):
             return None
             
         # reversing the index so that 0 is oldest and -1 is newest
-        df = df.iloc[::-1].reset_index(drop=True)
-        
+        #df = df.iloc[::-1].reset_index(drop=True)
+        #already reversed in the sliding window
         # cpu 
         cpu_mean = df["cpu_usage_percent"].mean()
         cpu_max = df["cpu_usage_percent"].max()
@@ -26,13 +26,41 @@ def extract_features(df: pd.DataFrame):
         ram_growth_rate = (df["memory_percent"].iloc[-1] - df["memory_percent"].iloc[0]) if len(df) > 0 else 0
         
         # network
-        net_mean = (df["net_bytes_sent"] + df["net_bytes_recv"]).mean()
-        disk_io_mean = (df["disk_write_mb_s"] + df["disk_read_mb_s"]).mean()
-        
+        net_combined = df["net_bytes_sent"] + df["net_bytes_recv"]
+        net_mean = net_combined.mean()
+        if net_mean > 0:
+            # captures trend: positive means rising traffic, negative means falling traffic
+            net_mean = float((net_combined.iloc[-1] - net_combined.iloc[0]) / net_mean)
+        else:
+            net_mean = 0.0 
+        #here i am calculating the coeffiecient of var = std/mean
+        # 10x spike on ssd == 10x spike on hdd
+        disk_combined = df["disk_write_mb_s"] + df["disk_read_mb_s"]
+        disk_mean_raw = disk_combined.mean()
+        if disk_mean_raw > 0:
+            disk_io_mean = float(disk_combined.std() / disk_mean_raw)
+        else:
+            disk_io_mean = 0.0
         # processes
-        process_count_mean = df["total_processes"].mean()
-        # 'thread_count' is not in layer1_sys
-        thread_count_mean = 0
+        process_count_mean = int(df["total_processes"].mean())
+        #calculating the normalised value: threads per core
+        cpu_cores = os.cpu_count() or 4
+        if "num_threads" in df.columns:
+            import json
+            def safe_sum_threads(val):
+                if isinstance(val, str) and val.strip():
+                    try:
+                        lst = json.loads(val)
+                        if isinstance(lst, list):
+                            return sum(lst)
+                    except Exception:
+                        pass
+                return 0
+            thread_count_mean = df["num_threads"].apply(safe_sum_threads).mean() / cpu_cores
+        else:
+            thread_count_mean = (df["total_processes"].mean() * 2.5) / cpu_cores
+
+
         # We use fillna('') so .str doesn't crash on missing process names
         process_col = df["process_data"].fillna("").str.lower()
         
