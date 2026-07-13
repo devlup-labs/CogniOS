@@ -7,13 +7,15 @@ I downloaded the Shuttle dataset from OpenML in `.arff` format.
 The dataset have 58,000 rows and 9 numeric features (A1 to A9). There is no missing values in this
 data, I checked and got 0 everywhere.
 
+![alt text](data/image2.png)
+
 The tricky part was that this dataset originally have 7 classes (1 to 7), so it is actually a
 multi-class classification dataset, not a ready made anomaly detection dataset. Since the task
 need anomaly detection, I had to convert it into binary labels myself.
 
 Class distribution was like this:
 
-![alt text](data/image2.png)
+![alt text](data/image5.png)
 
 I noticed that class 1 and class 4 are together almost 94% of all data, so these looks like normal
 / common operating states of the shuttle. The other classes (2,3,5,6,7) are very small in number
