@@ -92,7 +92,6 @@ class _noop_ctx:
 def write_telemetry(conn: sqlite3.Connection, metrics: dict) -> None:
     global _write_count
 
-    # Build data in schema-column order (Bug 4)
     data: dict = {k: metrics.get(k) for k in BLACKBOX_METRICS_KEYS}
     # Always store a float timestamp for time-range queries
     if data.get('timestamp') is None or not isinstance(data['timestamp'], (int, float)):
@@ -101,7 +100,7 @@ def write_telemetry(conn: sqlite3.Connection, metrics: dict) -> None:
     cols         = ", ".join(data.keys())
     placeholders = ", ".join("?" for _ in data)
 
-    # Bug 3: acquire lock before writing (shared connection across threads)
+    # acquire lock before writing (shared connection across threads)
     lock = _get_lock(conn)
     with lock if lock else _noop_ctx():
         conn.execute(
