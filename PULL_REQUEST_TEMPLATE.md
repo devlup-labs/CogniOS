@@ -23,9 +23,9 @@ Dataset Source:
 ---
 
 ## Preprocessing
-•   There were no missing values in the dataset.
-•	Feature Scaling Evaluation: We integrated data standardization using StandardScaler to evaluate the model's sensitivity to feature magnitudes. The experiments successfully validated that the Isolation Forest algorithm is inherently scale-invariant. Because the model relies on recursive, axis-aligned isolation trees rather than geometric distance metrics, scaling preserves the exact relative separation paths of the anomalies. This is an exceptional characteristic for our pipeline, as it proves the model achieves peak predictive performance with reduced preprocessing overhead.
 
+- There were no missing values in the dataset.
+- **Feature Scaling Evaluation:** We integrated data standardization using `StandardScaler` to evaluate the model's sensitivity to feature magnitudes. The experiments successfully validated that the Isolation Forest algorithm is inherently scale-invariant. Because the model relies on recursive, axis-aligned isolation trees rather than geometric distance metrics, scaling preserves the exact relative separation paths of the anomalies. This is an exceptional characteristic for our pipeline, as it proves the model achieves peak predictive performance with reduced preprocessing overhead.
 
 ---
 
@@ -56,18 +56,13 @@ Dataset Source:
 
 ## Visualizations
 
-Attach **at least 2 plots** from your analysis.
+**Confusion Matrix — Best Safety Model**
 
-Examples:
-- PCA visualization
-- Anomaly score distribution
-- Confusion Matrix
-- Correlation heatmap
-- Feature distributions
-- Hyperparameter comparison
-- Precision/Recall/F1 comparison
+![Confusion Matrix](./confusion_matrix.png)
 
-[attached in notebook.py]
+**Impact of Contamination Threshold on Anomaly Recall**
+
+![Hyperparameter Impact](./hyperparameter_impact.png)
 
 ---
 
@@ -82,9 +77,9 @@ Examples:
 
 ## Checklist
 
-- [*] Code runs successfully
-- [*] Notebook (`.ipynb`) included
-- [*] Code is well-commented
-- [ ] README/documentation updated
-- [*] At least **2 plots** included
-- [ ] PR is linked to the corresponding issue
+- [x] Code runs successfully
+- [x] Notebook (`.ipynb`) included
+- [x] Code is well-commented
+- [x] README/documentation updated
+- [x] At least **2 plots** included
+- [x] PR is linked to the corresponding issue
