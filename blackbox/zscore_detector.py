@@ -6,6 +6,8 @@ from config import (
     BLACKBOX_WARMUP_SEC,
     BLACKBOX_TREND_WINDOW,
     BLACKBOX_SLOPE_THRESHOLD,
+    BLACKBOX_SUSTAINED_SEC,
+    BLACKBOX_SUSTAINED_RATIO,
 )
 
 
@@ -17,12 +19,15 @@ class ZScoreDetector:
         self.trend_hist = deque(maxlen=BLACKBOX_TREND_WINDOW)
         self.z_threshold = BLACKBOX_Z_THRESHOLD
         self.slope_threshold = BLACKBOX_SLOPE_THRESHOLD
+        self.sustained_hist = deque(maxlen=BLACKBOX_SUSTAINED_SEC)
+        self.sustained_ratio = BLACKBOX_SUSTAINED_RATIO
         self.warmup_sec = BLACKBOX_WARMUP_SEC
 
     # Appends the given metric value
     def update(self, val):
         self.zscore_hist.append(val)
         self.trend_hist.append(val)
+        self.sustained_hist.append(val)
 
     # Returns the current warmup progress as a percentage of the warmup threshold.
     def warmup_pct(self):
@@ -58,6 +63,14 @@ class ZScoreDetector:
         x = np.arange(len(y))
         return np.polyfit(x, y, 1)[0]
     
+    # Checks if the given value has been sustained above the threshold for the required ratio of the historical window. Returns True if sustained, otherwise False.
+    def _is_sustained(self, threshold_val, val):
+        hist = self._history_with_current(self.sustained_hist, val)
+        if len(hist) < self.sustained_hist.maxlen:
+            return False
+        sustained_count = sum(1 for v in hist if v > threshold_val)
+        return sustained_count / len(hist) >= self.sustained_ratio
+    
     # Checks the given value against the historical window and returns a list of issues if the Z-score exceeds the threshold. Each issue includes severity, metric name, current value, mean, standard deviation, Z-score, and a message.
     def check(self, val, metric_name="metric", unit="%"):
         issues = []
@@ -67,22 +80,24 @@ class ZScoreDetector:
         if result is not None:
             z, mean, std = result
             if abs(z) > self.z_threshold:
-                severity = "CRITICAL" if abs(z) > 5 else "HIGH" if abs(z) > 4 else "MEDIUM"
-                issues.append({
-                    "check":    "sudden_spike",
-                    "severity": severity,
-                    "metric":   metric_name,
-                    "current":  round(val, 2),
-                    "mean":     round(mean, 2),
-                    "std":      round(std, 2),
-                    "z_score":  round(z, 2),
-                    "msg": (
-                        f"{metric_name} spike | "
-                        f"current={val:.1f}{unit} "
-                        f"baseline={mean:.1f}±{std:.1f}{unit} "
-                        f"Z={z:.1f}"
-                    )
-                })
+                spike_thresh = mean + 2 * std
+                if self._is_sustained(spike_thresh, val):
+                    severity = "CRITICAL" if abs(z) > 5 else "HIGH" if abs(z) > 4 else "MEDIUM"
+                    issues.append({
+                         "check":    "sudden_spike",
+                         "severity": severity,
+                         "metric":   metric_name,
+                         "current":  round(val, 2),
+                         "mean":     round(mean, 2),
+                         "std":      round(std, 2),
+                         "z_score":  round(z, 2),
+                         "msg": (
+                             f"{metric_name} spike | "
+                             f"current={val:.1f}{unit} "
+                             f"baseline={mean:.1f}±{std:.1f}{unit} "
+                             f"Z={z:.1f}"
+                         )
+                    })
 
         # Slope slow drift
         slope = self._slope(val)
