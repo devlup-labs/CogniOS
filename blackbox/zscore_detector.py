@@ -4,6 +4,8 @@ from config import (
     BLACKBOX_WINDOW_SEC,
     BLACKBOX_Z_THRESHOLD,
     BLACKBOX_WARMUP_SEC,
+    BLACKBOX_TREND_WINDOW,
+    BLACKBOX_SLOPE_THRESHOLD,
 )
 
 
@@ -12,12 +14,15 @@ class ZScoreDetector:
     def __init__(self):
         # Initializes the ZScoreDetector with a deque for historical values, a Z-score threshold, and a warmup period.
         self.zscore_hist = deque(maxlen=BLACKBOX_WINDOW_SEC)
+        self.trend_hist = deque(maxlen=BLACKBOX_TREND_WINDOW)
         self.z_threshold = BLACKBOX_Z_THRESHOLD
-        self.warmup_sec  = BLACKBOX_WARMUP_SEC
+        self.slope_threshold = BLACKBOX_SLOPE_THRESHOLD
+        self.warmup_sec = BLACKBOX_WARMUP_SEC
 
     # Appends the given metric value
     def update(self, val):
         self.zscore_hist.append(val)
+        self.trend_hist.append(val)
 
     # Returns the current warmup progress as a percentage of the warmup threshold.
     def warmup_pct(self):
@@ -44,10 +49,20 @@ class ZScoreDetector:
         std  = np.std(hist) + 0.001
         return (val - mean) / std, mean, std
 
+    # Calculates the slope of the trend line for the given value against the historical window. Returns None if there are fewer than 30 samples.
+    def _slope(self, val):
+        hist = self._history_with_current(self.trend_hist, val)
+        if len(hist) < 30:
+            return None
+        y = np.array(hist)
+        x = np.arange(len(y))
+        return np.polyfit(x, y, 1)[0]
+    
     # Checks the given value against the historical window and returns a list of issues if the Z-score exceeds the threshold. Each issue includes severity, metric name, current value, mean, standard deviation, Z-score, and a message.
     def check(self, val, metric_name="metric", unit="%"):
         issues = []
 
+        # zscore 
         result = self._zscore(val)
         if result is not None:
             z, mean, std = result
@@ -69,4 +84,25 @@ class ZScoreDetector:
                     )
                 })
 
+        # Slope slow drift
+        slope = self._slope(val)
+        if slope is not None and slope > self.slope_threshold:
+            eta_min = None
+            if val < 90 and slope > 0:
+                eta_min = round((90 - val) / slope / 60, 0)
+            issues.append({
+                "check":       "slow_drift",
+                "severity":    "HIGH",
+                "metric":      metric_name,
+                "current":     round(val, 2),
+                "slope":       round(slope, 5),
+                "eta_minutes": eta_min,
+                "msg": (
+                    f"{metric_name} rising trend | "
+                    f"slope={slope:.4f}{unit}/s "
+                    f"current={val:.1f}{unit}"
+                    + (f" ETA critical ~{eta_min:.0f}min" if eta_min else "")
+                )
+            })            
+            
         return issues
