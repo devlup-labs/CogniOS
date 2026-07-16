@@ -1,4 +1,5 @@
 # new things learnt
+# got familiarized with syntax of new libraries and standard practices
 # precision_score(y_true, y_pred) both these values must be same for binary -> same tuple
 import pandas as pd
 import numpy as np
