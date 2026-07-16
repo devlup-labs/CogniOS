@@ -41,6 +41,9 @@ def extract_and_engineer_sys(db_path, window_size=120):
     # diff()/rolling() see the correct time direction and .iloc[-1] is "now".
     df_sys = df_sys.iloc[::-1].reset_index(drop=True)
 
+    # Latest timestamp, kept as metadata (not a numeric feature for the model)
+    latest_timestamp = df_sys['timestamp'].iloc[-1]
+
     # timestamp/process_data aren't numeric features for the model
     df_sys_numeric = df_sys.drop(columns=['timestamp', 'process_data'])
 
@@ -59,6 +62,10 @@ def extract_and_engineer_sys(db_path, window_size=120):
         flat_sys_dict[f'sys_{col}'] = df_sys_numeric[col].iloc[-1]
         flat_sys_dict[f'sys_{col}_gradient'] = df_sys_gradients[col].iloc[-1]
         flat_sys_dict[f'sys_{col}_rolling_avg'] = df_sys_rolling_avg[col].iloc[-1]
+
+    # Metadata (bare name, no sys_ prefix) so build_unified_vector() can route
+    # it into metadata_payload instead of the model's feature matrix.
+    flat_sys_dict['timestamp'] = latest_timestamp
 
     # Convert to a single-row 2D DataFrame [1, num_sys_features]
     sys_vec = pd.DataFrame([flat_sys_dict])
@@ -286,8 +293,8 @@ def build_unified_vector(sys_vec, cpu_vec, ram_vec):
 
     df_unified = pd.concat([sys_vec, cpu_vec, ram_vec], axis=1)
     
-    metadata_cols = [col for col in df_unified.columns 
-                     if col.endswith('_name') or col.endswith('_id') or col.endswith('_ppid')]
+    metadata_cols = [col for col in df_unified.columns
+                     if col.endswith('_name') or col.endswith('_id') or col.endswith('_ppid') or col == 'timestamp']
     
     metadata_payload = df_unified[metadata_cols].iloc[0].to_dict()
     
@@ -435,13 +442,10 @@ def get_inference_payload(db_path, scaler=None):
         # 4. Consolidate and strip metadata 
         ml_features_df, metadata_payload = build_unified_vector(sys_vec, cpu_vec, ram_vec)
 
-        # --- NEW: 5. Scale numerical features only (transform-only, no fit) ---
+        # NEW: 5. Scale numerical features only (transform-only, no fit)
         if scaler is not None:
             ml_features_df = scale_features(ml_features_df, scaler)
-        # metadata_payload is untouched — PID/PPID/name never enter the scaler
-        # -----------------------------------------------------------------------
-
-        # Return the clean tuple directly down to the ML execution loop!
+        
         return ml_features_df, metadata_payload
 
     except Exception as e:

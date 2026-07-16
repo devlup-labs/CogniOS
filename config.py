@@ -1,4 +1,7 @@
 DB_PATH = "cognios_telemetry.db"
+
+OS_DOCTOR_DB_PATH = "os_doctor.db"
+
 BLACKBOX_DB_PATH         = "blackbox/blackbox.db"
 BLACKBOX_WINDOW_SEC = 1800  # 30 minutes
 BLACKBOX_WARMUP_SEC      = 60     # wait before detection starts
