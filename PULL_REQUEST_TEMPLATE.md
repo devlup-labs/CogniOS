@@ -76,10 +76,10 @@ List the important hyperparameters used.
 Attach **at least 2 plots** from your analysis.
 ---
 **Confusion Matrix**
-![alt text](image.png)
+![alt text](confusion_matrix.png)
 ---
 **Scatter Plot**
-![alt text](image-1.png)
+![alt text](anomaly_scatter_plot.png)
 ---
 
 ---
