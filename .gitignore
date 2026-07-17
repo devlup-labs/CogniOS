@@ -14,6 +14,8 @@ config.ini
 # Local data and generated artifacts
 cognios_telemetry.db
 *.db
+*.db-shm
+*.db-wal
 data/models/*.pt
 data/traces/*
 
