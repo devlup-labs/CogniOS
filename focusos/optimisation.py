@@ -91,3 +91,15 @@ def pin_process_to_cores(proc_name: str,cores: list[int]) -> int:
     except Exception:
       continue
   return optimised_count
+
+  def log_optimization_result(workload: str, confidence: float, actions: list[str]):
+  #logging all the optimisation event to the database
+  try:
+    with sqlite3.connect(DBPATH) as conn:
+      cur = conn.cursor()
+      with conn:
+      cur.execute("""CREATE TABLE IF NOT EXISTS focusos_events (timestamp REAL,workload TEXT,confidence INTEGER,actions TEXT)""")
+      cur.execute("""INSERT INTO focusos_events (timestamp, workload, confidence, actions_json)VALUES (?, ?, ?, ?)""", (time.time(), workload, confidence, json.dumps(actions)))
+    conn.commit()
+  except Exception as e:
+    print(f"Database logging error {e}")
