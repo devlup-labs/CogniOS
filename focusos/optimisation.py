@@ -38,3 +38,20 @@ def apply_optimization(workload: str, confidence: float) -> bool:
     except Exception as e:
       print(f"Database logging error :{e}")
   return True
+
+  def pin_process_to_cores(proc_name: str,cores: list(int)) -> int:
+  optimised_count=0
+  for proc in psutil.process_iter(attrs=['pid','name']):
+    try:
+      current_name=proc.info['name'] or ""
+      if proc_name.lower() in current_name.lower():
+        pid=proc.info['info']
+        process_obj=psutil.Process(pid)
+
+        process_obj.cpu_affinity(core_list)
+        optimised_count+=1
+    except(psutil.NoSuchProcess,psutil.AccessDenied,psutil.ZombieProcess):
+      continue
+    except Exception:
+      continue
+  return optimised_count
