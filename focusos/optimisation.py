@@ -23,7 +23,7 @@ def apply_optimization(workload: str, confidence: float) -> bool:
     #deprioritising the compilers
     count_nice=sum(prioritise_process(compiler,15) for compiler in COMPILERS)
     count_affinity=sum(pin_process_to_cores(compiler,background_cores) for compiler in COMPILERS)
-    count_io = sum(set_io_priority_by_name(compiler, 3) for compiler in COMPILERS)
+    count_io = sum(prioritise_process(compiler, 3) for compiler in COMPILERS)
     if count_nice > 0:
       actions.append(f"Deprioritise {count_nice},pinned {core_affinity} to core(s) {background_cores},set {count_io} to idle IO")
  
@@ -33,7 +33,6 @@ def apply_optimization(workload: str, confidence: float) -> bool:
     count_nice=prioritise_process("steam",-5)
     count_nice+=prioritise_process("game-process",-10)
     count_affinity=pin_process_to_cores("game-process",list(range(total_cores)))
-    if count_nice>0:
     actions.append(f"Prioritised {count_nice},granted {counted_affinity} full core affinity")
   
   
@@ -43,7 +42,7 @@ def apply_optimization(workload: str, confidence: float) -> bool:
     action.append(f"Prioritised{count_nice},pinned {cpu_affinity} browser process to cores {background_cores}")
   
   
-  elif workload.lower()="browsing":
+  elif workload.lower()=="browsing":
     #reset all the process to normal priority and spread across all cores
     count_nice=sum(prioritise_process(browser,0) for browser in BROWSERS)
     count_affinity=sum(pin_process_to_cores(browser,list(range(total_cores))) for browser BROWSERS)
@@ -84,13 +83,29 @@ def pin_process_to_cores(proc_name: str,cores: list[int]) -> int:
         pid=proc.info['info']
         process_obj=psutil.Process(pid)
 
-        process_obj.cpu_affinity(cores)
+        process_obj.cpu_affinity(cores) 
         optimised_count+=1
     except(psutil.NoSuchProcess,psutil.AccessDenied,psutil.ZombieProcess):
       continue
     except Exception:
       continue
   return optimised_count
+#it safely adjusts the cpu scheduling priority 19 to -20(nicest)
+def prioritise_process(proc_name: str, nice_val: int) -> int:
+  optimized_count = 0
+    for proc in psutil.process_iter(attrs=['pid', 'name']):
+        try:
+            current_name = proc.info['name'] or ""
+            if proc_name.lower() in current_name.lower():
+                pid = proc.info['pid']
+                process_obj = psutil.Process(pid)
+                process_obj.nice(nice_val)
+                optimized_count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+        except Exception:
+            continue
+      return optimized_count
 
   def log_optimization_result(workload: str, confidence: float, actions: list[str]):
   #logging all the optimisation event to the database
