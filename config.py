@@ -9,3 +9,8 @@ BLACKBOX_SLOPE_THRESHOLD = 0.003  # %/sec rise = suspicious
 BLACKBOX_SUSTAINED_SEC   = 30     # spike must last this long
 BLACKBOX_SUSTAINED_RATIO = 0.6    # 60% readings above threshold
 BLACKBOX_TREND_WINDOW    = 600    # 10 min for slope calculation
+
+BLACKBOX_CPU_CRITICAL  = 95.0   # %
+BLACKBOX_MEM_CRITICAL  = 90.0   # %
+BLACKBOX_ZOMBIE_LIMIT  = 10     # count
+BLACKBOX_TEMP_CRITICAL = 90.0   # °C
