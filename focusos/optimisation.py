@@ -23,7 +23,7 @@ def apply_optimization(workload: str, confidence: float) -> bool:
     #deprioritising the compilers
     count_nice=sum(prioritise_process(compiler,15) for compiler in COMPILERS)
     count_affinity=sum(pin_process_to_cores(compiler,background_cores) for compiler in COMPILERS)
-    count_io = sum(prioritise_process(compiler, 3) for compiler in COMPILERS)
+    count_io = sum(set_io_priority(compiler, 3) for compiler in COMPILERS)
     if count_nice > 0:
       actions.append(f"Deprioritise {count_nice},pinned {core_affinity} to core(s) {background_cores},set {count_io} to idle IO")
  
@@ -105,16 +105,32 @@ def prioritise_process(proc_name: str, nice_val: int) -> int:
             continue
         except Exception:
             continue
-      return optimized_count
+    return optimized_count
+def set_io_priority(proc_name: str,io_class: int) -> int:
+    optimised_count=0
+    for proc in psutil.process_iter(attrs=["pid","name"]):
+        current_pid=proc.info["pid"]
+        try:
+            current_name=proc.info["name"] or ""
+            if proc_name.lower() in current_name.lower():
+                process_obj=psutil.Process(current_pid)
+                process_obj.ionice(io_class)
+            optimised_count+=1
+        except(psutil.NoSuchProcess,psutil.ZombieProcess,psutil.AccessDenied):
+            continue
+    return optimised_count
 
-  def log_optimization_result(workload: str, confidence: float, actions: list[str]):
-  #logging all the optimisation event to the database
-  try:
-    with sqlite3.connect(DBPATH) as conn:
-      cur = conn.cursor()
-      with conn:
-      cur.execute("""CREATE TABLE IF NOT EXISTS focusos_events (timestamp REAL,workload TEXT,confidence INTEGER,actions TEXT)""")
-      cur.execute("""INSERT INTO focusos_events (timestamp, workload, confidence, actions_json)VALUES (?, ?, ?, ?)""", (time.time(), workload, confidence, json.dumps(actions)))
-    conn.commit()
-  except Exception as e:
-    print(f"Database logging error {e}")
+
+
+
+def log_optimization_result(workload: str, confidence: float, actions: list[str]):
+    #logging all the optimisation event to the database
+    try:
+      with sqlite3.connect(DBPATH) as conn:
+        cur = conn.cursor()
+        with conn:
+        cur.execute("""CREATE TABLE IF NOT EXISTS focusos_events (timestamp REAL,workload TEXT,confidence INTEGER,actions TEXT)""")
+        cur.execute("""INSERT INTO focusos_events (timestamp, workload, confidence, actions_json)VALUES (?, ?, ?, ?)""", (time.time(), workload, confidence, json.dumps(actions)))
+      conn.commit()
+    except Exception as e:
+      print(f"Database logging error {e}")
