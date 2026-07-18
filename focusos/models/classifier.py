@@ -8,7 +8,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 import xgboost as xgb
 
 CURRENT_FILE = os.path.abspath(__file__)
-MODELS_DIR = os.path.join(os.path.dirname(CURRENT_FILE), "models_saved")
+MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(CURRENT_FILE)), "models_saved")
 DATASET_PATH = os.path.join(MODELS_DIR, "pseudo_labeled_dataset.csv")
 
 FEATURE_COLUMNS = [
