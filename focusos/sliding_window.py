@@ -26,7 +26,7 @@ from config import SLIDING_WIND_N
 #         return list(self.buffer)
 def get_window_from_db(db_path=DB_PATH, limit=SLIDING_WIND_N):
     try:
-        with sqlite3.connect(db_path) as conn:
+        with sqlite3.connect(db_path,timeout=10.0) as conn:
             # it will fetch last nth rows n=limit from the db
             query = f"select * from layer1_sys order by timestamp desc limit {limit}"
             df = pd.read_sql(query, conn)

@@ -9,7 +9,7 @@ from config import DB_PATH
 
 def init_db():
     """Initializes the unified process_snapshot table for Layer 2 telemetry."""
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH,timeout=10.0) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS process_snapshot (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,7 +32,7 @@ def insert_process_snapshot(top_cpu, top_ram):
         json.dumps(top_cpu, separators=(',', ':')),
         json.dumps(top_ram, separators=(',', ':'))
     )
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH,timeout=10.0) as conn:
         conn.execute(
             "INSERT INTO process_snapshot (timestamp, top_cpu_processes, top_ram_processes) VALUES (?, ?, ?)",
             row
@@ -49,7 +49,8 @@ db_path = DB_PATH
 # Creating table for all the metrics collected from the system
 
 def create_connection(db_path):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path,timeout=10.0)
+    conn.execute("PRAGMA journal_mode=WAL")
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS layer1_sys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
