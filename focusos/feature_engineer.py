@@ -83,7 +83,6 @@ def extract_features(df: pd.DataFrame):
             "compiler_active": compiler_active,
         }
         features_df = pd.DataFrame([features])
-        print(features_df)
         return features_df
         
     except Exception as e:

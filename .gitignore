@@ -22,7 +22,14 @@ data/traces/*
 # Keep data directories present in git if marker files are added.
 !data/traces/.gitkeep
 
+<<<<<<< HEAD
 # OS / IDE
 .DS_Store
 .vscode/
 .idea/
+=======
+# Ignore SQLite database files
+*.db
+*.sqlite3
+*.sqlite
+>>>>>>> start_script
