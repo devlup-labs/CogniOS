@@ -1,4 +1,7 @@
-DB_PATH = "cognios_telemetry.db"
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "cognios_telemetry.db")
+SLIDING_WIND_N = 120
 BLACKBOX_DB_PATH         = "blackbox/blackbox.db"
 BLACKBOX_WINDOW_SEC = 1800  # 30 minutes
 BLACKBOX_WARMUP_SEC      = 60     # wait before detection starts

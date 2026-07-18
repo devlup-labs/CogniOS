@@ -1,4 +1,5 @@
-import psutil 
+import enum
+import psutil
 import time
 from datetime import datetime,timezone
 import sys
@@ -31,16 +32,19 @@ def collect_layer1_metrics():
                 pass
         time.sleep(0.1)
         process_data = []
+        num_threads=[]
         for pid, p in procs.items():
             try:
                 cpu = round(p.cpu_percent(), 2)
                 mem = round(p.info.get("memory_percent") or 0.0, 2)
                 if cpu > 0.5 or mem > 0.5:
                     process_data.append((p.info.get("name"), cpu, mem))
+                num_threads.append(p.num_threads())
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
     except Exception:
         process_data = []
+        num_threads= []
     # CPU Metrics
     cpu_usage_percent = psutil.cpu_percent(interval=None)
     cpu_times = psutil.cpu_times()
@@ -213,7 +217,8 @@ def collect_layer1_metrics():
         "avg_temp":temp_avg,
         "max_temp":temp_max,
         "battery_percent":battery_percent,
-        "process_data":process_data
+        "process_data":process_data,
+        "num_threads":num_threads
     }
 
 if __name__ == "__main__":
@@ -269,7 +274,8 @@ if __name__ == "__main__":
             metrics['net_packets_received'],
             metrics['net_errs'],
             metrics['net_drops'],
-            json.dumps(metrics['process_data'])
+            json.dumps(metrics['process_data']),
+            json.dumps(metrics["num_threads"])
         )
         print(f"Successfully saved Layer 1 metrics to database table 'layer1_sys' in {DB_PATH}!")
     except Exception as e:

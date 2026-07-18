@@ -8,7 +8,11 @@ from config import DB_PATH
 
 def init_layer2_db():
     """Initializes the unified layer2_proc table for Layer 2 telemetry."""
-    with sqlite3.connect(DB_PATH) as conn:
+    init_db()
+
+def init_db():
+    """Initializes the unified layer2_proc table for Layer 2 telemetry."""
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS layer2_proc (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,7 +35,7 @@ def write_layer2(top_cpu, top_ram):
         json.dumps(top_cpu, separators=(',', ':')),
         json.dumps(top_ram, separators=(',', ':'))
     )
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH,timeout=10.0) as conn:
         conn.execute(
             "INSERT INTO layer2_proc (timestamp, top_cpu_json, top_ram_json) VALUES (?, ?, ?)",
             row
@@ -45,7 +49,8 @@ def write_layer2(top_cpu, top_ram):
 db_path = DB_PATH
 
 def create_connection(db_path):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path,timeout=10.0)
+    conn.execute("PRAGMA journal_mode=WAL")
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS layer1_sys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,17 +99,65 @@ def create_connection(db_path):
             avg_temp REAL,
             max_temp REAL,
             battery_percent REAL,
-            process_data TEXT
+            process_data TEXT,
+            num_threads INTEGER
         )
     ''')
+
+    # Ensure num_threads column exists for older database instances
+    cursor.execute("PRAGMA table_info(layer1_sys)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'num_threads' not in columns:
+        cursor.execute("ALTER TABLE layer1_sys ADD COLUMN num_threads INTEGER")
 
     conn.commit()
     return conn
 
-def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, process_data):
+# Function to write the collected metrics into the database
+
+def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, process_data,num_threads):
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO layer1_sys (timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, process_data)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, process_data))
+        INSERT INTO layer1_sys (timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, process_data, num_threads)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (timestamp, 
+          cpu_usage_percent, 
+          cpu_freq, cpu_user_time, 
+          cpu_system_time, 
+          cpu_idle_time, 
+          cpu_iowait_time,
+          cpu_busy_time, 
+          cpu_ctx_switches, 
+          memory_percent, 
+          memory_used, 
+          memory_available, 
+          memory_cached, 
+          memory_buffers, 
+          swap_percent, 
+          swap_sin, 
+          swap_sout,
+          disk_usage_percent,
+          disk_read_mb_s,
+          disk_write_mb_s,
+          disk_read_time,
+          disk_write_time,
+          net_rate_mb_s,
+          net_bytes_sent,
+          net_bytes_recv,
+          net_packets_sent,
+          net_packets_recv,
+          net_errs,
+          net_drops,
+          load_avg_1,
+          load_avg_5,
+          load_avg_15,
+          total_processes,
+          running_processes,
+          sleeping_processes,
+          zombie_processes,
+          avg_temp,
+          max_temp,
+          battery_percent,
+          process_data,
+          num_threads))
     conn.commit()
