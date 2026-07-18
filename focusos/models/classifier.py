@@ -26,34 +26,38 @@ FEATURE_COLUMNS = [
     "compiler_active",
 ]
 class WorkloadPredictor:
-    def__init__(self,models_dirs="models_saved"):
-        self.scaler=joblib.load(os.path.join(models_dir,"scaler.pkl"))
-        self.label=joblib.load(os.path.join(models_dir,"label_encoder.pkl"))
-        self.kmeans=joblib.load(os.path.join(models_dir,"kmean_modle.pkl"))
-        self.xgb=XGBClassifier()
-        self.xgb.load_model(os.path.join(models_dir,"xgboost_model.json"))
+    def __init__(self, models_dir=MODELS_DIR):
+        self.models_dir = models_dir
+        self.scaler = joblib.load(os.path.join(models_dir, "scaler.pkl"))
+        self.label_encoder = joblib.load(os.path.join(models_dir, "label_encoder.pkl"))
+        self.kmeans = joblib.load(os.path.join(models_dir, "kmeans_model.pkl"))
+        self.xgb = xgb.XGBClassifier()
+        self.xgb.load_model(os.path.join(models_dir, "xgboost_model.json"))
 
-
-    def predict(self,features_df pd.DataFrame) ->dict:
-        if features_df is None or features_df.empty():
+    def predict(self, features_df: pd.DataFrame) -> dict:
+        if features_df is None or features_df.empty:
             return None
-        
-        #scaling the incoming feature_vector
-        scaled=self.scaler.transform(features_df)
-        #predicting the workload using the xgboost
-        pred_idx=self.xgb.predict(scaled)[0]
-        workload_name=self.label_encoder.inverse_transform([pred_idx])[0]
-        #calculating the confidence
-        confidence=float(probs[pred_idx]*100)
-        #predicting the cluster ids
-        cluster_id=int(self.kmeans.predict(scale)[0])
 
-        return 
-        {
-            "workload":workload_name
-            "confidence":round(confidence,2)
-            "cluster_id":cluster_id
+        # scaling the incoming feature_vector
+        scaled = self.scaler.transform(features_df)
+        
+        # predicting the workload using xgboost
+        probs = self.xgb.predict_proba(scaled)[0]
+        pred_idx = int(np.argmax(probs))
+        workload_name = str(self.label_encoder.inverse_transform([pred_idx])[0])
+
+        # calculating the confidence
+        confidence = float(probs[pred_idx] * 100)
+
+        # predicting the cluster id
+        cluster_id = int(self.kmeans.predict(scaled)[0])
+
+        return {
+            "workload": workload_name,
+            "confidence": round(confidence, 2),
+            "cluster_id": cluster_id,
         }
+
 
 def train_classifier():
     print("\n" + "═"*60)
