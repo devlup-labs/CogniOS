@@ -27,3 +27,24 @@ print("To stop the daemon, run: pkill -f cognios_as_daemon.py")
 
 #print("\nAll CogniOS modules are now running silently in the background!")
 print("Your terminal is free to use.")
+
+from focusos.models.classifier import WorkloadPredictor
+from focusos.feature_engineer import extract_features
+from focusos.sliding_window import get_window_from_db
+import time 
+
+def run_focusos():
+    predictor = WorkloadPredictor()
+    print("FocusOS model inference testing...")
+    while True:
+        df_window = get_window_from_db()
+        if df_window is not None:
+            features = extract_features(df_window)
+            if features is not None:
+                result = predictor.predict(features)
+                if result:
+                    print(f"[{time.strftime('%H:%M:%S')}] Detected: {result['workload']} ({result['confidence']}%)")
+        time.sleep(2)
+
+if __name__ == "__main__":
+    run_focusos()
