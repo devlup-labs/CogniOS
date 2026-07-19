@@ -19,6 +19,7 @@ from blackbox.feature_engineering import extract_feature_vector, FEATURE_NAMES
 from blackbox.zscore_detector import ZScoreDetector
 from blackbox.rule_engine import check_rules
 
+
 PASS = "[PASS]"
 FAIL = "[FAIL]"
 results = []
@@ -133,8 +134,8 @@ check("get_window_rows returns rows in time range",
       len(window_rows) > 0, f"{len(window_rows)} rows in last 60s")
 print()
 
-# ── Test 6: 40-cycle warmup + detection ─────────────────
-print("[ 6 ] 40-cycle run (warmup + Z-score + Rule Engine)")
+# ── Test 6: 70-cycle warmup + detection ─────────────────
+print("[ 6 ] 70-cycle run (warmup + Z-score + Rule Engine)")
 detectors = {
     "cpu":    ZScoreDetector(),
     "memory": ZScoreDetector(),
@@ -143,7 +144,7 @@ rule_fires   = 0
 zscore_fires = 0
 vec_success  = False
 
-for i in range(40):
+for i in range(70):
     m = collect_layer1_metrics()
     write_telemetry(conn, m)
     update_heartbeat(conn)
@@ -159,20 +160,20 @@ for i in range(40):
     alerts = check_rules(m)
     rule_fires += len(alerts)
 
-    # Feature vector at t=36
-    if i == 35:
+    # Feature vector at t=66 (after warmup of 60 seconds)
+    if i == 65:
         recent = get_recent_rows(conn, n=120)
         vec = extract_feature_vector(recent)
         vec_success = vec is not None and len(vec) == 8
 
-    time.sleep(0.1)
+    time.sleep(0.05)
 
-check("40 cycles completed without crash", True)
+check("70 cycles completed without crash", True)
 check("Rule engine ran every cycle", True,
       f"{rule_fires} alerts fired (0 = system healthy)")
 check("Z-score detectors updated", True,
       f"{zscore_fires} alerts fired")
-check("Feature vector generated at t=36", vec_success,
+check("Feature vector generated at t=66", vec_success,
       f"8 features extracted")
 print()
 
