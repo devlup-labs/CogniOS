@@ -21,18 +21,22 @@ def extract_features(df: pd.DataFrame):
         cpu_max = df["cpu_usage_percent"].max()
         cpu_variance = df["cpu_usage_percent"].var()
         
+        # Time-scaling factor to normalize rate features relative to baseline 120 window
+        scale_factor = (120.0 / len(df)) if len(df) > 0 else 1.0
+
         # mem feature engineering 
         ram_mean = df["memory_percent"].mean()
-        ram_growth_rate = (df["memory_percent"].iloc[-1] - df["memory_percent"].iloc[0]) if len(df) > 0 else 0
+        ram_growth_rate = ((df["memory_percent"].iloc[-1] - df["memory_percent"].iloc[0]) * scale_factor) if len(df) > 0 else 0
         
-        # network
-        net_combined = df["net_bytes_sent"] + df["net_bytes_recv"]
-        net_mean = net_combined.mean()
-        if net_mean > 0:
-            # captures trend: positive means rising traffic, negative means falling traffic
-            net_mean = float((net_combined.iloc[-1] - net_combined.iloc[0]) / net_mean)
+        # network: calculate true average throughput rate (MB/s) across the window
+        if "net_rate_mb_s" in df.columns and df["net_rate_mb_s"].notnull().any():
+            net_mean = float(df["net_rate_mb_s"].mean())
         else:
-            net_mean = 0.0 
+            # Fallback: MB/s rate computed from total byte delta over window length
+            net_combined = df["net_bytes_sent"] + df["net_bytes_recv"]
+            total_bytes = max(0, net_combined.iloc[-1] - net_combined.iloc[0])
+            net_mean = float((total_bytes / (1024 * 1024)) / len(df)) if len(df) > 0 else 0.0
+
         #here i am calculating the coeffiecient of var = std/mean
         # 10x spike on ssd == 10x spike on hdd
         disk_combined = df["disk_write_mb_s"] + df["disk_read_mb_s"]
