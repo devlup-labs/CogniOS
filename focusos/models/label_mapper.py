@@ -37,7 +37,7 @@ WORKLOAD_OPTIMIZATION_PROFILE = {
         "description":         "Boosting compiler processes for faster build times",
     },
     "Video_Call": {
-        "process_keywords":    ["zoom", "teams", "chrome", "firefox", "brave", "msedge"],
+        "process_keywords":    ["zoom", "teams","slack","discord","skype","webex"],
         "deprioritize_others": True,
         "nice_value":          -5,
         "description":         "Boosting video call app for smooth audio and video",
