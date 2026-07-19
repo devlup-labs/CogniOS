@@ -60,3 +60,32 @@ def telemetry_to_events(rows: list[dict]) -> list[dict]:
                 'severity': 'high' if c_swap > 80 else 'medium'})
 
     return events
+
+# Builds a chain of related events
+def build_event_chain(events: list[dict]) -> list[dict]:
+    if not events:
+        return []
+
+    sorted_events = sorted(events, key=lambda e: e.get('timestamp', 0))
+    chain = []
+    last_seen = {}
+
+    for e in sorted_events:
+        key = e['type']
+        ts = e.get('timestamp', 0)
+        if key not in last_seen or ts - last_seen[key] >= 5:
+            chain.append(e)
+            last_seen[key] = ts
+
+    return chain
+
+# Formats the event chain into a human-readable string
+def format_chain_text(chain: list[dict]) -> str:
+    if not chain:
+        return "No significant events detected in this window."
+
+    lines = []
+    for i, e in enumerate(chain):
+        arrow = "\n      ↓\n" if i < len(chain) - 1 else ""
+        lines.append(f"[{e['time']}] {e['detail']}{arrow}")
+    return "\n".join(lines)
