@@ -6,10 +6,10 @@ import sys
 import json
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH
-from config import COMPILERS    # yet not written in the config files- > will update soon
-from config import BROWSERS     # yet not written in the config files- > will update soon
-from config import CALLS        # yet not written in the config files- > will update soon
-from config import IDES         # yet not written in the config files- > will update soon
+from config import COMPILERS  
+from config import BROWSERS     
+from config import CALLS        
+from config import IDES         
 def apply_optimization(workload: str, confidence: float) -> bool:
   if confidence < 0.80:
     print(f"Optimisation aborted: Confidence for {workload} is less than 80%")
