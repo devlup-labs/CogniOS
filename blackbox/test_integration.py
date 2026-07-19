@@ -2,6 +2,7 @@ import sqlite3
 import time
 import sys
 import os
+from correlation import telemetry_to_events, build_event_chain, format_chain_text
 
 sys.path.insert(0, '.')
 
@@ -251,6 +252,46 @@ total_rows = row_count(conn)
 check("DB has rows stored", total_rows > 0, f"{total_rows} rows total")
 check("cognios_telemetry.db NOT written by BlackBox",
       True, "separate DB confirmed")
+print()
+
+# ── Test 11: Correlation & Event Chain ───────────────────
+print("[ 11 ] Correlation Engine & Event Chain")
+mock_rows = [
+    {"timestamp": 1700000000.0, "cpu_usage_percent": 10.0, "memory_percent": 20.0, "swap_percent": 5.0, "total_processes": 100, "zombie_processes": 0, "disk_read": 10.0},
+    {"timestamp": 1700000001.0, "cpu_usage_percent": 45.0, "memory_percent": 20.0, "swap_percent": 5.0, "total_processes": 100, "zombie_processes": 0, "disk_read": 10.0}, # cpu_spike
+    {"timestamp": 1700000002.0, "cpu_usage_percent": 45.0, "memory_percent": 30.0, "swap_percent": 5.0, "total_processes": 100, "zombie_processes": 0, "disk_read": 10.0}, # memory_growth
+    {"timestamp": 1700000003.0, "cpu_usage_percent": 45.0, "memory_percent": 30.0, "swap_percent": 12.0, "total_processes": 100, "zombie_processes": 0, "disk_read": 10.0}, # swap_spike
+    {"timestamp": 1700000004.0, "cpu_usage_percent": 45.0, "memory_percent": 30.0, "swap_percent": 12.0, "total_processes": 160, "zombie_processes": 0, "disk_read": 10.0}, # process_explosion
+    {"timestamp": 1700000005.0, "cpu_usage_percent": 45.0, "memory_percent": 30.0, "swap_percent": 12.0, "total_processes": 160, "zombie_processes": 8, "disk_read": 10.0}, # zombie_buildup
+    {"timestamp": 1700000006.0, "cpu_usage_percent": 45.0, "memory_percent": 30.0, "swap_percent": 12.0, "total_processes": 160, "zombie_processes": 8, "disk_read": 150.0}, # io_storm
+]
+
+events = telemetry_to_events(mock_rows)
+event_types = [e['type'] for e in events]
+check("cpu_spike detected in correlation", "cpu_spike" in event_types)
+check("memory_growth detected in correlation", "memory_growth" in event_types)
+check("swap_spike detected in correlation", "swap_spike" in event_types)
+check("process_explosion detected in correlation", "process_explosion" in event_types)
+check("zombie_buildup detected in correlation", "zombie_buildup" in event_types)
+check("io_storm detected in correlation", "io_storm" in event_types)
+
+# Deduplication test: two cpu_spikes 3 seconds apart vs 6 seconds apart
+duplicate_rows = [
+    {"timestamp": 1700000010.0, "cpu_usage_percent": 10.0},
+    {"timestamp": 1700000011.0, "cpu_usage_percent": 50.0}, # cpu_spike at 11
+    {"timestamp": 1700000014.0, "cpu_usage_percent": 10.0},
+    {"timestamp": 1700000015.0, "cpu_usage_percent": 50.0}, # cpu_spike at 15 (within 5 seconds - should be deduped)
+    {"timestamp": 1700000020.0, "cpu_usage_percent": 10.0},
+    {"timestamp": 1700000021.0, "cpu_usage_percent": 50.0}, # cpu_spike at 21 (after 6 seconds - should NOT be deduped)
+]
+
+dup_events = telemetry_to_events(duplicate_rows)
+chain = build_event_chain(dup_events)
+check("Deduplication logic works (5s window)", len(chain) == 2, f"Expected 2 events after deduplication, got {len(chain)}")
+
+# Formatting test
+formatted = format_chain_text(chain)
+check("format_chain_text returns non-empty timeline", len(formatted) > 0)
 print()
 
 # ── Summary ──────────────────────────────────────────────
