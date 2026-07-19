@@ -93,7 +93,7 @@ def collect_feature_vectors(
             # STEP = 30 means each sample is offset by 30 seconds from the last.
             # This gives temporal diversity — we sample from different moments.
             timestamps_df = pd.read_sql_query(
-                "SELECT rowid, timestamp FROM layer1_sys ORDER BY timestamp ASC",
+                "SELECT id, timestamp FROM layer1_sys ORDER BY timestamp ASC",
                 conn
             )
             all_rowids = timestamps_df["id"].tolist()
@@ -111,7 +111,7 @@ def collect_feature_vectors(
  
                 # Fetch exactly those rows from the DB
                 window_df = pd.read_sql_query(
-                    f"SELECT * FROM layer1_sys WHERE rowid IN ({rowid_list}) "
+                    f"SELECT * FROM layer1_sys WHERE id IN ({rowid_list}) "
                     f"ORDER BY timestamp ASC",
                     conn
                 )
@@ -199,14 +199,30 @@ def scale_features(df: pd.DataFrame):
     return X_scaled, scaler, df_clean  # return df_clean too (NaN rows dropped)
 
 
+def plot_elbow_curve(results: list, best_k: int):
+    """Plots the inertia curve for the elbow method."""
+    ks = [r[0] for r in results]
+    inertias = [r[1] for r in results]
+
+    plt.figure(figsize=(8, 5))
+    plt.plot(ks, inertias, marker='o', linewidth=2)
+    plt.scatter(best_k, inertias[ks.index(best_k)], s=120, color='red', label=f"Suggested k={best_k}")
+    plt.xlabel("Number of Clusters (k)")
+    plt.ylabel("Inertia")
+    plt.title("Elbow Method")
+    plt.xticks(ks)
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
 #ELBOW METHOD
-def find_optimal_k(X_scaled: np.ndarray, k_range=range(2, 11)) -> list:
+def find_optimal_k(X_scaled: np.ndarray, k_range=range(2, 11), show_plot: bool = True) -> tuple:
     """
         The "elbow" — where the curve bends — is the optimal k.
     """
     print("\n[cluster_trainer] Running elbow method...")
     results = []
- 
+
     for k in k_range:
         km = KMeans(
             n_clusters=k,
@@ -218,7 +234,7 @@ def find_optimal_k(X_scaled: np.ndarray, k_range=range(2, 11)) -> list:
         km.fit(X_scaled)
         results.append((k, km.inertia_))
         print(f"  k={k:2d}  inertia={km.inertia_:10.1f}")
- 
+
     # Find the elbow programmatically (largest drop in inertia reduction rate)
     inertias = [r[1] for r in results]
     drops = [inertias[i] - inertias[i+1] for i in range(len(inertias)-1)]
@@ -226,37 +242,11 @@ def find_optimal_k(X_scaled: np.ndarray, k_range=range(2, 11)) -> list:
     best_k_idx = drop_reduction.index(max(drop_reduction)) + 2  # +2 offset
     best_k = list(k_range)[best_k_idx]
     print(f"\n[cluster_trainer] Elbow suggests k={best_k} (verify visually)")
-    return results,best_k
 
+    if show_plot:
+        plot_elbow_curve(results, best_k)
 
-# Collect features
-df_features = collect_feature_vectors(db_path=DB_PATH)
-
-# Scale features
-X_scaled, scaler, df_clean = scale_features(df_features)
-
-results, best_k = find_optimal_k(X_scaled )
-ks = [r[0] for r in results]
-inertias = [r[1] for r in results]
-
-plt.figure(figsize=(8,5))
-
-plt.plot(ks, inertias, marker='o', linewidth=2)
-
-plt.scatter(best_k,
-            inertias[ks.index(best_k)],
-            s=120,
-            color='red',
-            label=f"Suggested k={best_k}")
-
-plt.xlabel("Number of Clusters (k)")
-plt.ylabel("Inertia")
-plt.title("Elbow Method")
-plt.xticks(ks)
-plt.grid(True)
-plt.legend()
-
-plt.show()
+    return results, best_k
 
 #train k means 
 def train_kmeans(X_scaled: np.ndarray, n_clusters: int = N_CLUSTERS) -> KMeans:
