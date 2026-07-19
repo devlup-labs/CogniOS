@@ -30,7 +30,7 @@ def collect_snapshot(conn):
 				processes = json.loads(result_dict['process_data'])
 				
 				#Sorting the list and retaining top 5 entries
-				result_dict['process_data'] = sorted(processes, key=lambda x: x['cpu'], reverse=True)[:5]
+				result_dict['process_data'] = sorted(processes, key=lambda x: x['cpu'], reverse=True)[:10]
 			except (json.JSONDecodeError, TypeError):
 				result_dict['process_data'] = []
 		else:
@@ -61,7 +61,7 @@ def get_foreground_app():
         return window
     
         
-#returns 2 list[dict], one for top cpu and one for top memory
+# #returns 2 list[dict], one for top cpu and one for top memory
 def get_top_processes(n = 5):
     top_cpu, top_mem, _ = layer2_process.collect_process_telemetry()
     
@@ -71,12 +71,12 @@ def get_top_processes(n = 5):
     cpu_keys = ['pid', 'name', 'cpu_percent', 'thread_count', 'status']
     mem_keys = ['pid', 'name', 'memory_percent', 'thread_count', 'status']
     
-    top_cpu_filtered = [{key: d[key] for key in cpu_keys if key in d} for d in top_cpu]
-    top_mem_filtered = [{key: d[key] for key in mem_keys if key in d} for d in top_mem]
+    top_cpu_filtered = [{key: d[key] for key in cpu_keys if key in d} for d in top_cpu[:n]]
+    top_mem_filtered = [{key: d[key] for key in mem_keys if key in d} for d in top_mem[:n]]
     
     return top_cpu_filtered, top_mem_filtered
 
-    
+
 #layer 1 must also be run as a daemon to get all outputs
 if __name__ == "__main__":
     
