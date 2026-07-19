@@ -7,7 +7,8 @@ CLUSTER_TO_WORKLOAD = {
     1: "Compiling",   
     2: "Idle",         
     3: "Video_Call",   
-    4: "Gaming",       
+    4: "Gaming",     
+    5: "Browsing",  
 }
 
 #FUNCTION to check the correct mapping here
