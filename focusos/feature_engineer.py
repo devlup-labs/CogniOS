@@ -26,7 +26,12 @@ def extract_features(df: pd.DataFrame):
 
         # mem feature engineering 
         ram_mean = df["memory_percent"].mean()
-        ram_growth_rate = ((df["memory_percent"].iloc[-1] - df["memory_percent"].iloc[0]) * scale_factor) if len(df) > 0 else 0
+        #ram_growth_rate = ((df["memory_percent"].iloc[-1] - df["memory_percent"].iloc[0]) * scale_factor) if len(df) > 0 else 0
+        n_samples = len(df)
+        chunk_size = max(1, n_samples // 10)
+        ram_start = df["memory_percent"].iloc[:chunk_size].mean()
+        ram_end = df["memory_percent"].iloc[-chunk_size:].mean()
+        ram_growth_rate = (ram_end - ram_start) * scale_factor
         
         # network: calculate true average throughput rate (MB/s) across the window
         if "net_rate_mb_s" in df.columns and df["net_rate_mb_s"].notnull().any():
