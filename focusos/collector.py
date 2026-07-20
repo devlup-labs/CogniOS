@@ -9,8 +9,8 @@ import db
 import sqlite3
 import subprocess
 import json
+from config import DB_PATH
 
-DB_PATH = "cognios_telemetry.db"
 conn = db.create_connection(DB_PATH)
 
 #collects relevant telemetry data from layer 1 table and returns it as a dictionary
