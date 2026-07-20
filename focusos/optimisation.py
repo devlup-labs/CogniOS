@@ -19,7 +19,7 @@ def apply_optimization(workload: str, confidence: float) -> bool:
   # isolating backgrounds tasks by allocating them unto the last core
   background_cores=[total_cores-1]
   foreground_cores=list(range(0,total_cores-1)) if total_cores > 1 else [0]
-  if workload.lower()=="compiler":
+  if workload.lower()=="compiling":
     #deprioritising the compilers
     count_nice=sum(prioritise_process(compiler,15) for compiler in COMPILERS)
     count_affinity=sum(pin_process_to_cores(compiler,background_cores) for compiler in COMPILERS)
