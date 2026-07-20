@@ -76,11 +76,21 @@ def train_classifier():
     # split features and labels
     X = df[FEATURE_COLUMNS].values
     y_raw = df["workload_label"].values
+
+    # fix scale features before training 
+    scaler_path=os.path.join(MODELS_DIR,"feature_scaler.pkl")
+    if os.path.exists(scaler_path):
+        scaler=joblib.load(scaler_path)
+        X=scaler.transform(X_raw)
+        print("[Classifier]Scaled feature using saved feature_scaler.pkl")
+    else:
+        print("[Classifier] WARNING!!! feature_scaler.pkl not found Training on unscaled features")
+        X=X_raw
+
     
     # encode categorical labels to integers
     le = LabelEncoder()
     y = le.fit_transform(y_raw)
-    
     # save the label encoder
     le_path = os.path.join(MODELS_DIR, "label_encoder.pkl")
     joblib.dump(le, le_path)
