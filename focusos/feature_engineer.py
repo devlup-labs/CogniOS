@@ -68,9 +68,9 @@ def extract_features(df: pd.DataFrame):
         # We use fillna('') so .str doesn't crash on missing process names
         process_col = df["process_data"].fillna("").str.lower()
         
-        vscode_active = int(process_col.str.contains("code|code-insiders|vsls-agent|antigravity|sublime", regex=True).any())
-        browser_active = int(process_col.str.contains("chrome|firefox|brave|msedge", regex=True).any())
-        compiler_active = int(process_col.str.contains("gcc|g\\+\\+|clang|rustc|javac|make", regex=True).any())
+        vscode_active = int(process_col.str.contains("code|code-insiders|vsls-agent|antigravity|sublime", regex=True).mean())
+        browser_active = int(process_col.str.contains("chrome|firefox|brave|msedge", regex=True).mean())
+        compiler_active = int(process_col.str.contains("gcc|g\\+\\+|clang|rustc|javac|make", regex=True).mean())
         
         features = {
             "cpu_mean": cpu_mean,
