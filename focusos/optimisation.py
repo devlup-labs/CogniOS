@@ -11,7 +11,7 @@ from config import BROWSERS
 from config import CALLS        
 from config import IDES         
 def apply_optimization(workload: str, confidence: float) -> bool:
-  if confidence < 0.80:
+  if confidence < 80:
     print(f"Optimisation aborted: Confidence for {workload} is less than 80%")
     return False
   actions = []
