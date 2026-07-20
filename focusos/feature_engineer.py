@@ -40,9 +40,8 @@ def extract_features(df: pd.DataFrame):
         #here i am calculating the coeffiecient of var = std/mean
         # 10x spike on ssd == 10x spike on hdd
         disk_combined = df["disk_write_mb_s"] + df["disk_read_mb_s"]
-        disk_mean_raw = disk_combined.mean()
-        if disk_mean_raw > 0:
-            disk_io_mean = float(disk_combined.std() / disk_mean_raw)
+        disk_io_mean = float(disk_combined.mean())
+        disk_io_burstiness = float(disk_combined.std() / disk_io_mean) if disk_io_mean > 0 else 0.0
         else:
             disk_io_mean = 0.0
         # processes
