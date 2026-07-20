@@ -1,8 +1,8 @@
 """Telemetry replay utilities."""
 
 import time
-from blackbox.recorder import get_window_rows
-from blackbox.correlation import telemetry_to_events, build_event_chain, format_chain_text
+from recorder import get_window_rows
+from correlation import telemetry_to_events, build_event_chain, format_chain_text
 
 # replay the telemetry data in the given time window and return a structured summary of events.
 def replay(conn, crash_time: float = None,
@@ -27,4 +27,23 @@ def replay(conn, crash_time: float = None,
         'timeline_text': format_chain_text(chain),
     }
 
+# Generate a context dictionary for LLM input based on the replay result and anomaly type.
+def generate_llm_context(replay_result: dict,
+                         anomaly_type: str = "unknown") -> dict:
+    chain      = replay_result.get('chain', [])
+    top_events = [f"{e['time']}: {e['detail']}" for e in chain[:5]]
 
+    # Create a prompt for the LLM that summarizes the anomaly and recent events.
+    prompt = (
+        f"A system experienced a '{anomaly_type}' event. "
+        f"In the 30 minutes before the event, the following occurred: "
+        f"{'; '.join(top_events) if top_events else 'No significant events detected'}. "
+        f"Explain in simple language: "
+        f"1. Root cause  2. Severity  3. Suggested action."
+    )
+    return {
+        "anomaly_type": anomaly_type,
+        "total_events": len(chain),
+        "timeline":     top_events,
+        "prompt":       prompt,
+    }
