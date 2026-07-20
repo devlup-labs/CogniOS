@@ -19,6 +19,7 @@ from blackbox.heartbeat import (
 from blackbox.feature_engineering import extract_feature_vector, FEATURE_NAMES
 from blackbox.zscore_detector import ZScoreDetector
 from blackbox.rule_engine import check_rules
+from blackbox.replay import replay, generate_llm_context
 
 
 PASS = "[PASS]"
@@ -292,6 +293,31 @@ check("Deduplication logic works (5s window)", len(chain) == 2, f"Expected 2 eve
 # Formatting test
 formatted = format_chain_text(chain)
 check("format_chain_text returns non-empty timeline", len(formatted) > 0)
+print()
+
+# ── Test 12: Replay & LLM Context ────────────────────────
+print("[ 12 ] Telemetry Replay & LLM Context Generation")
+now_ts = time.time()
+# Let's insert a couple of mock telemetry points to query
+conn.execute(
+    "INSERT INTO blackbox_telemetry (timestamp, cpu_usage_percent) VALUES (?, ?)",
+    (now_ts - 100, 15.0)
+)
+conn.execute(
+    "INSERT INTO blackbox_telemetry (timestamp, cpu_usage_percent) VALUES (?, ?)",
+    (now_ts - 50, 25.0)
+)
+conn.commit()
+
+replay_res = replay(conn, now_ts, window_minutes=2)
+check("replay returns a dict", isinstance(replay_res, dict))
+check("replay contains timeline_text", "timeline_text" in replay_res)
+check("replay contains event chain", "chain" in replay_res)
+
+llm_ctx = generate_llm_context(replay_res, "cpu_spike")
+check("generate_llm_context returns a dict", isinstance(llm_ctx, dict))
+check("llm_context contains prompt", "prompt" in llm_ctx)
+check("llm_context contains timeline", "timeline" in llm_ctx)
 print()
 
 # ── Summary ──────────────────────────────────────────────
