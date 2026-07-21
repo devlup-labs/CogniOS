@@ -72,28 +72,7 @@ The project is designed as both:
 
 # Architecture
 
-```
-                Linux System
-                     │
-                     ▼
-          Telemetry Collectors
-       (/proc, psutil, process APIs)
-                     │
-                     ▼
-             SQLite Database
-                     │
-     ┌───────────────┼────────────────┐
-     │               │                │
-     ▼               ▼                ▼
- OS Doctor       FocusOS         BlackBox
-     │               │                │
-     └───────────────┼────────────────┘
-                     ▼
-             Research Engine
-                     │
-                     ▼
-          Streamlit Dashboard
-```
+![alt text](./assets/image.png)
 
 ---
 
