@@ -32,3 +32,5 @@ data/traces/*
 *.sqlite3
 *.sqlite
 
+# Logs
+logs/

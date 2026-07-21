@@ -4,43 +4,64 @@ import sqlite3
 import time
 from config import DB_PATH
 
+
+def _harden_connection(conn):
+    """Best-effort per-connection pragmas. journal_mode is a one-time, whole-file
+    switch — see ensure_wal_mode() for the race-free way to enable it up front."""
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+def ensure_wal_mode(db_path=DB_PATH):
+    """Switch the DB file to WAL mode once, via a single connection, before any
+    concurrent writers open their own connections. Doing this per-connection from
+    multiple threads/processes at once races on the initial (non-WAL -> WAL) file
+    header rewrite and can raise 'database is locked' even with busy_timeout set."""
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.close()
+
 # layer 2 db code starts here
 
-def init_layer2_db():
+def create_layer2_connection(db_path=DB_PATH):
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    _harden_connection(conn)
+    return conn
+
+
+def init_layer2_db(conn):
     """Initializes the unified layer2_proc table for Layer 2 telemetry."""
-    init_db()
-
-def init_db():
-    """Initializes the unified layer2_proc table for Layer 2 telemetry."""
-    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS layer2_proc (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp           REAL    NOT NULL,
-                top_cpu_json        TEXT    NOT NULL,
-                top_ram_json        TEXT    NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_snapshot_ts
-            ON layer2_proc (timestamp)
-        """)
-        conn.commit()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS layer2_proc (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp           REAL    NOT NULL,
+            top_cpu_json        TEXT    NOT NULL,
+            top_ram_json        TEXT    NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_snapshot_ts
+        ON layer2_proc (timestamp)
+    """)
+    conn.commit()
 
 
-def write_layer2(top_cpu, top_ram):
+def write_layer2(conn, top_cpu, top_ram):
     """Writes one unified row per 5-second poll — timestamp + two compact JSON arrays."""
     row = (
         time.time(),
         json.dumps(top_cpu, separators=(',', ':')),
         json.dumps(top_ram, separators=(',', ':'))
     )
-    with sqlite3.connect(DB_PATH,timeout=10.0) as conn:
-        conn.execute(
-            "INSERT INTO layer2_proc (timestamp, top_cpu_json, top_ram_json) VALUES (?, ?, ?)",
-            row
-        )
-        conn.commit()
+    conn.execute(
+        "INSERT INTO layer2_proc (timestamp, top_cpu_json, top_ram_json) VALUES (?, ?, ?)",
+        row
+    )
+    conn.commit()
 
 # layer 2 db code ends here
 
@@ -49,8 +70,8 @@ def write_layer2(top_cpu, top_ram):
 db_path = DB_PATH
 
 def create_connection(db_path):
-    conn = sqlite3.connect(db_path,timeout=10.0)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    _harden_connection(conn)
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS layer1_sys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
