@@ -36,12 +36,12 @@ def apply_optimization(workload: str, confidence: float) -> bool:
 			background_cores = [c for c in range(total_cores) if c % 2 != 0] or [total_cores - 1]
 
 	top_cpu, top_mem = get_top_processes(5)
-	unique_processes = list({proc['pid']: proc for proc in top_cpu + top_mem}.values())
+	workload_clean = workload.lower().replace("_", " ")
 
-	if workload.lower() != "video call":
+	if workload_clean != "video call":
 			set_network_fair_queuing(False)
 
-	if workload.lower()=="compiling":
+	if workload_clean == "compiling":
 		#prioritising the compilers
 		count_nice = sum(prioritise_process(compiler,-12) for compiler in COMPILERS)
 		count_affinity = sum(pin_process_to_cores(compiler, foreground_cores) for compiler in COMPILERS)
@@ -64,7 +64,7 @@ def apply_optimization(workload: str, confidence: float) -> bool:
 			actions.append(f"Prioritised {count_nice} compiler(s), pinned {count_affinity} to core(s) {foreground_cores}, set {count_io} to idle IO")
  
  
-	elif workload.lower() == "gaming":
+	elif workload_clean == "gaming":
 		#will reset the affinity of the bg processes to free up gaming cores and pin game processes to foreground cores
 		count_nice = sum(prioritise_process(game, -10) for game in GAMES)
 		count_affinity = sum(pin_process_to_cores(game, foreground_cores) for game in GAMES)
@@ -82,7 +82,7 @@ def apply_optimization(workload: str, confidence: float) -> bool:
 			actions.append(f"Prioritised {count_nice} game process(es), granted {count_affinity} full core affinity")
 	
 	
-	elif workload.lower() == "coding":
+	elif workload_clean == "coding":
 		count_nice = sum(prioritise_process(ide, -5) for ide in IDES)
 		count_affinity = sum(pin_process_to_cores(ide, foreground_cores) for ide in IDES)
 		count_browser_aff = sum(pin_process_to_cores(browser, background_cores) for browser in BROWSERS)
@@ -91,7 +91,7 @@ def apply_optimization(workload: str, confidence: float) -> bool:
 			actions.append(f"Prioritised {count_nice} IDE process(es), pinned {count_browser_aff} browser(s) to cores {background_cores}")
 	
 	
-	elif workload.lower()=="browsing":
+	elif workload_clean == "browsing":
 		#reset all the process to normal priority and spread across all cores
 		count_nice = sum(prioritise_process(browser, 0) for browser in BROWSERS)
 		count_affinity = sum(pin_process_to_cores(browser, foreground_cores) for browser in BROWSERS)
@@ -106,7 +106,7 @@ def apply_optimization(workload: str, confidence: float) -> bool:
 			actions.append(f"Browsing: Restored {count_nice} browser(s) to normal nice priority across {count_affinity} core(s)")
 
 
-	elif workload.lower()=="video call":
+	elif workload_clean == "video call":
 		#prioritising the communication 
 		count_nice = sum(prioritise_process(call, -5) for call in CALLS)
 		count_affinity = sum(pin_process_to_cores(call, foreground_cores) for call in CALLS)
@@ -122,7 +122,7 @@ def apply_optimization(workload: str, confidence: float) -> bool:
 
 		actions.append(f"Video calling: Prioritising {count_nice} communication process")
 
-	elif workload.lower() == "idle":
+	elif workload_clean == "idle":
 		target_proc = set(COMPILERS + IDES + GAMES + BROWSERS + CALLS)
 		
 		count_nice = 0
