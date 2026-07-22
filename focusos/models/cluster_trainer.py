@@ -98,7 +98,7 @@ def collect_feature_vectors(
             )
             all_rowids = timestamps_df["id"].tolist()
  
-            STEP = 30  # rows between window starts (= 30 seconds diversity)
+            STEP = 120  # non-overlapping windows to prevent data leakage
  
             # ── slide through history, extract one feature vector per window ──
             windows_collected = 0
