@@ -47,8 +47,6 @@ def extract_features(df: pd.DataFrame):
         disk_combined = df["disk_write_mb_s"] + df["disk_read_mb_s"]
         disk_io_mean = float(disk_combined.mean())
         disk_io_burstiness = float(disk_combined.std() / disk_io_mean) if disk_io_mean > 0 else 0.0
-        else:
-            disk_io_mean = 0.0
         # processes
         process_count_mean = int(df["total_processes"].mean())
         #calculating the normalised value: threads per core
