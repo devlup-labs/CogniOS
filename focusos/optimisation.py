@@ -88,7 +88,7 @@ def apply_optimization(workload: str, confidence: float) -> bool:
 		count_browser_aff = sum(pin_process_to_cores(browser, background_cores) for browser in BROWSERS)
 		
 		if count_nice > 0:
-			actions.append(f"Prioritised {count_nice} IDE process(es), pinned {count_affinity_aff} browser(s) to cores {background_cores}")
+			actions.append(f"Prioritised {count_nice} IDE process(es), pinned {count_browser_aff} browser(s) to cores {background_cores}")
 	
 	
 	elif workload.lower()=="browsing":
@@ -218,29 +218,29 @@ def prioritise_process(proc_name: str, nice_val: int) -> int:
 	return optimised_count
 
 
-def set_io_priority(proc_name: str,io_class: int) -> int:
-	 optimised_count=0
-		for proc in psutil.process_iter(attrs=["pid","name"]):
-				current_pid=proc.info["pid"]
+def set_io_priority(proc_name: str, io_class: str, io_value: int = 0) -> int:
+	optimised_count = 0
+	for proc in psutil.process_iter(attrs=["pid", "name"]):
+		current_pid = proc.info["pid"]
+		try:
+			current_name = proc.info["name"] or ""
+			if proc_name.lower() in current_name.lower():
+				process_obj = psutil.Process(current_pid)
 				try:
-						current_name=proc.info["name"] or ""
-						if proc_name.lower() in current_name.lower():
-								process_obj=psutil.Process(current_pid)
-								try:
-										if io_class.lower() == 'b':
-												process_obj.ionice(psutil.IOPRIO_CLASS_BE, io_value)
-												optimised_count += 1
-										elif io_class.lower() == 'r':
-												process_obj.ionice(psutil.IOPRIO_CLASS_RT, io_value)
-												optimised_count += 1
-										elif io_class.lower() == 'i':
-												process_obj.ionice(psutil.IOPRIO_CLASS_IDLE)
-												optimised_count += 1
-								except (AttributeError, ValueError):
-										continue
-				except(psutil.NoSuchProcess,psutil.ZombieProcess,psutil.AccessDenied):
-						continue
-		return optimised_count
+					if io_class.lower() == 'b':
+						process_obj.ionice(psutil.IOPRIO_CLASS_BE, io_value)
+						optimised_count += 1
+					elif io_class.lower() == 'r':
+						process_obj.ionice(psutil.IOPRIO_CLASS_RT, io_value)
+						optimised_count += 1
+					elif io_class.lower() == 'i':
+						process_obj.ionice(psutil.IOPRIO_CLASS_IDLE)
+						optimised_count += 1
+				except (AttributeError, ValueError):
+					continue
+		except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied):
+			continue
+	return optimised_count
 
 
 #retrieves core details and returns as 2 lists
