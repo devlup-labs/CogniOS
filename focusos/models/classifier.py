@@ -28,11 +28,28 @@ FEATURE_COLUMNS = [
 class WorkloadPredictor:
     def __init__(self, models_dir=MODELS_DIR):
         self.models_dir = models_dir
-        self.scaler = joblib.load(os.path.join(models_dir, "scaler.pkl"))
+
+        # Load scaler (cluster_trainer.py saves feature_scaler.pkl)
+        scaler_path = os.path.join(models_dir, "feature_scaler.pkl")
+        if not os.path.exists(scaler_path):
+            scaler_path = os.path.join(models_dir, "scaler.pkl")
+
+        if not os.path.exists(scaler_path):
+            raise FileNotFoundError(
+                f"[WorkloadPredictor] Scaler artifact missing in '{models_dir}'. Please run cluster_trainer.py first."
+            )
+
+        self.scaler = joblib.load(scaler_path)
         self.label_encoder = joblib.load(os.path.join(models_dir, "label_encoder.pkl"))
         self.kmeans = joblib.load(os.path.join(models_dir, "kmeans_model.pkl"))
         self.xgb = xgb.XGBClassifier()
-        self.xgb.load_model(os.path.join(models_dir, "xgboost_model.json"))
+
+        xgb_path = os.path.join(models_dir, "xgboost_model.json")
+        if not os.path.exists(xgb_path):
+            raise FileNotFoundError(
+                f"[WorkloadPredictor] XGBoost model missing at '{xgb_path}'. Please run classifier.py training first."
+            )
+        self.xgb.load_model(xgb_path)
 
     def predict(self, features_df: pd.DataFrame) -> dict:
         if features_df is None or features_df.empty:
