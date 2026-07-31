@@ -1,52 +1,61 @@
 import pandas as pd
 import sys
 import os
+import json
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH
 
 # Import the stateless database window function
 from focusos.sliding_window import get_window_from_db
 
+
 # sliding window fetching all the 120 rows via the sliding_window module
 def extract_features(df: pd.DataFrame):
     try:
         if df is None or df.empty:
             return None
-            
-        # reversing the index so that 0 is oldest and -1 is newest
-        #df = df.iloc[::-1].reset_index(drop=True)
-        #already reversed in the sliding window
-        # cpu 
+
+        # CPU features
         cpu_mean = df["cpu_usage_percent"].mean()
         cpu_max = df["cpu_usage_percent"].max()
         cpu_variance = df["cpu_usage_percent"].var()
-        
-        # mem feature engineering 
+
+        # Memory features
         ram_mean = df["memory_percent"].mean()
-        ram_growth_rate = (df["memory_percent"].iloc[-1] - df["memory_percent"].iloc[0]) if len(df) > 0 else 0
-        
-        # network
+        ram_growth_rate = (
+            df["memory_percent"].iloc[-1] - df["memory_percent"].iloc[0]
+            if len(df) > 0
+            else 0
+        )
+
+        # Network features
         net_combined = df["net_bytes_sent"] + df["net_bytes_recv"]
         net_mean = net_combined.mean()
+
         if net_mean > 0:
-            # captures trend: positive means rising traffic, negative means falling traffic
-            net_mean = float((net_combined.iloc[-1] - net_combined.iloc[0]) / net_mean)
+            net_mean = float(
+                (net_combined.iloc[-1] - net_combined.iloc[0]) / net_mean
+            )
         else:
-            net_mean = 0.0 
-        #here i am calculating the coeffiecient of var = std/mean
-        # 10x spike on ssd == 10x spike on hdd
+            net_mean = 0.0
+
+        # Disk I/O coefficient of variation
         disk_combined = df["disk_write_mb_s"] + df["disk_read_mb_s"]
         disk_mean_raw = disk_combined.mean()
+
         if disk_mean_raw > 0:
             disk_io_mean = float(disk_combined.std() / disk_mean_raw)
         else:
             disk_io_mean = 0.0
-        # processes
+
+        # Process statistics
         process_count_mean = int(df["total_processes"].mean())
-        #calculating the normalised value: threads per core
+
         cpu_cores = os.cpu_count() or 4
+
         if "num_threads" in df.columns:
-            import json
+
             def safe_sum_threads(val):
                 if isinstance(val, str) and val.strip():
                     try:
@@ -56,18 +65,94 @@ def extract_features(df: pd.DataFrame):
                     except Exception:
                         pass
                 return 0
-            thread_count_mean = df["num_threads"].apply(safe_sum_threads).mean() / cpu_cores
+
+            thread_count_mean = (
+                df["num_threads"].apply(safe_sum_threads).mean() / cpu_cores
+            )
         else:
-            thread_count_mean = (df["total_processes"].mean() * 2.5) / cpu_cores
+            thread_count_mean = (
+                df["total_processes"].mean() * 2.5
+            ) / cpu_cores
 
-
-        # We use fillna('') so .str doesn't crash on missing process names
+        # Process detection
         process_col = df["process_data"].fillna("").str.lower()
-        
-        vscode_active = int(process_col.str.contains("code|code-insiders|vsls-agent|antigravity|sublime", regex=True).any())
-        browser_active = int(process_col.str.contains("chrome|firefox|brave|msedge", regex=True).any())
-        compiler_active = int(process_col.str.contains("gcc|g\\+\\+|clang|rustc|javac|make", regex=True).any())
-        
+
+        vscode_active = int(
+            process_col.str.contains(
+                "code|code-insiders|vsls-agent|antigravity|sublime",
+                regex=True,
+            ).any()
+        )
+
+        browser_active = int(
+            process_col.str.contains(
+                "chrome|firefox|brave|msedge",
+                regex=True,
+            ).any()
+        )
+
+      #changes this compiler active detection for testing compilation
+
+        def detect_compiler_active(df):
+            """
+            Detects compilation in two ways:
+
+            1. Direct compiler process names.
+            2. VSCode consuming high CPU while compiling.
+            """
+
+            compiler_names = {
+                "gcc",
+                "cc1",
+                "cc1plus",
+                "g++",
+                "clang",
+                "clang++",
+                "rustc",
+                "javac",
+                "make",
+                "ninja",
+                "cargo",
+                "ld",
+                "as",
+                "collect2",
+                "cmake",
+            }
+
+            for _, row in df.iterrows():
+
+                try:
+                    raw = row.get("process_data", "")
+
+                    if not raw or not isinstance(raw, str):
+                        continue
+
+                    processes = json.loads(raw)
+
+                    for proc in processes:
+
+                        if not proc or len(proc) < 2:
+                            continue
+
+                        name = str(proc[0]).lower()
+                        cpu = float(proc[1]) if len(proc) > 1 else 0
+
+                        # Way 1: compiler process detected
+                        if any(comp in name for comp in compiler_names):
+                            return 1
+
+                        # Way 2: VSCode using high CPU
+                        if "code" in name and cpu > 50:
+                            return 1
+
+                except (json.JSONDecodeError, ValueError, IndexError, TypeError):
+                    continue
+
+            return 0
+
+        compiler_active = detect_compiler_active(df)
+
+        # Feature vector
         features = {
             "cpu_mean": cpu_mean,
             "cpu_max": cpu_max,
@@ -82,17 +167,28 @@ def extract_features(df: pd.DataFrame):
             "browser_active": browser_active,
             "compiler_active": compiler_active,
         }
+
         features_df = pd.DataFrame([features])
+
         return features_df
-        
+
     except Exception as e:
         print(f"Window Extraction Error: {e}")
         return None
 
+
 if __name__ == "__main__":
     print("Fetching window from database...")
+
     df = get_window_from_db()
+
     if df is not None:
-        extract_features(df)
+        features = extract_features(df)
+
+        if features is not None:
+            print(features)
     else:
         print("Not enough data or database empty.")
+
+
+

@@ -39,10 +39,18 @@ class WorkloadPredictor:
             return None
 
         # scaling the incoming feature_vector
+        print("\nIncoming features:")
+        print(features_df.to_string(index=False))
         scaled = self.scaler.transform(features_df)
         
         # predicting the workload using xgboost
         probs = self.xgb.predict_proba(scaled)[0]
+
+        # temporary adding 3 lines
+        print("\nPrediction probabilities:")
+        for label, prob in zip(self.label_encoder.classes_, probs):
+            print(f"{label:12} : {prob:.4f}")
+
         pred_idx = int(np.argmax(probs))
         workload_name = str(self.label_encoder.inverse_transform([pred_idx])[0])
 
@@ -77,6 +85,26 @@ def train_classifier():
     X = df[FEATURE_COLUMNS].values
     y_raw = df["workload_label"].values
     
+    # split features and labels
+    X = df[FEATURE_COLUMNS].values
+    y_raw = df["workload_label"].values
+
+# ----------------------------------------------------
+# Scale features using the SAME scaler from KMeans
+# ----------------------------------------------------
+    scaler_path = os.path.join(MODELS_DIR, "scaler.pkl")
+
+    if not os.path.exists(scaler_path):
+        raise FileNotFoundError(
+        f"Scaler not found at {scaler_path}. "
+        "Run cluster_trainer.py first."
+    )
+
+    scaler = joblib.load(scaler_path)
+    X = scaler.transform(X)
+
+    print("[classifier] Features scaled using saved StandardScaler.")
+
     # encode categorical labels to integers
     le = LabelEncoder()
     y = le.fit_transform(y_raw)

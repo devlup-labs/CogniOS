@@ -9,7 +9,7 @@ print("Starting CogniOS System...")
 telemetry_log = open('telemetry_daemon.log', 'w')
 telemetry_process = subprocess.Popen(
     [sys.executable, "cognios_as_daemon.py"], 
-    stdout=telemetry_log, 
+    stdout=telemetry_log,
     stderr=telemetry_log
 )
 print(f"Telemetry Daemon started! (PID: {telemetry_process.pid})")
@@ -41,6 +41,10 @@ def run_focusos():
         if df_window is not None:
             features = extract_features(df_window)
             if features is not None:
+                print("\n========== LIVE FEATURE VECTOR ==========")
+                print(features.to_string(index=False))
+                print("=========================================\n")
+
                 result = predictor.predict(features)
                 if result:
                     print(f"[{time.strftime('%H:%M:%S')}] Detected: {result['workload']} ({result['confidence']}%)")
