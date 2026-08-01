@@ -6,24 +6,29 @@ from db import create_connection, write_layer1
 from collectors.layer1_system import collect_layer1_metrics
 from config import DB_PATH
 
-from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_telemetry
+from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_telemetry, get_recent_rows
 from blackbox.heartbeat import (
     create_heartbeat_table,
     update_heartbeat,
     check_crash_on_startup,
     mark_graceful_shutdown,
 )
+from blackbox.rule_engine import check_rules
+from blackbox.zscore_detector import ZScoreDetector
+from blackbox.feature_engineering import extract_feature_vector
+from blackbox.anomaly_model import load_model, predict, anomaly_severity
+from blackbox.replay import replay
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+ANOMALY_CHECK_INTERVAL_SEC = 120  # Isolation Forest check cadence
 
 
 def run_daemon():
     logging.info(f"Starting CogniOS Daemon. Saving metrics to '{DB_PATH}' every 1 second.")
 
-    # Permanent DB connection
     conn = create_connection(DB_PATH)
 
-    # BlackBox rolling-window DB setup
     bb_conn = get_blackbox_conn()
     create_blackbox_table(bb_conn)
     create_heartbeat_table(bb_conn)
@@ -31,11 +36,30 @@ def run_daemon():
     crashed, gap = check_crash_on_startup(bb_conn)
     if crashed:
         logging.warning(f"Previous session may have crashed! Gap = {gap}s")
+        result = replay(bb_conn)
+        logging.warning("BlackBox pre-crash timeline:\n" + result['timeline_text'])
     else:
         logging.info(f"Previous session ended cleanly (gap = {gap:.1f}s)")
 
+    # ── Detection layers ──────────────────────────────────
+    detectors = {
+        'cpu':    ZScoreDetector(),
+        'memory': ZScoreDetector(),
+    }
+
+    try:
+        anomaly_model = load_model()
+        logging.info("Isolation Forest model loaded — multi-metric detection enabled.")
+    except FileNotFoundError:
+        anomaly_model = None
+        logging.info("No trained Isolation Forest model found — running with "
+                     "rule_engine + zscore only.")
+
+    tick = 0
+
     try:
         while True:
+            tick += 1
             try:
                 metrics = collect_layer1_metrics()
 
@@ -84,9 +108,34 @@ def run_daemon():
                     json.dumps(metrics['process_data'])
                 )
 
-                # --- Write to BlackBox rolling-window DB (blackbox/blackbox.db) ---
+                # --- Write to BlackBox rolling-window DB ---
                 write_telemetry(bb_conn, metrics)
                 update_heartbeat(bb_conn)
+
+                # --- Rule engine (always runs, no warmup needed) ---
+                rule_alerts = check_rules(metrics)
+                for alert in rule_alerts:
+                    logging.warning(f"[Rule] {alert['message']}")
+
+                # --- Z-score detection ---
+                for key, mkey in [('cpu', 'cpu_usage_percent'), ('memory', 'memory_percent')]:
+                    val = metrics.get(mkey) or 0
+                    detectors[key].update(val)
+                    for issue in detectors[key].check(val, metric_name=key):
+                        logging.warning(f"[ZScore] {issue['msg']}")
+
+                # --- Isolation Forest (every ANOMALY_CHECK_INTERVAL_SEC) ---
+                if anomaly_model is not None and tick % ANOMALY_CHECK_INTERVAL_SEC == 0:
+                    rows = get_recent_rows(bb_conn, n=120)
+                    vec = extract_feature_vector(rows)
+                    if vec is not None:
+                        label, score = predict(anomaly_model, vec)
+                        if label == -1:
+                            severity = anomaly_severity(score)
+                            logging.warning(
+                                f"[IsolationForest] ANOMALY detected — "
+                                f"score={score:.4f} severity={severity}/100"
+                            )
 
                 logging.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
 
