@@ -40,7 +40,7 @@ class WorkloadPredictor:
             return None
 
         # scaling the incoming feature_vector
-        scaled = self.scaler.transform(features_df)
+        scaled = self.scaler.transform(features_df.values)
         
         # predicting the workload using xgboost
         probs = self.xgb.predict_proba(scaled)[0]
