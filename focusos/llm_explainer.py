@@ -13,7 +13,28 @@ except ImportError:
     except ImportError:
         DDG_avail = False
 
-# API key fallback to test key if env var is not set
+# Load API keys from .env file
+def _load_env():
+    # Try importing dotenv
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+    
+    # Fallback manual parser for .env
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    for path in [os.path.join(base_dir, '.env'), os.path.join(os.path.dirname(base_dir), '.env'), '.env']:
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        k, v = line.split('=', 1)
+                        os.environ[k.strip()] = v.strip().strip('"').strip("'")
+            break
+
+_load_env()
 gemini_api_key = os.getenv("gem_api_key")
 gemma_api_key = os.getenv("gemma_api_key")
 def get_top_features(feature_importances: dict, current_values: dict, top_n: int = 3) -> dict:
