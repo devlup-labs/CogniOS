@@ -49,6 +49,39 @@ def try_gemma_explanation(system_prompt: str, user_prompt: str, model_name: str 
     if not gemma_api_key:
         raise ValueError("Gemma API key is not set.")
     
+    # Detect OpenRouter key and call via HTTP requests
+    if gemma_api_key.startswith("sk-or-"):
+        import requests
+        # OpenRouter models usually need the org prefix, e.g., "google/gemma-2-27b-it"
+        # We'll use the model_name as provided
+        headers = {
+            "Authorization": f"Bearer {gemma_api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 4000
+        }
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=15
+        )
+        if response.status_code == 200:
+            res_data = response.json()
+            if "choices" in res_data and len(res_data["choices"]) > 0:
+                return res_data["choices"][0]["message"]["content"].strip()
+            raise ValueError(f"Unexpected OpenRouter response format: {res_data}")
+        else:
+            raise ValueError(f"OpenRouter HTTP Error {response.status_code}: {response.text}")
+
+    # Fallback to Google GenAI SDK (expects Google Gemini API key)
     client = genai.Client(api_key=gemma_api_key)
     response = client.models.generate_content(
         model=model_name,
