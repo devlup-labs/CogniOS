@@ -7,7 +7,8 @@ CLUSTER_TO_WORKLOAD = {
     1: "Compiling",   
     2: "Idle",         
     3: "Video_Call",   
-    4: "Gaming",       
+    4: "Gaming",     
+    5: "Browsing",  
 }
 
 #FUNCTION to check the correct mapping here
@@ -37,7 +38,7 @@ WORKLOAD_OPTIMIZATION_PROFILE = {
         "description":         "Boosting compiler processes for faster build times",
     },
     "Video_Call": {
-        "process_keywords":    ["zoom", "teams", "chrome", "firefox", "brave", "msedge"],
+        "process_keywords":    ["zoom", "teams","slack","discord","skype","webex"],
         "deprioritize_others": True,
         "nice_value":          -5,
         "description":         "Boosting video call app for smooth audio and video",

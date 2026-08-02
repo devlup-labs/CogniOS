@@ -34,16 +34,25 @@ from focusos.sliding_window import get_window_from_db
 import time 
 
 def run_focusos():
-    predictor = WorkloadPredictor()
+    try:
+        predictor = WorkloadPredictor()
+    except Exception as e:
+        print(f"[FocusOS] Model initialization warning: {e}")
+        print("[FocusOS] Telemetry collection is active. Please train the model when enough telemetry is collected.")
+        return
+
     print("FocusOS model inference testing...")
     while True:
-        df_window = get_window_from_db()
-        if df_window is not None:
-            features = extract_features(df_window)
-            if features is not None:
-                result = predictor.predict(features)
-                if result:
-                    print(f"[{time.strftime('%H:%M:%S')}] Detected: {result['workload']} ({result['confidence']}%)")
+        try:
+            df_window = get_window_from_db()
+            if df_window is not None:
+                features = extract_features(df_window)
+                if features is not None:
+                    result = predictor.predict(features)
+                    if result:
+                        print(f"[{time.strftime('%H:%M:%S')}] Detected: {result['workload']} ({result['confidence']}%)")
+        except Exception as e:
+            print(f"[FocusOS] Prediction error: {e}")
         time.sleep(2)
 
 if __name__ == "__main__":
