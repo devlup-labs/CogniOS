@@ -18,10 +18,9 @@ from blackbox.zscore_detector import ZScoreDetector
 from blackbox.feature_engineering import extract_feature_vector
 from blackbox.anomaly_model import load_model, predict, anomaly_severity
 from blackbox.replay import replay
+from config import ANOMALY_CHECK_INTERVAL_SEC 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-ANOMALY_CHECK_INTERVAL_SEC = 120  # Isolation Forest check cadence
 
 
 def run_daemon():
