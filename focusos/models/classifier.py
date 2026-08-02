@@ -28,28 +28,12 @@ FEATURE_COLUMNS = [
 class WorkloadPredictor:
     def __init__(self, models_dir=MODELS_DIR):
         self.models_dir = models_dir
-
-        # Load scaler (cluster_trainer.py saves feature_scaler.pkl)
-        scaler_path = os.path.join(models_dir, "feature_scaler.pkl")
-        if not os.path.exists(scaler_path):
-            scaler_path = os.path.join(models_dir, "scaler.pkl")
-
-        if not os.path.exists(scaler_path):
-            raise FileNotFoundError(
-                f"[WorkloadPredictor] Scaler artifact missing in '{models_dir}'. Please run cluster_trainer.py first."
-            )
-
-        self.scaler = joblib.load(scaler_path)
+        self.scaler = joblib.load(os.path.join(models_dir, "scaler.pkl"))
         self.label_encoder = joblib.load(os.path.join(models_dir, "label_encoder.pkl"))
         self.kmeans = joblib.load(os.path.join(models_dir, "kmeans_model.pkl"))
         self.xgb = xgb.XGBClassifier()
+        self.xgb.load_model(os.path.join(models_dir, "xgboost_model.json"))
 
-        xgb_path = os.path.join(models_dir, "xgboost_model.json")
-        if not os.path.exists(xgb_path):
-            raise FileNotFoundError(
-                f"[WorkloadPredictor] XGBoost model missing at '{xgb_path}'. Please run classifier.py training first."
-            )
-        self.xgb.load_model(xgb_path)
 
     def predict(self, features_df: pd.DataFrame) -> dict:
         if features_df is None or features_df.empty:
@@ -94,15 +78,18 @@ def train_classifier():
     X = df[FEATURE_COLUMNS].values
     y_raw = df["workload_label"].values
 
-    # fix scale features before training 
-    scaler_path=os.path.join(MODELS_DIR,"feature_scaler.pkl")
-    if os.path.exists(scaler_path):
-        scaler=joblib.load(scaler_path)
-        X=scaler.transform(X)
-        print("[Classifier]Scaled feature using saved feature_scaler.pkl")
-    else:
-        print("[Classifier] WARNING!!! feature_scaler.pkl not found Training on unscaled features")
-
+    scaler_path = os.path.join(MODELS_DIR, "scaler.pkl")
+    
+    if not os.path.exists(scaler_path):
+            raise FileNotFoundError(
+            f"Scaler not found at {scaler_path}. "
+            "Run cluster_trainer.py first."
+    )
+    
+    scaler = joblib.load(scaler_path)
+    X = scaler.transform(X)
+    
+    print("[classifier] Features scaled using saved StandardScaler.")
     
     # encode categorical labels to integers
     le = LabelEncoder()
