@@ -1,10 +1,20 @@
-"""Daemon entry point for CogniOS — writes to both permanent DB and BlackBox rolling window."""
+"""Daemon entry point for CogniOS — runs Layer 1 and Layer 2 collection concurrently."""
 import time
 import json
-import logging
-from db import create_connection, write_layer1
+import signal
+import threading
+from db import (
+    create_connection,
+    write_layer1,
+    create_layer2_connection,
+    init_layer2_db,
+    write_layer2,
+    ensure_wal_mode,
+)
 from collectors.layer1_system import collect_layer1_metrics
+from collectors.layer2_process import collect_layer2_metrics
 from config import DB_PATH
+from logging_utils import get_layer_logger
 
 from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_telemetry
 from blackbox.heartbeat import (
@@ -14,28 +24,24 @@ from blackbox.heartbeat import (
     mark_graceful_shutdown,
 )
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+def run_layer1_loop(stop_event):
+    logger = get_layer_logger("layer1")
+    logger.info(f"Starting Layer 1 collection. Saving metrics to '{DB_PATH}' every 1 second.")
 
-def run_daemon():
-    logging.info(f"Starting CogniOS Daemon. Saving metrics to '{DB_PATH}' every 1 second.")
-
-    # Permanent DB connection
     conn = create_connection(DB_PATH)
-
-    # BlackBox rolling-window DB setup
     bb_conn = get_blackbox_conn()
     create_blackbox_table(bb_conn)
     create_heartbeat_table(bb_conn)
 
     crashed, gap = check_crash_on_startup(bb_conn)
     if crashed:
-        logging.warning(f"Previous session may have crashed! Gap = {gap}s")
+        logger.warning(f"Previous session may have crashed! Gap = {gap}s")
     else:
-        logging.info(f"Previous session ended cleanly (gap = {gap:.1f}s)")
+        logger.info(f"Previous session ended cleanly (gap = {gap:.1f}s)")
 
     try:
-        while True:
+        while not stop_event.is_set():
             try:
                 metrics = collect_layer1_metrics()
 
@@ -89,19 +95,62 @@ def run_daemon():
                 write_telemetry(bb_conn, metrics)
                 update_heartbeat(bb_conn)
 
-                logging.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
+                logger.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
 
             except Exception as e:
-                logging.error(f"Error collecting or writing metrics: {e}")
+                logger.error(f"Error collecting or writing metrics: {e}")
 
             time.sleep(1)
 
-    except KeyboardInterrupt:
-        logging.info("Stopping CogniOS Daemon. Shutting down gracefully...")
-        mark_graceful_shutdown(bb_conn)
     finally:
+        logger.info("Stopping Layer 1 collection. Shutting down gracefully...")
+        mark_graceful_shutdown(bb_conn)
         conn.close()
         bb_conn.close()
+
+
+def run_layer2_loop(stop_event):
+    logger = get_layer_logger("layer2")
+    conn = create_layer2_connection()
+    init_layer2_db(conn)
+    baselines = {}
+    logger.info("Starting Layer 2 collection.")
+
+    try:
+        while not stop_event.is_set():
+            top_cpu, top_mem, baselines = collect_layer2_metrics(baselines)
+            write_layer2(conn, top_cpu, top_mem)
+            logger.info(
+                f"Snapshot committed at t={time.time():.0f} | "
+                f"top_cpu={top_cpu[0]['name']} score={top_cpu[0]['cpu_score']} | "
+                f"top_ram={top_mem[0]['name']} score={top_mem[0]['ram_score']}"
+            )
+    finally:
+        logger.info("Stopping Layer 2 collection. Shutting down gracefully...")
+        conn.close()
+
+
+def run_daemon():
+    ensure_wal_mode(DB_PATH)
+
+    stop_event = threading.Event()
+
+    def _request_shutdown(signum, frame):
+        stop_event.set()
+
+    # Explicit handlers so shutdown works even when backgrounded/orphaned, where
+    # the shell has already set SIGINT to be ignored and Python's default
+    # KeyboardInterrupt handler never gets installed at startup.
+    signal.signal(signal.SIGINT, _request_shutdown)
+    signal.signal(signal.SIGTERM, _request_shutdown)
+
+    t1 = threading.Thread(target=run_layer1_loop, args=(stop_event,), daemon=True)
+    t2 = threading.Thread(target=run_layer2_loop, args=(stop_event,), daemon=True)
+    t1.start()
+    t2.start()
+
+    while t1.is_alive() or t2.is_alive():
+        time.sleep(1)
 
 
 if __name__ == "__main__":
