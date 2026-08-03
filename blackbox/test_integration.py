@@ -2,7 +2,7 @@ import sqlite3
 import time
 import sys
 import os
-from correlation import telemetry_to_events, build_event_chain, format_chain_text
+from blackbox.correlation import telemetry_to_events, build_event_chain, format_chain_text
 
 sys.path.insert(0, '.')
 
@@ -318,6 +318,63 @@ llm_ctx = generate_llm_context(replay_res, "cpu_spike")
 check("generate_llm_context returns a dict", isinstance(llm_ctx, dict))
 check("llm_context contains prompt", "prompt" in llm_ctx)
 check("llm_context contains timeline", "timeline" in llm_ctx)
+print()
+
+# ── Test 13: Anomaly Model (Isolation Forest) ──────────────
+print("[ 13 ] Anomaly Model (Isolation Forest)")
+from blackbox.anomaly_model import train, predict, anomaly_severity, save_model, load_model
+
+# 1. Prepare synthetic normal training data (30 feature vectors of length 8)
+# normal feature: [mean_cpu, max_cpu, cpu_growth_rate, cpu_variance, mean_ram, memory_growth_rate, disk_spike_frequency, context_switch_rate]
+normal_data = []
+for i in range(40):
+    normal_data.append([
+        10.0 + (i % 5),        # mean_cpu around 10-14
+        15.0 + (i % 10),       # max_cpu around 15-24
+        0.1 * (i % 3),         # cpu_growth_rate small
+        1.5 + (i % 2),         # cpu_variance small
+        45.0 + (i % 4),        # mean_ram around 45-48
+        0.05 * (i % 2),        # memory_growth_rate small
+        0.0,                   # disk_spike_frequency
+        12000.0 + (i * 10)     # context_switch_rate normal
+    ])
+
+# Train the model
+model = train(normal_data, contamination=0.05)
+check("Model trained successfully", model is not None)
+
+# Predict normal sample
+normal_sample = [12.0, 18.0, 0.2, 1.8, 46.0, 0.04, 0.0, 12200.0]
+label_norm, score_norm = predict(model, normal_sample)
+check("Normal sample prediction label is 1", label_norm == 1, f"label={label_norm}, score={score_norm}")
+
+# Predict anomalous sample
+anomalous_sample = [95.0, 100.0, 8.0, 50.0, 92.0, 2.5, 10.0, 95000.0]
+label_anom, score_anom = predict(model, anomalous_sample)
+check("Anomalous sample prediction label is -1", label_anom == -1, f"label={label_anom}, score={score_anom}")
+
+# Check severity conversion
+sev_norm = anomaly_severity(score_norm)
+sev_anom = anomaly_severity(score_anom)
+check("Normal severity is low", sev_norm < 50, f"severity={sev_norm} for score={score_norm}")
+check("Anomalous severity is high", sev_anom > 50, f"severity={sev_anom} for score={score_anom}")
+
+# Model save & load
+test_model_path = "blackbox/test_if_model.pkl"
+try:
+    save_model(model, test_model_path)
+    check("Model saved to disk", os.path.exists(test_model_path))
+    
+    loaded_model = load_model(test_model_path)
+    check("Model loaded from disk", loaded_model is not None)
+    
+    # Verify loaded model predictions
+    label_loaded, score_loaded = predict(loaded_model, anomalous_sample)
+    check("Loaded model predictions match original", label_loaded == label_anom and score_loaded == score_anom,
+          f"Loaded label={label_loaded}, score={score_loaded}")
+finally:
+    if os.path.exists(test_model_path):
+        os.remove(test_model_path)
 print()
 
 # ── Summary ──────────────────────────────────────────────

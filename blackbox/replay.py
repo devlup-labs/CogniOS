@@ -1,8 +1,8 @@
 """Telemetry replay utilities."""
 
 import time
-from recorder import get_window_rows
-from correlation import telemetry_to_events, build_event_chain, format_chain_text
+from blackbox.recorder import get_window_rows
+from blackbox.correlation import telemetry_to_events, build_event_chain, format_chain_text
 
 # replay the telemetry data in the given time window and return a structured summary of events.
 def replay(conn, crash_time: float = None,

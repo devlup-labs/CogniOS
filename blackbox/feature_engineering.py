@@ -24,7 +24,7 @@ def extract_feature_vector(rows: list[dict]) -> list[float] | None:
         return [r[key] for r in rows if r.get(key) is not None]
     
 
-    rows = list(reversed(rows))
+    # rows = list(reversed(rows))
 
     cpu    = safe_list("cpu_usage_percent")
     mem    = safe_list("memory_percent")
