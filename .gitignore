@@ -18,6 +18,8 @@ cognios_telemetry.db
 *.db-wal
 data/models/*.pt
 data/traces/*
+blackbox/blackbox.db-shm
+blackbox/blackbox.db-wal
 
 # Keep data directories present in git if marker files are added.
 !data/traces/.gitkeep

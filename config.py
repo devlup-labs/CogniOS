@@ -29,3 +29,9 @@ BLACKBOX_MEM_CRITICAL  = 90.0 # critical memory usage threshold
 BLACKBOX_ZOMBIE_LIMIT  = 10   # limit for zombie processes
 BLACKBOX_TEMP_CRITICAL = 85.0 # critical temperature threshold
 BLACKBOX_SWAP_CRITICAL = 80.0 # critical swap usage threshold
+
+TRAINING_DATA_PATH = "blackbox/training_vectors.jsonl"
+COLLECT_INTERVAL_SEC = 30
+ROWS_PER_VECTOR = 120  # ~2 min of telemetry per feature vector
+ANOMALY_CHECK_INTERVAL_SEC = 120  # Isolation Forest check cadence
+

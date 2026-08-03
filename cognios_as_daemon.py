@@ -16,13 +16,19 @@ from collectors.layer2_process import collect_layer2_metrics
 from config import DB_PATH
 from logging_utils import get_layer_logger
 
-from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_telemetry
+from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_telemetry, get_recent_rows
 from blackbox.heartbeat import (
     create_heartbeat_table,
     update_heartbeat,
     check_crash_on_startup,
     mark_graceful_shutdown,
 )
+from blackbox.rule_engine import check_rules
+from blackbox.zscore_detector import ZScoreDetector
+from blackbox.feature_engineering import extract_feature_vector
+from blackbox.anomaly_model import load_model, predict, anomaly_severity
+from blackbox.replay import replay
+from config import ANOMALY_CHECK_INTERVAL_SEC 
 
 
 def run_layer1_loop(stop_event):
@@ -37,11 +43,30 @@ def run_layer1_loop(stop_event):
     crashed, gap = check_crash_on_startup(bb_conn)
     if crashed:
         logger.warning(f"Previous session may have crashed! Gap = {gap}s")
+        result = replay(bb_conn)
+        logger.warning("BlackBox pre-crash timeline:\n" + result['timeline_text'])
     else:
         logger.info(f"Previous session ended cleanly (gap = {gap:.1f}s)")
 
+    # ── Detection layers ──────────────────────────────────
+    detectors = {
+        'cpu':    ZScoreDetector(),
+        'memory': ZScoreDetector(),
+    }
+
+    try:
+        anomaly_model = load_model()
+        logger.info("Isolation Forest model loaded — multi-metric detection enabled.")
+    except FileNotFoundError:
+        anomaly_model = None
+        logger.info("No trained Isolation Forest model found — running with "
+                     "rule_engine + zscore only.")
+
+    tick = 0
+
     try:
         while not stop_event.is_set():
+            tick += 1
             try:
                 metrics = collect_layer1_metrics()
 
@@ -91,9 +116,34 @@ def run_layer1_loop(stop_event):
                     json.dumps(metrics['num_threads'])
                 )
 
-                # --- Write to BlackBox rolling-window DB (blackbox/blackbox.db) ---
+                # --- Write to BlackBox rolling-window DB ---
                 write_telemetry(bb_conn, metrics)
                 update_heartbeat(bb_conn)
+
+                # --- Rule engine (always runs, no warmup needed) ---
+                rule_alerts = check_rules(metrics)
+                for alert in rule_alerts:
+                    logger.warning(f"[Rule] {alert['message']}")
+
+                # --- Z-score detection ---
+                for key, mkey in [('cpu', 'cpu_usage_percent'), ('memory', 'memory_percent')]:
+                    val = metrics.get(mkey) or 0
+                    detectors[key].update(val)
+                    for issue in detectors[key].check(val, metric_name=key):
+                        logger.warning(f"[ZScore] {issue['msg']}")
+
+                # --- Isolation Forest (every ANOMALY_CHECK_INTERVAL_SEC) ---
+                if anomaly_model is not None and tick % ANOMALY_CHECK_INTERVAL_SEC == 0:
+                    rows = get_recent_rows(bb_conn, n=120)
+                    vec = extract_feature_vector(rows)
+                    if vec is not None:
+                        label, score = predict(anomaly_model, vec)
+                        if label == -1:
+                            severity = anomaly_severity(score)
+                            logger.warning(
+                                f"[IsolationForest] ANOMALY detected — "
+                                f"score={score:.4f} severity={severity}/100"
+                            )
 
                 logger.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
 
@@ -107,51 +157,3 @@ def run_layer1_loop(stop_event):
         mark_graceful_shutdown(bb_conn)
         conn.close()
         bb_conn.close()
-
-
-def run_layer2_loop(stop_event):
-    logger = get_layer_logger("layer2")
-    conn = create_layer2_connection()
-    init_layer2_db(conn)
-    baselines = {}
-    logger.info("Starting Layer 2 collection.")
-
-    try:
-        while not stop_event.is_set():
-            top_cpu, top_mem, baselines = collect_layer2_metrics(baselines)
-            write_layer2(conn, top_cpu, top_mem)
-            logger.info(
-                f"Snapshot committed at t={time.time():.0f} | "
-                f"top_cpu={top_cpu[0]['name']} score={top_cpu[0]['cpu_score']} | "
-                f"top_ram={top_mem[0]['name']} score={top_mem[0]['ram_score']}"
-            )
-    finally:
-        logger.info("Stopping Layer 2 collection. Shutting down gracefully...")
-        conn.close()
-
-
-def run_daemon():
-    ensure_wal_mode(DB_PATH)
-
-    stop_event = threading.Event()
-
-    def _request_shutdown(signum, frame):
-        stop_event.set()
-
-    # Explicit handlers so shutdown works even when backgrounded/orphaned, where
-    # the shell has already set SIGINT to be ignored and Python's default
-    # KeyboardInterrupt handler never gets installed at startup.
-    signal.signal(signal.SIGINT, _request_shutdown)
-    signal.signal(signal.SIGTERM, _request_shutdown)
-
-    t1 = threading.Thread(target=run_layer1_loop, args=(stop_event,), daemon=True)
-    t2 = threading.Thread(target=run_layer2_loop, args=(stop_event,), daemon=True)
-    t1.start()
-    t2.start()
-
-    while t1.is_alive() or t2.is_alive():
-        time.sleep(1)
-
-
-if __name__ == "__main__":
-    run_daemon()
