@@ -68,7 +68,7 @@ expected_columns = [
     "ram_4_open_fds",             
     "ram_5_peak_gradient",
     "ram_5_peak",                 
-    "ram_5_open_fds_gradient"
+    "ram_5_open_fds_gradient",
     "ram_5_open_fds"
 ]
 

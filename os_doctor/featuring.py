@@ -171,7 +171,7 @@ def build_unified_vector(sys_vec, proc_vec):
     metadata_payload = df_unified[metadata_cols].iloc[0].to_dict()
 
     cols_to_drop = [col for col in df_unified.columns
-                         if col.endswith('_name_gradient') or col.endswith('_id_gradient') or col.endswith('_id') or col.endswith('_ppid_gradient') or col.endswith('_ppid') or col.endswith('_status_gradient') or col.endswith('_pid') or col.endswith('_pid_gradient') or col.endswith('_status')]
+                         if col.endswith('_name_gradient') or col.endswith('_name') or col.endswith('_id_gradient') or col.endswith('_id') or col.endswith('_ppid_gradient') or col.endswith('_ppid') or col.endswith('_status_gradient') or col.endswith('_pid') or col.endswith('_pid_gradient') or col.endswith('_status')]
     
     ml_features_df = df_unified.drop(columns=cols_to_drop)
 
