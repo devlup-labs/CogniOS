@@ -81,6 +81,7 @@ def extract_and_engineer_sys(db_path, window_size=120):
 
     for col in gradient_cols:
         flat_sys_dict[f'{col}_gradient'] = round(df_sys[f'{col}_gradient'].iloc[-1], 2)
+        flat_sys_dict[f'{col}'] = round(df_sys[f'{col}'].iloc[-1], 2)
 
     for col in deviation_cols:
         rolling_baseline = df_sys[col].rolling(window=120, min_periods=1).mean()
@@ -89,11 +90,13 @@ def extract_and_engineer_sys(db_path, window_size=120):
 
     for col in deviation_cols:
         flat_sys_dict[f'{col}_deviation'] = round(df_sys[f'{col}_deviation'].iloc[-1], 2)
+        flat_sys_dict[f'{col}'] = round(df_sys[f'{col}'].iloc[-1], 2)
 
     # Convert to a single-row 2D DataFrame [1, num_sys_features]
     sys_vec = pd.DataFrame([flat_sys_dict])
     sys_vec['timestamp'] = latest_timestamp  # Add timestamp 
-    # print(sys_vec)
+    # for col in sys_vec.columns:
+    #     print(col)
     return sys_vec
 
 def extract_and_engineer_processes(db_path, window_size=24):
@@ -147,6 +150,7 @@ def extract_and_engineer_processes(db_path, window_size=24):
     
     for col in cols:
         flat_proc_dict[f'{col}_gradient'] = round(df_raw[f'{col}_gradient'].iloc[-1], 2)
+        flat_proc_dict[f'{col}'] = round(df_raw[f'{col}'].iloc[-1], 2)
 
     
     proc_vec = pd.DataFrame([flat_proc_dict])
@@ -161,12 +165,16 @@ def build_unified_vector(sys_vec, proc_vec):
 
     df_unified = pd.concat([sys_vec, proc_vec], axis=1)
     
+
     metadata_cols = [col for col in df_unified.columns
-                     if col.endswith('_name_gradient') or col.endswith('id_gradient') or col.endswith('_ppid_gradient') or col.endswith('_status_gradient')]
-    
+                             if col.endswith('_name') or col.endswith('_id') or col.endswith('_ppid') or col.endswith('_pid') or col.endswith('_status')]
     metadata_payload = df_unified[metadata_cols].iloc[0].to_dict()
+
+    cols_to_drop = [col for col in df_unified.columns
+                         if col.endswith('_name_gradient') or col.endswith('_id_gradient') or col.endswith('_id') or col.endswith('_ppid_gradient') or col.endswith('_ppid') or col.endswith('_status_gradient') or col.endswith('_pid') or col.endswith('_pid_gradient') or col.endswith('_status')]
     
-    ml_features_df = df_unified.drop(columns=metadata_cols)
+    ml_features_df = df_unified.drop(columns=cols_to_drop)
+
     
     # ml_features_df = ml_features_df.reindex(sorted(ml_features_df.columns), axis=1)
 
@@ -313,12 +321,7 @@ def get_inference_payload(db_path, scaler=None):
         # NEW: 5. Scale numerical features only (transform-only, no fit)
         if scaler is not None:
             ml_features_df = scale_features(ml_features_df, scaler)
-
-        # for col in ml_features_df.columns:
-        #     print(f"{col}: {ml_features_df[col].iloc[0]}")
-        # print(ml_features_df)
-        # print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-        # print(metadata)
+        
         return ml_features_df, metadata
 
     except Exception as e:

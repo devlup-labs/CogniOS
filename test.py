@@ -13,7 +13,11 @@ if __name__ == "__main__":
     # train_isolation_forest_model()
     # extract_and_engineer_sys(DB_PATH)
     # extract_and_engineer_processes(DB_PATH)
-    # get_inference_payload(DB_PATH)
+    # ml_features_df, metadata = get_inference_payload(DB_PATH)
+    # for col in ml_features_df.columns:
+    #     print(col)
+    # print(metadata)
     # train_isolation_forest_model()
     # flag_anomaly()
+    # execute_os_doctor_db()
     
