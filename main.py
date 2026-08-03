@@ -48,6 +48,10 @@ def run_focusos():
             if df_window is not None:
                 features = extract_features(df_window)
                 if features is not None:
+                    print("\n========== LIVE FEATURE VECTOR ==========")
+                    print(features.to_string(index=False))
+                    print("=========================================\n")
+                    
                     result = predictor.predict(features)
                     if result:
                         print(f"[{time.strftime('%H:%M:%S')}] Detected: {result['workload']} ({result['confidence']}%)")

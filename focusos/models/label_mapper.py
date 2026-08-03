@@ -3,12 +3,12 @@
 # Values are the workload name that we will decided from reading the cluster summary
 
 CLUSTER_TO_WORKLOAD = {
-    0: "Coding",       # ← replace this based on our cluster_trainer output
-    1: "Compiling",   
-    2: "Idle",         
-    3: "Video_Call",   
-    4: "Gaming",     
-    5: "Browsing",  
+         0: "Video_Call",
+         1: "Gaming",
+         2: "Idle",
+         3: "Coding",
+         4: "Compiling",
+         5: "Browsing",
 }
 
 #FUNCTION to check the correct mapping here
@@ -55,6 +55,12 @@ WORKLOAD_OPTIMIZATION_PROFILE = {
         "nice_value":          0,
         # System is idle — no point changing priorities
         "description":         "System idle — no optimization applied",
+    },
+     "Browsing": {
+        "process_keywords": ["chrome", "firefox", "brave", "msedge"],
+        "deprioritize_others": False,
+        "nice_value": 0,
+        "description": "General web browsing workload",
     },
 }
 
@@ -108,7 +114,7 @@ def validate_mapping() -> bool:
     try:
         from focusos.models.cluster_trainer import N_CLUSTERS
     except ImportError:
-        N_CLUSTERS = 5  # fallback
+        N_CLUSTERS = 6 # fallback
 
     all_ok = True
 
@@ -153,7 +159,7 @@ if __name__ == "__main__":
     validate_mapping()
 
     print("\nTesting get_workload_name():")
-    for cid in range(5):
+    for cid in range(6):
         name = get_workload_name(cid)
         profile = get_optimization_profile(name)
         print(f"  Cluster {cid} → '{name}'  |  nice={profile['nice_value']}  "
