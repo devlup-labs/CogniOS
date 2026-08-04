@@ -9,7 +9,9 @@ from config import DB_PATH
 
 def init_db():
     """Initializes the unified process_snapshot table for Layer 2 telemetry."""
-    with sqlite3.connect(DB_PATH,timeout=10.0) as conn:
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS process_snapshot (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,6 +25,9 @@ def init_db():
             ON process_snapshot (timestamp)
         """)
         conn.commit()
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def insert_process_snapshot(top_cpu, top_ram):
@@ -32,12 +37,17 @@ def insert_process_snapshot(top_cpu, top_ram):
         json.dumps(top_cpu, separators=(',', ':')),
         json.dumps(top_ram, separators=(',', ':'))
     )
-    with sqlite3.connect(DB_PATH,timeout=10.0) as conn:
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
         conn.execute(
             "INSERT INTO process_snapshot (timestamp, top_cpu_processes, top_ram_processes) VALUES (?, ?, ?)",
             row
         )
         conn.commit()
+    finally:
+        if conn is not None:
+            conn.close()
 
 # layer 2 db code ends here
 
