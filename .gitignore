@@ -36,3 +36,12 @@ blackbox/blackbox.db-wal
 
 # Logs
 logs/
+
+# Environment and secret files
+.env
+.env.local 
+*.env 
+
+.DS_Store
+*.db-shm
+*.db-wal

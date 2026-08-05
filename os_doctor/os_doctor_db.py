@@ -10,97 +10,80 @@ TABLE_NAME = "os_doctor_train"
 
 def create_connection(os_doctor_db_path):
     conn = sqlite3.connect(os_doctor_db_path)
-    cursor = conn.cursor()
-
-    cpu_metrics = [
-        ("score", "REAL"), ("avg", "REAL"), ("peak", "REAL"), ("user_time", "REAL"),
-        ("system_time", "REAL"), ("ctx_invol_rate", "REAL"), ("ctx_vol_rate", "REAL"),
-        ("gradient", "REAL"), ("rolling_avg", "REAL")
-    ]
-
-    ram_metrics = [
-        ("score", "REAL"), ("avg", "REAL"), ("peak", "REAL"),("gradient", "REAL"),
-        ("net_conn_count", "REAL"), ("open_fds", "REAL"), ("read_bytes_rate", "REAL"),
-        ("write_bytes_rate", "REAL")
-    ]
-
-    sys_metrics = [
-        ("cpu_usage_percent", "REAL"),
-        ("cpu_freq", "REAL"),
-        ("cpu_user_time", "REAL"),
-        ("cpu_system_time", "REAL"),
-        ("cpu_idle_time", "REAL"),
-        ("cpu_iowait_time", "REAL"),
-        ("cpu_busy_time", "REAL"),
-        ("cpu_ctx_switches", "REAL"),
-
-        ("memory_percent", "REAL"),
-        ("memory_used", "INTEGER"),
-        ("memory_available", "INTEGER"),
-        ("memory_cached", "INTEGER"),
-        ("memory_buffers", "INTEGER"),
-        ("swap_percent", "REAL"),
-        ("swap_sin", "INTEGER"),
-        ("swap_sout", "INTEGER"),
-
-        ("disk_usage_percent", "REAL"),
-        ("disk_read_mb_s", "REAL"),
-        ("disk_write_mb_s", "REAL"),
-        ("disk_read_time", "INTEGER"),
-        ("disk_write_time", "INTEGER"),
-
-        ("net_rate_mb_s", "REAL"),
-        ("net_bytes_sent", "INTEGER"),
-        ("net_bytes_recv", "INTEGER"),
-        ("net_packets_sent", "INTEGER"),
-        ("net_packets_recv", "INTEGER"),
-        ("net_errs", "INTEGER"),
-        ("net_drops", "INTEGER"),
-
-        ("load_avg_1", "REAL"),
-        ("load_avg_5", "REAL"),
-        ("load_avg_15", "REAL"),
-        ("total_processes", "INTEGER"),
-        ("running_processes", "INTEGER"),
-        ("sleeping_processes", "INTEGER"),
-        ("zombie_processes", "INTEGER"),
-
-        ("avg_temp", "REAL"),
-        ("max_temp", "REAL"),
-        ("battery_percent", "REAL"),
-        # ("process_data", "TEXT")
-    ]   
+    cursor = conn.cursor()   
 
     query = f'''CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL'''
-    
-    for i in range(1,6):
-        for metric_name, data_type in cpu_metrics:
-            query += f",\n pid_cpu_{i}_{metric_name} {data_type}"
-    
-    for i in range(1,6):
-        for metric_name, data_type in ram_metrics:
-            query += f",\n pid_ram_{i}_{metric_name} {data_type}"
+            id                                  INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    for metric_name, data_type in sys_metrics:
-        query += f",\n sys_{metric_name} {data_type}"
-        query += f",\n sys_{metric_name}_gradient REAL"
-        query += f",\n sys_{metric_name}_rolling_avg REAL"
+            cpu_usage_percent_gradient          REAL,
+            cpu_usage_percent                   REAL,
+            cpu_iowait_time_gradient            REAL,
+            cpu_iowait_time                     REAL,
+            memory_percent_gradient             REAL,
+            memory_percent                      REAL,
+            disk_read_mb_s_gradient             REAL,
+            disk_read_mb_s                      REAL, 
+            disk_write_mb_s_gradient            REAL,
+            disk_write_mb_s                     REAL, 
+            net_rate_mb_s_gradient              REAL, 
+            net_rate_mb_s                       REAL,
+            running_processes_gradient          REAL,
+            running_processes                   REAL,
+            cpu_usage_percent_deviation         REAL,
+            cpu_ctx_switches_deviation          REAL,
+            cpu_ctx_switches                    REAL,
+            memory_percent_deviation            REAL,
+            swap_percent_deviation              REAL,
+            swap_percent                        REAL,
+            load_avg_1_deviation                REAL,
+            load_avg_1                          REAL,
+            avg_temp_deviation                  REAL,
+            avg_temp                            REAL,
 
-    query += "\n)"
+            timestamp                           TEXT NOT NULL,
+            
+            cpu_1_cpu_peak_gradient             REAL,
+            cpu_1_cpu_peak                      REAL,
+            cpu_2_cpu_peak_gradient             REAL,
+            cpu_2_cpu_peak                      REAL,
+            cpu_3_cpu_peak_gradient             REAL,
+            cpu_3_cpu_peak                      REAL,
+            cpu_4_cpu_peak_gradient             REAL,
+            cpu_4_cpu_peak                      REAL,
+            cpu_5_cpu_peak_gradient             REAL,
+            cpu_5_cpu_peak                      REAL,
+            ram_1_peak_gradient                 REAL,
+            ram_1_peak                          REAL,
+            ram_1_open_fds_gradient             REAL,
+            ram_1_open_fds                      REAL,
+            ram_2_peak_gradient                 REAL,
+            ram_2_peak                          REAL,
+            ram_2_open_fds_gradient             REAL,
+            ram_2_open_fds                      REAL,
+            ram_3_peak_gradient                 REAL,
+            ram_3_peak                          REAL,
+            ram_3_open_fds_gradient             REAL,
+            ram_3_open_fds                      REAL,
+            ram_4_peak_gradient                 REAL,
+            ram_4_peak                          REAL,
+            ram_4_open_fds_gradient             REAL,
+            ram_4_open_fds                      REAL,
+            ram_5_peak_gradient                 REAL,
+            ram_5_peak                          REAL,
+            ram_5_open_fds_gradient             REAL,
+            ram_5_open_fds                      REAL
+            )
+        '''
 
     cursor.execute(query)
     conn.commit()
     return conn
-    # print(query)
 
-def write_to_os_doctor_train(ml_features_df, metadata_payload, os_doctor_db_path):
+def write_to_os_doctor_train(ml_features_df, os_doctor_db_path):
 
     engine = create_engine(f"sqlite:///{os_doctor_db_path}")
 
     ml_features_df = ml_features_df.copy()
-    ml_features_df.insert(0, "timestamp", metadata_payload["timestamp"])
 
     ml_features_df.to_sql(
         name=TABLE_NAME,
@@ -116,9 +99,9 @@ def execute_os_doctor_db():
         print("Starting the appending procces for os_doctor_train. Press Ctrl+C to stop")
         while True:
             try:
-                ml_features_df, metadata_payload = get_inference_payload(DB_PATH)
+                ml_features_df, metadata = get_inference_payload(DB_PATH)
                 if ml_features_df is not None:
-                    write_to_os_doctor_train(ml_features_df, metadata_payload, OS_DOCTOR_DB_PATH)
+                    write_to_os_doctor_train(ml_features_df, OS_DOCTOR_DB_PATH)
                     print("Successfully appended to os_doctor_train")
             except Exception as e:
                 print(e)
