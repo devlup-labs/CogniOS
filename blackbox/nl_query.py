@@ -63,7 +63,8 @@ def ask_groq(
     system_prompt: str = SYSTEM_PROMPT,
     model: str = GROQ_MODEL,
     stream: bool = True,
-    api_key: str | None = None
+    api_key: str | None = None,
+    history: list | None = None
 ) -> str:
     effective_api_key = api_key or os.environ.get("GROQ_API_KEY") or GROQ_API_KEY
     if not effective_api_key or effective_api_key == "your_groq_api_key_here":
@@ -77,14 +78,17 @@ def ask_groq(
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": user_content})
+    if history:
+        messages += history
+    elif user_content:
+        messages.append({"role": "user", "content": user_content})
 
     if stream:
         completion = client.chat.completions.create(
             model=model,
             messages=messages,
-            temperature=1,
-            max_completion_tokens=2048,
+            temperature=0.3,
+            max_completion_tokens=150,
             top_p=1,
             stream=True,
             stop=None,
@@ -109,7 +113,7 @@ def ask_groq(
         )
         response_text = completion.choices[0].message.content or ""
         return response_text
-
+_chat_history = []
 
 def query_telemetry(
     user_query: str,
@@ -117,32 +121,34 @@ def query_telemetry(
     window_minutes: int = 30,
     stream: bool = True,
     model: str = GROQ_MODEL,
-    api_key: str | None = None
+    api_key: str | None = None,
+    history: list | None = None
 ) -> str:
-    """Queries CogniOS telemetry using natural language via Groq LLM."""
     close_conn = False
     if conn is None:
         conn = get_blackbox_conn()
         close_conn = True
-
     try:
         context_str = build_telemetry_context(conn, window_minutes=window_minutes)
         full_user_content = (
-            f"Here is the telemetry context from CogniOS BlackBox:\n\n"
-            f"{context_str}\n\n"
+            f"Telemetry context:\n{context_str}\n\n"
             f"User Question: {user_query}"
         )
-        return ask_groq(
-            user_content=full_user_content,
+        _chat_history.append({"role": "user", "content": full_user_content})
+
+        response = ask_groq(
+            user_content=None,          # we pass history directly instead
             system_prompt=SYSTEM_PROMPT,
             model=model,
             stream=stream,
-            api_key=api_key
+            api_key=api_key,
+            history=_chat_history       # pass history in
         )
+        _chat_history.append({"role": "assistant", "content": response})
+        return response
     finally:
         if close_conn:
             conn.close()
-
 
 def main():
     """Command-line interface for CogniOS Natural Language Telemetry Query."""
