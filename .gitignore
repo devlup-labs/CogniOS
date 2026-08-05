@@ -23,3 +23,8 @@ data/traces/*
 
 # Logs
 logs/
+
+# Environment and secret files
+.env
+.env.local 
+*.env 

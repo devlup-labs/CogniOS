@@ -11,7 +11,6 @@ if __name__ == "__main__":
     # threading.Thread(target=execute_os_doctor_db, daemon=True).start()
     threading.Thread(target=flag_anomaly, daemon=True).start()
     run_daemon()
-    # train_isolation_forest_model()
     # extract_and_engineer_sys(DB_PATH)
     # extract_and_engineer_processes(DB_PATH)
     # train_isolation_forest_model()

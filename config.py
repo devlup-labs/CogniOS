@@ -3,6 +3,8 @@ DB_PATH = "cognios_telemetry.db"
 OS_DOCTOR_DB_PATH = "os_doctor.db"
 ALERTS_DB_PATH = "os_doctor/alerts.db"
 ALERTS_TABLE_NAME = "alerts"
+MODEL_PATH = "iso_forest_model.joblib"
+SCALER_PATH = "scaler.joblib"
 
 BLACKBOX_DB_PATH         = "blackbox/blackbox.db"
 BLACKBOX_WINDOW_SEC = 1800  # 30 minutes
