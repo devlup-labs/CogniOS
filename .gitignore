@@ -22,3 +22,7 @@ blackbox/blackbox.db-wal
 *.db
 *.sqlite3
 *.sqlite
+
+# Environment variables
+.env
+
