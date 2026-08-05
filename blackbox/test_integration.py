@@ -1,10 +1,9 @@
-import sqlite3
 import time
 import sys
 import os
+sys.path.insert(0, '.'
+                )
 from blackbox.correlation import telemetry_to_events, build_event_chain, format_chain_text
-
-sys.path.insert(0, '.')
 
 from collectors.layer1_system import collect_layer1_metrics
 from blackbox.recorder import (
