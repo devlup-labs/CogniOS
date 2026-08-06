@@ -48,7 +48,6 @@ def run_layer1_loop(stop_event):
     else:
         logger.info(f"Previous session ended cleanly (gap = {gap:.1f}s)")
 
-    # ── Detection layers ──────────────────────────────────
     detectors = {
         'cpu':    ZScoreDetector(),
         'memory': ZScoreDetector(),
@@ -113,7 +112,7 @@ def run_layer1_loop(stop_event):
                     metrics['net_errs'],
                     metrics['net_drops'],
                     json.dumps(metrics['process_data']),
-                    json.dumps(metrics['num_threads'])
+                    sum(metrics['num_threads']) if isinstance(metrics.get('num_threads'), list) else int(metrics.get('num_threads') or 0)
                 )
 
                 # --- Write to BlackBox rolling-window DB ---
@@ -157,3 +156,51 @@ def run_layer1_loop(stop_event):
         mark_graceful_shutdown(bb_conn)
         conn.close()
         bb_conn.close()
+
+def run_layer2_loop(stop_event):
+    logger = get_layer_logger("layer2")
+    conn = create_layer2_connection()
+    init_layer2_db(conn)
+    baselines = {}
+    logger.info("Starting Layer 2 collection.")
+
+    try:
+        while not stop_event.is_set():
+            top_cpu, top_mem, baselines = collect_layer2_metrics(baselines)
+            write_layer2(conn, top_cpu, top_mem)
+            logger.info(
+                f"Snapshot committed at t={time.time():.0f} | "
+                f"top_cpu={top_cpu[0]['name']} score={top_cpu[0]['cpu_score']} | "
+                f"top_ram={top_mem[0]['name']} score={top_mem[0]['ram_score']}"
+            )
+    finally:
+        logger.info("Stopping Layer 2 collection. Shutting down gracefully...")
+        conn.close()
+
+
+def run_daemon():
+    ensure_wal_mode(DB_PATH)
+
+    stop_event = threading.Event()
+
+    def _request_shutdown(signum, frame):
+        stop_event.set()
+    signal.signal(signal.SIGINT, _request_shutdown)
+    signal.signal(signal.SIGTERM, _request_shutdown)
+
+    t1 = threading.Thread(target=run_layer1_loop, args=(stop_event,), daemon=True)
+    t2 = threading.Thread(target=run_layer2_loop, args=(stop_event,), daemon=True)
+    t1.start()
+    t2.start()
+
+    try:
+        while t1.is_alive() or t2.is_alive():
+            time.sleep(1)
+    except KeyboardInterrupt:
+        stop_event.set()
+        t1.join(timeout=2)
+        t2.join(timeout=2)
+
+
+if __name__ == "__main__":
+    run_daemon()
