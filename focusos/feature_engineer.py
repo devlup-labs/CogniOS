@@ -83,8 +83,8 @@ def extract_features(df: pd.DataFrame):
             ).any()
         )
 
-        network_symmetry = df["net_bytes_sent"]/(df["net_bytes_sent"] + df["net_bytes_recv"])
-        ctx_switch_per_core = df["cpu_ctx_switches"]/ cpu_cores
+        network_symmetry = df["network_symmetry"].mean()
+        ctx_switch_per_core = df["cpu_ctx_switches"].mean()/cpu_cores
       
         browser_active = int(
                   process_col.str.contains(

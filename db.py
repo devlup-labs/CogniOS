@@ -101,7 +101,7 @@ def create_connection(db_path):
             net_packets_recv INTEGER,
             net_errs INTEGER,
             net_drops INTEGER,
-            tcp_udp_ratio FLOAT,
+            udp_tcp_ratio FLOAT,
                    
             --System Metrics
             load_avg_1 REAL,
@@ -135,7 +135,7 @@ def create_connection(db_path):
 
 # Function to write the collected metrics into the database
 
-def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, tcp_udp_ratio, process_data, num_threads, psi_metrics_cpu, psi_metrics_mem, psi_metrics_io):
+def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, udp_tcp_ratio, process_data, num_threads, psi_metrics_cpu, psi_metrics_mem, psi_metrics_io):
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO layer1_sys (
@@ -146,7 +146,7 @@ def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cp
             disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15,
             total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp,
             max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv,
-            net_packets_sent, net_packets_recv, net_errs, net_drops, tcp_udp_ratio, process_data,
+            net_packets_sent, net_packets_recv, net_errs, net_drops, udp_tcp_ratio, process_data,
             num_threads, psi_metrics_cpu, psi_metrics_mem, psi_metrics_io
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -188,7 +188,7 @@ def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cp
           net_packets_recv,
           net_errs,
           net_drops,
-          tcp_udp_ratio,
+          udp_tcp_ratio,
           process_data,
           num_threads,
           psi_metrics_cpu,
