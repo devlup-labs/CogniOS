@@ -11,21 +11,18 @@ import joblib
 #  single source of truth for where the fitted scaler lives 
 SCALER_PATH = os.path.join(os.path.dirname(__file__), "models", "robust_scaler.joblib")
 
+from config import DB_PATH
 
 def extract_and_engineer_sys(db_path, window_size=120):
     query = """
         SELECT
             timestamp, 
-            cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time,
+            cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_iowait_time, cpu_busy_time,
             cpu_ctx_switches,
-            memory_percent, memory_used, memory_available,
-            memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout,
-            disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time,
-            disk_write_time, net_rate_mb_s, net_bytes_sent,
-            net_bytes_recv, net_packets_sent, net_packets_recv,
-            net_errs, net_drops, load_avg_1, load_avg_5, load_avg_15, total_processes,
+            memory_percent, swap_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time,
+            disk_write_time, net_rate_mb_s, net_errs, net_drops, load_avg_1, total_processes,
             running_processes, sleeping_processes, zombie_processes, avg_temp,
-            max_temp, battery_percent,  process_data
+            max_temp, battery_percent
         FROM layer1_sys
         ORDER BY timestamp DESC
         LIMIT ?
@@ -44,43 +41,79 @@ def extract_and_engineer_sys(db_path, window_size=120):
     # Latest timestamp, kept as metadata (not a numeric feature for the model)
     latest_timestamp = df_sys['timestamp'].iloc[-1]
 
-    # timestamp/process_data aren't numeric features for the model
-    df_sys_numeric = df_sys.drop(columns=['timestamp', 'process_data'])
-
     # Columns that are all-NULL in sqlite (e.g. temp/iowait/cached on platforms
     # that don't report them) load as dtype=object with None, not NaN, which
     # breaks diff()'s subtraction. Coerce to numeric so missing sensors = 0.0.
-   
-    df_sys_numeric = df_sys_numeric.apply(pd.to_numeric, errors='coerce').fillna(0.0)
-
-    df_sys_gradients = df_sys_numeric.diff(periods=1).fillna(0.0)
-    df_sys_rolling_avg = df_sys_numeric.rolling(window=window_size, min_periods=1).mean()
 
     flat_sys_dict = {}
-
-    for col in df_sys_numeric.columns:
-        flat_sys_dict[f'sys_{col}'] = df_sys_numeric[col].iloc[-1]
-        flat_sys_dict[f'sys_{col}_gradient'] = df_sys_gradients[col].iloc[-1]
-        flat_sys_dict[f'sys_{col}_rolling_avg'] = df_sys_rolling_avg[col].iloc[-1]
-
-    # Metadata (bare name, no sys_ prefix) so build_unified_vector() can route
     # it into metadata_payload instead of the model's feature matrix.
-    flat_sys_dict['timestamp'] = latest_timestamp
+    # flat_sys_dict['timestamp'] = latest_timestamp
+
+    gradient_cols = [
+        'cpu_usage_percent',
+        'cpu_iowait_time',
+        'memory_percent',
+        'disk_read_mb_s', 
+        'disk_write_mb_s', 
+        'net_rate_mb_s', 
+        'running_processes',
+    ]
+
+    deviation_cols = [
+            'cpu_usage_percent',
+            'cpu_ctx_switches',
+            'memory_percent',
+            'swap_percent',
+            'load_avg_1',
+            'avg_temp'
+        ]
+
+    cols_to_clean = gradient_cols + deviation_cols
+
+    # Handling NaN values
+    for col in cols_to_clean:
+        if col in df_sys.columns:
+            df_sys[col] = pd.to_numeric(df_sys[col], errors='coerce').fillna(0.0)
+
+    for col in gradient_cols:
+        df_sys[f'{col}_gradient'] = df_sys[col].diff(periods=1).fillna(0.0)
+        df_sys = df_sys.copy()
+
+    for col in gradient_cols:
+        flat_sys_dict[f'{col}_gradient'] = round(df_sys[f'{col}_gradient'].iloc[-1], 2)
+        flat_sys_dict[f'{col}'] = round(df_sys[f'{col}'].iloc[-1], 2)
+
+    for col in deviation_cols:
+        rolling_baseline = df_sys[col].rolling(window=120, min_periods=1).mean()
+        df_sys[f'{col}_deviation'] = df_sys[col] - rolling_baseline
+        df_sys = df_sys.copy()
+
+    for col in deviation_cols:
+        flat_sys_dict[f'{col}_deviation'] = round(df_sys[f'{col}_deviation'].iloc[-1], 2)
+        flat_sys_dict[f'{col}'] = round(df_sys[f'{col}'].iloc[-1], 2)
 
     # Convert to a single-row 2D DataFrame [1, num_sys_features]
     sys_vec = pd.DataFrame([flat_sys_dict])
+    sys_vec['timestamp'] = latest_timestamp  # Add timestamp 
+    # for col in sys_vec.columns:
+    #     print(col)
     return sys_vec
-
-    
-# This function converts json formatted string to a Pandas' Long-Form DataFrame
-# Resamples the data and finally returns two vectors cpu_vec and ram_vec
-
-# Flow of our data: sql table + Json -> list of dict -> sep lists -> stretched df -> single-row vector
 
 def extract_and_engineer_processes(db_path, window_size=24):
 
     query = """
-            SELECT timestamp, top_cpu_json, top_ram_json
+            SELECT timestamp,
+            cpu_1_pid, cpu_1_ppid, cpu_1_name, cpu_1_status, cpu_1_cpu_peak, 
+            cpu_2_pid, cpu_2_ppid, cpu_2_name, cpu_2_status, cpu_2_cpu_peak,
+            cpu_3_pid, cpu_3_ppid, cpu_3_name, cpu_3_status, cpu_3_cpu_peak,
+            cpu_4_pid, cpu_4_ppid, cpu_4_name, cpu_4_status, cpu_4_cpu_peak,
+            cpu_5_pid, cpu_5_ppid, cpu_5_name, cpu_5_status, cpu_5_cpu_peak,    
+            ram_1_pid, ram_1_ppid, ram_1_name, ram_1_status, ram_1_peak, ram_1_open_fds,
+            ram_2_pid, ram_2_ppid, ram_2_name, ram_2_status, ram_2_peak, ram_2_open_fds,
+            ram_3_pid, ram_3_ppid, ram_3_name, ram_3_status, ram_3_peak, ram_3_open_fds,
+            ram_4_pid, ram_4_ppid, ram_4_name, ram_4_status, ram_4_peak, ram_4_open_fds,
+            ram_5_pid, ram_5_ppid, ram_5_name, ram_5_status, ram_5_peak, ram_5_open_fds
+
             FROM layer2_proc
             ORDER BY timestamp DESC
             LIMIT ?
@@ -94,214 +127,57 @@ def extract_and_engineer_processes(db_path, window_size=24):
 
     df_raw = df_raw.iloc[::-1].reset_index(drop=True)
 
-    parsed_snapshots = []
+    cols = ['cpu_1_pid', 'cpu_1_ppid', 'cpu_1_name', 'cpu_1_status', 'cpu_1_cpu_peak',
+           'cpu_2_pid', 'cpu_2_ppid', 'cpu_2_name', 'cpu_2_status', 'cpu_2_cpu_peak',
+           'cpu_3_pid', 'cpu_3_ppid', 'cpu_3_name', 'cpu_3_status', 'cpu_3_cpu_peak',
+           'cpu_4_pid', 'cpu_4_ppid', 'cpu_4_name', 'cpu_4_status', 'cpu_4_cpu_peak',
+           'cpu_5_pid', 'cpu_5_ppid', 'cpu_5_name', 'cpu_5_status', 'cpu_5_cpu_peak',
+           'ram_1_pid', 'ram_1_ppid', 'ram_1_name', 'ram_1_status', 'ram_1_peak', 'ram_1_open_fds',
+           'ram_2_pid', 'ram_2_ppid', 'ram_2_name', 'ram_2_status', 'ram_2_peak', 'ram_2_open_fds',
+           'ram_3_pid', 'ram_3_ppid', 'ram_3_name', 'ram_3_status', 'ram_3_peak', 'ram_3_open_fds',
+           'ram_4_pid', 'ram_4_ppid', 'ram_4_name', 'ram_4_status', 'ram_4_peak', 'ram_4_open_fds',
+           'ram_5_pid', 'ram_5_ppid', 'ram_5_name', 'ram_5_status', 'ram_5_peak', 'ram_5_open_fds']
 
-    # In this block: extracting the json strings into a list of dicts
-    for index, row in df_raw.iterrows():
-        timestamp = row['timestamp']
-        
-        try:
-            cpu_list = json.loads(row['top_cpu_json'])
-            ram_list = json.loads(row['top_ram_json'])
-            
-            parsed_snapshots.append({
-                "timestamp": timestamp,
-                "cpu_processes": cpu_list,  
-                "ram_processes": ram_list 
-            })
-            
-        except (json.JSONDecodeError, TypeError) as e:
-            print(f"Skipping corrupt database row at frame {timestamp}: {e}")
-            continue
+    flat_proc_dict = {}
 
-    # In this block: converting the list of dicts to separate lists 
-    long_form_cpu_rows = []
-    long_form_ram_rows = []
+    for col in cols:
+        if col in df_raw.columns:
+            df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0.0)
 
-    for snapshot in parsed_snapshots:
+    for col in cols:
+            df_raw[f'{col}_gradient'] = df_raw[col].diff(periods=1).fillna(0.0)
+            df_raw = df_raw.copy()
+    
+    for col in cols:
+        flat_proc_dict[f'{col}_gradient'] = round(df_raw[f'{col}_gradient'].iloc[-1], 2)
+        flat_proc_dict[f'{col}'] = round(df_raw[f'{col}'].iloc[-1], 2)
 
-        ts = snapshot["timestamp"]
-
-        for proc in snapshot["cpu_processes"]:
-            long_form_cpu_rows.append({
-                "timestamp": ts,
-                "pid": proc.get("pid"),
-                "ppid": proc.get("ppid"),
-                "name": proc.get("name"),
-                "cpu_score": proc.get("cpu_score"),
-                "cpu_avg": proc.get("cpu_avg"),
-                "cpu_peak": proc.get("cpu_peak"),
-                "user_time": proc.get("user_time"),
-                "system_time": proc.get("system_time"),
-                "ctx_vol_rate": proc.get("ctx_vol_rate"),
-                "ctx_invol_rate": proc.get("ctx_invol_rate"),
-            })
-
-        for proc in snapshot["ram_processes"]:
-            long_form_ram_rows.append({
-                "timestamp": ts,
-                "pid": proc.get("pid"),
-                "ppid": proc.get("ppid"),
-                "name": proc.get("name"),
-                "ram_score": proc.get("ram_score"),
-                "ram_avg": proc.get("ram_avg"),
-                "ram_peak": proc.get("ram_peak"),
-                "read_bytes_rate": proc.get("read_bytes_rate"),
-                "write_bytes_rate": proc.get("write_bytes_rate"),
-                "open_fds": proc.get("open_fds"),
-                "net_conn_count": proc.get("net_conn_count"),
-            })
-
-    # Converting python lists to pandas' DataFrame
-    df_long_cpu = pd.DataFrame(long_form_cpu_rows)
-    df_long_ram = pd.DataFrame(long_form_ram_rows)
-
-    # In this block: we resample the above DataFrames rows to match the 120 rows final DataFrame
-
-    def resample_process_dataframe(df_long, feature_columns, window_seconds=120):
-        if df_long.empty:
-            return pd.DataFrame()
-
-        df_long['timestamp_dt'] = pd.to_datetime(df_long['timestamp'], unit='s')
-        
-        df_pivoted = df_long.pivot(index='timestamp_dt', columns='pid', values=feature_columns)
-         
-        df_resampled = df_pivoted.resample('1s').ffill()
-        
-        # Crop/Truncate the timeline to make sure it matches our exact 120-second window length
-        df_resampled = df_resampled.tail(window_seconds)
-        
-        # Fill remaining missing history blocks with 0.0 (Cold Start/Zero-Imputation)
-        df_resampled = df_resampled.fillna(0.0)
-        
-        return df_resampled
-
-    cpu_features = ['cpu_score', 'cpu_avg', 'cpu_peak', 'user_time', 'system_time', 'ctx_vol_rate', 'ctx_invol_rate']
-    df_cpu_stretched = resample_process_dataframe(df_long_cpu, cpu_features)
-
-    ram_features = ['ram_score', 'ram_avg', 'ram_peak', 'read_bytes_rate', 'write_bytes_rate', 'open_fds', 'net_conn_count']
-    df_ram_stretched = resample_process_dataframe(df_long_ram, ram_features)
-
-    # CALCULATE MATH FEATURES
-    # Gradients for ALL CPU features and PIDs simultaneously
-    df_cpu_gradients = df_cpu_stretched.diff(periods=1).fillna(0.0)
-
-    # Compute Rolling Averages for ALL CPU columns
-    df_cpu_rolling_avg = df_cpu_stretched.rolling(window=30, min_periods=1).mean()
-
-    # Compute Gradients for ALL RAM features and PIDs simultaneously 
-    df_ram_gradients = df_ram_stretched.diff(periods=1).fillna(0.0)
-
-    # EXTRACT CPU RANK VECTOR 
-
-    # Get the last row of the raw scores matrix -> for naming and storing them
-    current_cpu_scores = df_cpu_stretched['cpu_score'].iloc[-1]
-    top_cpu_pids = current_cpu_scores.sort_values(ascending=False).head(5).index.tolist()
-
-    flat_cpu_dict = {}
-    for i in range(5):
-        rank = i + 1
-        if i < len(top_cpu_pids):
-            pid = top_cpu_pids[i]
-            
-            # Extract numerical features for the Isolation Forest
-            flat_cpu_dict[f'pid_cpu_{rank}_score'] = df_cpu_stretched[('cpu_score', pid)].iloc[-1]
-            flat_cpu_dict[f'pid_cpu_{rank}_avg'] = df_cpu_stretched[('cpu_avg', pid)].iloc[-1]
-            flat_cpu_dict[f'pid_cpu_{rank}_peak'] = df_cpu_stretched[('cpu_peak', pid)].iloc[-1]
-            flat_cpu_dict[f'pid_cpu_{rank}_user_time'] = df_cpu_stretched[('user_time', pid)].iloc[-1]
-            flat_cpu_dict[f'pid_cpu_{rank}_system_time'] = df_cpu_stretched[('system_time', pid)].iloc[-1]
-            flat_cpu_dict[f'pid_cpu_{rank}_ctx_vol_rate'] = df_cpu_stretched[('ctx_vol_rate', pid)].iloc[-1]
-            flat_cpu_dict[f'pid_cpu_{rank}_ctx_invol_rate'] = df_cpu_stretched[('ctx_invol_rate', pid)].iloc[-1]
-            
-            # Extract math features 
-            flat_cpu_dict[f'pid_cpu_{rank}_gradient'] = df_cpu_gradients[('cpu_peak', pid)].iloc[-1]
-            flat_cpu_dict[f'pid_cpu_{rank}_rolling_avg'] = df_cpu_rolling_avg[('cpu_avg', pid)].iloc[-1]
-            
-            # Inject metadata to final vector
-            static_info = df_long_cpu[df_long_cpu['pid'] == pid].iloc[-1]
-            flat_cpu_dict[f'pid_cpu_{rank}_id'] = int(pid)
-            flat_cpu_dict[f'pid_cpu_{rank}_name'] = static_info['name']
-            flat_cpu_dict[f'pid_cpu_{rank}_ppid'] = int(static_info['ppid'])
-        else:
-            # Padding loop if the system has fewer than 5 active processes
-            flat_cpu_dict[f'pid_cpu_{rank}_score'] = 0.0
-            flat_cpu_dict[f'pid_cpu_{rank}_avg'] = 0.0
-            flat_cpu_dict[f'pid_cpu_{rank}_peak'] = 0.0
-            flat_cpu_dict[f'pid_cpu_{rank}_user_time'] = 0.0
-            flat_cpu_dict[f'pid_cpu_{rank}_system_time'] = 0.0
-            flat_cpu_dict[f'pid_cpu_{rank}_ctx_vol_rate'] = 0.0
-            flat_cpu_dict[f'pid_cpu_{rank}_ctx_invol_rate'] = 0.0
-            flat_cpu_dict[f'pid_cpu_{rank}_gradient'] = 0.0
-            flat_cpu_dict[f'pid_cpu_{rank}_rolling_avg'] = 0.0
-            flat_cpu_dict[f'pid_cpu_{rank}_id'] = 0
-            flat_cpu_dict[f'pid_cpu_{rank}_name'] = "None"
-            flat_cpu_dict[f'pid_cpu_{rank}_ppid'] = 0
-
-    # Convert to a single-row 2D DataFrame [1, num_cpu_features]
-    cpu_vec = pd.DataFrame([flat_cpu_dict])
-
-
-    # EXTRACT RAM RANK VECTOR 
-    current_ram_scores = df_ram_stretched['ram_score'].iloc[-1]
-    top_ram_pids = current_ram_scores.sort_values(ascending=False).head(5).index.tolist()
-
-    flat_ram_dict = {}
-    for i in range(5):
-        rank = i + 1
-        if i < len(top_ram_pids):
-            pid = top_ram_pids[i]
-            
-            flat_ram_dict[f'pid_ram_{rank}_score'] = df_ram_stretched[('ram_score', pid)].iloc[-1]
-            flat_ram_dict[f'pid_ram_{rank}_avg'] = df_ram_stretched[('ram_avg', pid)].iloc[-1]
-            flat_ram_dict[f'pid_ram_{rank}_peak'] = df_ram_stretched[('ram_peak', pid)].iloc[-1]
-            flat_ram_dict[f'pid_ram_{rank}_read_bytes_rate'] = df_ram_stretched[('read_bytes_rate', pid)].iloc[-1]
-            flat_ram_dict[f'pid_ram_{rank}_write_bytes_rate'] = df_ram_stretched[('write_bytes_rate', pid)].iloc[-1]
-            flat_ram_dict[f'pid_ram_{rank}_open_fds'] = df_ram_stretched[('open_fds', pid)].iloc[-1]
-            flat_ram_dict[f'pid_ram_{rank}_net_conn_count'] = df_ram_stretched[('net_conn_count', pid)].iloc[-1]
-            
-            # Extract RAM math features 
-            flat_ram_dict[f'pid_ram_{rank}_gradient'] = df_ram_gradients[('ram_avg', pid)].iloc[-1]
-            
-            # Inject metadata to final vector
-            static_info = df_long_ram[df_long_ram['pid'] == pid].iloc[-1]
-            flat_ram_dict[f'pid_ram_{rank}_id'] = int(pid)
-            flat_ram_dict[f'pid_ram_{rank}_name'] = static_info['name']
-            flat_ram_dict[f'pid_ram_{rank}_ppid'] = int(static_info['ppid'])
-        else:
-            flat_ram_dict[f'pid_ram_{rank}_score'] = 0.0
-            flat_ram_dict[f'pid_ram_{rank}_avg'] = 0.0
-            flat_ram_dict[f'pid_ram_{rank}_peak'] = 0.0
-            flat_ram_dict[f'pid_ram_{rank}_read_bytes_rate'] = 0.0
-            flat_ram_dict[f'pid_ram_{rank}_write_bytes_rate'] = 0.0
-            flat_ram_dict[f'pid_ram_{rank}_open_fds'] = 0.0
-            flat_ram_dict[f'pid_ram_{rank}_net_conn_count'] = 0.0
-            flat_ram_dict[f'pid_ram_{rank}_gradient'] = 0.0
-            flat_ram_dict[f'pid_ram_{rank}_id'] = 0
-            flat_ram_dict[f'pid_ram_{rank}_name'] = "None"
-            flat_ram_dict[f'pid_ram_{rank}_ppid'] = 0
-
-    # Convert to a single-row 2D DataFrame [1, num_ram_features]
-    ram_vec = pd.DataFrame([flat_ram_dict])
-
-    # Return single row vectors for cpu and ram
-    return cpu_vec, ram_vec
+    
+    proc_vec = pd.DataFrame([flat_proc_dict])
+    # Return single row vector for cpu and ram
+    # print(proc_vec)
+    return proc_vec
 
 #   Concatenates system and process feature spaces into a fixed-dimensional matrix.
 #   Separates isolation_forest ready numerical rows from human-readable metadata.
     
-def build_unified_vector(sys_vec, cpu_vec, ram_vec):
+def build_unified_vector(sys_vec, proc_vec):
 
-    df_unified = pd.concat([sys_vec, cpu_vec, ram_vec], axis=1)
+    df_unified = pd.concat([sys_vec, proc_vec], axis=1)
     
+
     metadata_cols = [col for col in df_unified.columns
-                     if col.endswith('_name') or col.endswith('_id') or col.endswith('_ppid') or col == 'timestamp']
-    
+                             if col.endswith('_name') or col.endswith('_id') or col.endswith('_ppid') or col.endswith('_pid') or col.endswith('_status')]
     metadata_payload = df_unified[metadata_cols].iloc[0].to_dict()
+
+    cols_to_drop = [col for col in df_unified.columns
+                         if col.endswith('_name_gradient') or col.endswith('_name') or col.endswith('_id_gradient') or col.endswith('_id') or col.endswith('_ppid_gradient') or col.endswith('_ppid') or col.endswith('_status_gradient') or col.endswith('_pid') or col.endswith('_pid_gradient') or col.endswith('_status')]
     
-    ml_features_df = df_unified.drop(columns=metadata_cols)
+    ml_features_df = df_unified.drop(columns=cols_to_drop)
+
     
-    ml_features_df = ml_features_df.reindex(sorted(ml_features_df.columns), axis=1)
-    
+    # ml_features_df = ml_features_df.reindex(sorted(ml_features_df.columns), axis=1)
+
     return ml_features_df, metadata_payload
 
 
@@ -432,23 +308,26 @@ def get_inference_payload(db_path, scaler=None):
         sys_vec = extract_and_engineer_sys(db_path)
         
         # 2. Fetch process vectors 
-        cpu_vec, ram_vec = extract_and_engineer_processes(db_path)
+        proc_vec = extract_and_engineer_processes(db_path)
         
         # 3. Check for empty payloads before stitching to prevent concat failures
-        if sys_vec.empty or cpu_vec.empty or ram_vec.empty:
+        if sys_vec.empty or proc_vec.empty:
             print("Warning: One of the sub-vectors returned an empty frame. Skipping inference.")
             return None, None
             
         # 4. Consolidate and strip metadata 
-        ml_features_df, metadata_payload = build_unified_vector(sys_vec, cpu_vec, ram_vec)
+        ml_features_df, metadata = build_unified_vector(sys_vec, proc_vec)
 
         # NEW: 5. Scale numerical features only (transform-only, no fit)
         if scaler is not None:
             ml_features_df = scale_features(ml_features_df, scaler)
         
-        return ml_features_df, metadata_payload
+        return ml_features_df, metadata
 
     except Exception as e:
         print(f"Critical error during feature engineering pipeline orchestration: {e}")
         return None, None
 
+if __name__ == "__main__":
+    # extract_and_engineer_sys()
+    extract_and_engineer_processes(DB_PATH)

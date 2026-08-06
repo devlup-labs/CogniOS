@@ -5,6 +5,10 @@ SLIDING_WIND_N = 120
 
 # OS Doctor Config
 OS_DOCTOR_DB_PATH = "os_doctor.db"
+ALERTS_DB_PATH = "os_doctor/alerts.db"
+ALERTS_TABLE_NAME = "alerts"
+MODEL_PATH = "iso_forest_model.joblib"
+SCALER_PATH = "scaler.joblib"
 
 # FocusOS config
 COMPILERS = ["gcc", "g++", "clang", "make", "ninja", "rustc", "javac"]
