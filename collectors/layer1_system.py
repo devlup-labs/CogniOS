@@ -18,17 +18,19 @@ _last = {
 	"net_bytes_recv": None,
 }
 def read_psi_metric(resource: str) -> float:
-    """
-    Parses Linux /proc/pressure metrics directly from kernel interfaces.
-    """
     try:
         with open(f"/proc/pressure/{resource}", "r") as f:
-            return float(f.readline().split()[1].split("=")[1])
-    except Exception:
-        return 0.0
+            line = f.readline()
+            for token in line.split():
+                if token.startswith("avg10="):
+                    return float(token.split("=")[1])
+    except (FileNotFoundError, IndexError, ValueError, PermissionError):
+        pass
+        
+    return 0.0
 # collects metriics 
 def collect_layer1_metrics():
-	now = time.time()
+	now = time.time()	
 	timestamp = datetime.now(timezone.utc).isoformat()
 	#process
 	try:
