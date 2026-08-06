@@ -82,6 +82,9 @@ def extract_features(df: pd.DataFrame):
                 regex=True,
             ).any()
         )
+
+        network_symmetry = df["net_bytes_sent"]/(df["net_bytes_sent"] + df["net_bytes_recv"])
+        ctx_switch_per_core = df["cpu_ctx_switches"]/ cpu_cores
       
         browser_active = int(
                   process_col.str.contains(
@@ -162,6 +165,8 @@ def extract_features(df: pd.DataFrame):
                   "disk_io_mean": disk_io_mean,
                   "process_count_mean": process_count_mean,
                   "thread_count_mean": thread_count_mean,
+                  "network_symmetry": network_symmetry,
+                  "ctx_switches_per_core": ctx_switch_per_core,
                   "vscode_active": vscode_active,
                   "browser_active": browser_active,
                   "compiler_active": compiler_active,
