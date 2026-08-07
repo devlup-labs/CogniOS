@@ -85,6 +85,14 @@ def extract_features(df: pd.DataFrame):
 
         network_symmetry = df["network_symmetry"].mean()
         ctx_switch_per_core = df["cpu_ctx_switches"].mean()/cpu_cores
+        psi_cpu_some = df["psi_cpu_some"].mean()
+        psi_mem_some = df["psi_mem_some"].mean()
+        psi_io_some = df["psi_io_some"].mean()
+        swap_percent = df["swap_percent"].mean()
+        net_variance = df["net_rate_mb_s"].var()
+        udp_tcp_ratio = df["udp_tcp_ratio"].mean()
+        load_avg = df["load_avg1"].mean()
+        cpu_user_system_ratio = (df["cpu_user_time"]/(df["cpu_system_time"] + 1e-6)).mean()
       
         browser_active = int(
                   process_col.str.contains(
@@ -159,17 +167,25 @@ def extract_features(df: pd.DataFrame):
                   "cpu_mean": cpu_mean,
                   "cpu_max": cpu_max,
                   "cpu_variance": cpu_variance,
+                  "cpu_user_system_ratio": cpu_user_system_ratio,
                   "ram_mean": ram_mean,
                   "ram_growth_rate": ram_growth_rate,
+                  "load_avg": load_avg,
                   "network_mean": net_mean,
+                  "net_variance": net_variance,
+                  "swap_percent": swap_percent,
+                  "udp_tcp_ratio": udp_tcp_ratio,
                   "disk_io_mean": disk_io_mean,
                   "process_count_mean": process_count_mean,
                   "thread_count_mean": thread_count_mean,
                   "network_symmetry": network_symmetry,
                   "ctx_switches_per_core": ctx_switch_per_core,
+                  "psi_cpu_some": psi_cpu_some,
+                  "psi_mem_some": psi_mem_some,
+                  "psi_io_some": psi_io_some,
                   "vscode_active": vscode_active,
                   "browser_active": browser_active,
-                  "compiler_active": compiler_active,
+                  "compiler_active": compiler_active
               }
       
         features_df = pd.DataFrame([features])
