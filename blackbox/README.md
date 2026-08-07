@@ -589,34 +589,17 @@ graph TB
 pip install psutil numpy scikit-learn
 ```
 
-### First-time setup
+### Run the complete BlackBox pipeline
 
 ```bash
-cd CogniOS
-
-python3 -c "
-import sys
-sys.path.insert(0, '.')
-from blackbox.recorder import get_blackbox_conn, create_blackbox_table
-from blackbox.heartbeat import create_heartbeat_table
-
-conn = get_blackbox_conn()
-create_blackbox_table(conn)
-create_heartbeat_table(conn)
-print('BlackBox DB initialised at blackbox/blackbox.db')
-"
+python3 main.py
 ```
 
-### Run full daemon
-
-```bash
-python3 cognios_as_daemon.py
-```
-
-Wires in `check_rules()`, `ZScoreDetector`, and — if `blackbox/if_model.pkl`
-exists — Isolation Forest predictions every `ANOMALY_CHECK_INTERVAL_SEC`. If
-no trained model is found, the daemon logs that and continues with rule
-engine + Z-score only, rather than failing.
+This single command automatically creates the BlackBox telemetry and heartbeat
+tables when needed, then starts recording. It wires in `check_rules()`,
+`ZScoreDetector`, and — if `blackbox/if_model.pkl` exists — Isolation Forest
+predictions every `ANOMALY_CHECK_INTERVAL_SEC`. If no trained model is found,
+the daemon logs that and continues with rule-engine and Z-score detection.
 
 ### Run BlackBox integration test only
 
