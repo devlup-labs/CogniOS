@@ -10,7 +10,7 @@ from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_te
 from blackbox.heartbeat import (
     create_heartbeat_table,
     update_heartbeat,
-    check_crash_on_startup,
+    full_crash_check,
     mark_graceful_shutdown,
 )
 from blackbox.rule_engine import check_rules
@@ -32,13 +32,17 @@ def run_daemon():
     create_blackbox_table(bb_conn)
     create_heartbeat_table(bb_conn)
 
-    crashed, gap = check_crash_on_startup(bb_conn)
-    if crashed:
-        logging.warning(f"Previous session may have crashed! Gap = {gap}s")
+    crash_info = full_crash_check(bb_conn)
+    if crash_info["any_crash"]:
+        logging.warning(
+            f"Crash detected! heartbeat_gap={crash_info['heartbeat_gap']}s "
+            f"heartbeat={crash_info['heartbeat_crash']} "
+            f"systemd={crash_info['systemd_crash']}"
+        )
         result = replay(bb_conn)
         logging.warning("BlackBox pre-crash timeline:\n" + result['timeline_text'])
     else:
-        logging.info(f"Previous session ended cleanly (gap = {gap:.1f}s)")
+        logging.info(f"Clean start. heartbeat gap={crash_info['heartbeat_gap']:.1f}s")
 
     # ── Detection layers ──────────────────────────────────
     detectors = {
