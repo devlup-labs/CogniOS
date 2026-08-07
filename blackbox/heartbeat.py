@@ -1,10 +1,12 @@
-"""Crash/freeze detection via heartbeat timestamps and systemd journal analysis."""
 
 import sqlite3
 import time
 import subprocess
 from config import BLACKBOX_CRASH_GAP_SEC
 from blackbox.recorder import _get_lock, _noop_ctx
+
+
+JOURNALCTL_TIMEOUT_SEC = 5
 
 
 # ── Heartbeat table ──────────────────────────────────────────────────────────
@@ -37,31 +39,44 @@ def update_heartbeat(conn: sqlite3.Connection) -> None:
 
 
 def mark_graceful_shutdown(conn: sqlite3.Connection) -> None:
+    """Record a clean exit and the time at which it was requested."""
     lock = _get_lock(conn)
     with lock if lock else _noop_ctx():
         conn.execute(
-            "UPDATE blackbox_heartbeat SET graceful_shutdown = 1 WHERE id = 1"
+            """UPDATE blackbox_heartbeat
+               SET last_beat = ?, graceful_shutdown = 1
+               WHERE id = 1""",
+            (time.time(),),
         )
         conn.commit()
 
 
 def check_crash_on_startup(conn: sqlite3.Connection) -> tuple[bool, float]:
+    """Return whether the prior run appears to have stopped unexpectedly.
+
+    Reading the previous state and clearing its shutdown marker happen under one
+    lock.  That prevents a concurrent heartbeat write from leaving a stale
+    marker behind for the next startup check.
+    """
     lock = _get_lock(conn)
     with lock if lock else _noop_ctx():
         row = conn.execute(
             "SELECT last_beat, graceful_shutdown FROM blackbox_heartbeat WHERE id = 1"
         ).fetchone()
 
+        if row is not None:
+            conn.execute(
+                "UPDATE blackbox_heartbeat SET graceful_shutdown = 0 WHERE id = 1"
+            )
+            conn.commit()
+
     if row is None:
         return False, 0.0
 
     last_beat, graceful = row
-    gap = round(time.time() - last_beat, 1)
-
-    conn.execute(
-        "UPDATE blackbox_heartbeat SET graceful_shutdown = 0 WHERE id = 1"
-    )
-    conn.commit()
+    # A clock correction can put last_beat slightly in the future.  A negative
+    # duration is not meaningful to callers and must not look like a crash.
+    gap = max(0.0, round(time.time() - last_beat, 1))
 
     if graceful:
         return False, gap
@@ -72,14 +87,31 @@ def check_crash_on_startup(conn: sqlite3.Connection) -> tuple[bool, float]:
 # ── Systemd journal crash detection ─────────────────────────────────────────
 
 def detect_crash_via_systemd() -> bool:
-    result = subprocess.run(
-        ["journalctl", "-b", "-1", "-n", "10", "--no-pager"],
-        capture_output=True, text=True
-    )
+    """Conservatively classify the end of the previous boot from journald.
+
+    The daemon must still start on machines without systemd or retained journal
+    history, so journalctl failures are converted into a suspicious result
+    instead of propagating an exception from startup.
+    """
+    try:
+        result = subprocess.run(
+            ["journalctl", "-b", "-1", "-n", "10", "--no-pager"],
+            capture_output=True,
+            text=True,
+            timeout=JOURNALCTL_TIMEOUT_SEC,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return True
+
     output = result.stdout.lower()
 
+    # journalctl returns a non-zero status when no previous boot is available.
+    # With no usable journal evidence, preserve the existing fail-safe result.
+    if result.returncode != 0 and not output.strip():
+        return True
+
     clean_signals = ["power-off", "shutdown", "reboot", "stopped target"]
-    crash_signals = ["kernel panic", "oom", "out of memory", "segfault"]
+    crash_signals = ["kernel panic", "oom", "oom-killer", "out of memory", "segfault"]
 
     if any(s in output for s in crash_signals):
         return True
@@ -104,23 +136,3 @@ def full_crash_check(conn: sqlite3.Connection) -> dict:
         "systemd_crash":   sys_crashed,
         "any_crash":       hb_crashed or sys_crashed,
     }
-
-
-# ── Test ─────────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    print("=== Testing detect_crash_via_systemd ===\n")
-    result = subprocess.run(
-        ["journalctl", "-b", "-1", "-n", "10", "--no-pager"],
-        capture_output=True, text=True
-    )
-    print("--- Last 10 lines of previous boot ---")
-    print(result.stdout if result.stdout else "No previous boot logs found.")
-    print("--------------------------------------\n")
-
-    if not result.stdout.strip():
-        print("No previous boot found — either first boot or logs are cleared.")
-    else:
-        crashed = detect_crash_via_systemd()
-        print(f"detect_crash_via_systemd() returned: {crashed}")
-        print(f"Conclusion: {'CRASH detected' if crashed else 'Clean shutdown detected'}")
