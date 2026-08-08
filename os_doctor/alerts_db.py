@@ -44,7 +44,7 @@ def write_to_alerts_table(data, metadata):
     This function writes the data and metadata to the alerts table in the database.
     """
     conn = create_connection(ALERTS_DB_PATH)
-
+    init_alerts_db(conn)
     row = [
         json.dumps(metadata, separators=(',', ':')),
         json.dumps(data, separators=(',',':'))

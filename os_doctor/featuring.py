@@ -268,20 +268,22 @@ def scale_features(ml_features_df, scaler):
         index=ml_features_df.index,
     )
 
-
 def get_inference_payload(db_path, scaler=None):
     """
     Centralized orchestration function called by the main daemon loop.
-    Enforces data safety buffers and executes functions 1, 2, and 3 sequentially.
-
-    NEW: accepts a pre-loaded `scaler` (RobustScaler, already fitted and
-    loaded via load_scaler() at service startup). If provided, the returned
-    ml_features_df is scaled (transform-only, no fitting) before being handed
-    to the Isolation Forest for prediction. Metadata is returned unscaled
-    and untouched, exactly as before.
+ 
+    CHANGED: now always returns the RAW (unscaled) feature frame alongside
+    an optional SCALED one, instead of overwriting raw -> scaled in place.
+    Callers that need raw values for storage/display (alerts, LLM layer)
+    and callers that need scaled values for the model (Isolation Forest)
+    both get what they need from a single call, with no ambiguity based
+    on whether `scaler` was passed.
+ 
+    Returns
+    -------
+    (ml_features_raw_df, ml_features_scaled_df, metadata)
+        ml_features_scaled_df is None if no scaler was provided.
     """
-    # Run safety check to ensure database has enough historical data
-    # We need a minimum of 120 rows (120 seconds) of system metrics to build our vectors
     try:
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA journal_mode=WAL;")
@@ -290,43 +292,41 @@ def get_inference_payload(db_path, scaler=None):
             row_count_layer2 = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM layer1_sys;")
             row_count_layer1 = cursor.fetchone()[0]
-            
-        
+ 
         if row_count_layer1 < 120 or row_count_layer2 < 24:
-           
             print(f"Pipeline Warm-up Phase: {row_count_layer1}/120 records collected. Skipping tick.")
             print(f"Pipeline Warm-up Phase: {row_count_layer2}/24 records collected. Skipping tick.")
-            return None, None
-            
+            return None, None, None
+ 
     except sqlite3.Error as e:
         print(f"Database error during warm-up check: {e}")
-        return None, None
-
-    # Sequential execution 
+        return None, None, None
+ 
     try:
-        # 1. Fetch system vector
         sys_vec = extract_and_engineer_sys(db_path)
-        
-        # 2. Fetch process vectors 
         proc_vec = extract_and_engineer_processes(db_path)
-        
-        # 3. Check for empty payloads before stitching to prevent concat failures
+ 
         if sys_vec.empty or proc_vec.empty:
             print("Warning: One of the sub-vectors returned an empty frame. Skipping inference.")
-            return None, None
-            
-        # 4. Consolidate and strip metadata 
-        ml_features_df, metadata = build_unified_vector(sys_vec, proc_vec)
-
-        # NEW: 5. Scale numerical features only (transform-only, no fit)
+            return None, None, None
+ 
+        # Raw features, kept as-is — this is what gets stored/displayed.
+        ml_features_raw_df, metadata = build_unified_vector(sys_vec, proc_vec)
+ 
+        # Scaled features, computed into a SEPARATE frame — raw is never
+        # mutated, so callers can't accidentally lose it.
+        ml_features_scaled_df = None
         if scaler is not None:
-            ml_features_df = scale_features(ml_features_df, scaler)
-        
-        return ml_features_df, metadata
-
+            ml_features_scaled_df = scale_features(ml_features_raw_df, scaler)
+ 
+        return ml_features_raw_df, ml_features_scaled_df, metadata
+ 
     except Exception as e:
         print(f"Critical error during feature engineering pipeline orchestration: {e}")
-        return None, None
+        return None, None, None
+
+    
+    
 
 if __name__ == "__main__":
     # extract_and_engineer_sys()
