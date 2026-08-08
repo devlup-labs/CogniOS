@@ -25,17 +25,21 @@ from config import SLIDING_WIND_N
 #         # Returns a copy of the current buffer as a standard Python list.
 #         return list(self.buffer)
 def get_window_from_db(db_path=DB_PATH, limit=SLIDING_WIND_N):
+    conn = None
     try:
-        with sqlite3.connect(db_path,timeout=10.0) as conn:
-            # it will fetch last nth rows n=limit from the db
-            query = f"select * from layer1_sys order by timestamp desc limit {limit}"
-            df = pd.read_sql(query, conn)
-            if df.empty:
-                return None
-            
-            # Reverses the dataframe so the oldest data is first, newest is last
-            df = df[::-1].reset_index(drop=True)
-            return df
+        conn = sqlite3.connect(db_path, timeout=10.0)
+        # it will fetch last nth rows n=limit from the db
+        query = f"select * from layer1_sys order by timestamp desc limit {limit}"
+        df = pd.read_sql(query, conn)
+        if df.empty:
+            return None
+        
+        # Reverses the dataframe so the oldest data is first, newest is last
+        df = df[::-1].reset_index(drop=True)
+        return df
     except Exception as e:
         print(f"Window Extraction Error: {e}")
         return None
+    finally:
+        if conn is not None:
+            conn.close()

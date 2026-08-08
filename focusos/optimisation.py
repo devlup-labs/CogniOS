@@ -291,22 +291,26 @@ def get_cores():
 
 def log_optimization_result(workload: str, confidence: float, actions: list[str]):
 		"""Log all optimisation events to the focusos_events database table."""
+		conn = None
 		try:
-				with sqlite3.connect(DB_PATH) as conn:
-						cur = conn.cursor()
-						cur.execute("""
-								CREATE TABLE IF NOT EXISTS focusos_events (
-										timestamp  REAL,
-										workload   TEXT,
-										confidence REAL,
-										actions    TEXT
-								)
-						""")
-						cur.execute(
-								"""INSERT INTO focusos_events (timestamp, workload, confidence, actions)
-									 VALUES (?, ?, ?, ?)""",
-								(time.time(), workload, confidence, json.dumps(actions))
+				conn = sqlite3.connect(DB_PATH)
+				cur = conn.cursor()
+				cur.execute("""
+						CREATE TABLE IF NOT EXISTS focusos_events (
+								timestamp  REAL,
+								workload   TEXT,
+								confidence REAL,
+								actions    TEXT
 						)
-						# `with sqlite3.connect(...) as conn` auto-commits on exit
+				""")
+				cur.execute(
+						"""INSERT INTO focusos_events (timestamp, workload, confidence, actions)
+							 VALUES (?, ?, ?, ?)""",
+						(time.time(), workload, confidence, json.dumps(actions))
+				)
+				conn.commit()
 		except Exception as e:
 				print(f"Database logging error: {e}")
+		finally:
+				if conn is not None:
+						conn.close()
