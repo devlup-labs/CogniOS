@@ -30,7 +30,7 @@ FEATURE_COLUMNS = [
     "cpu_user_system_ratio",
     "psi_cpu_some",
     "psi_mem_some",
-    "psi_io_some"
+    "psi_io_some",
     "vscode_active",
     "browser_active",
     "compiler_active"

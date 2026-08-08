@@ -41,14 +41,24 @@ FEATURE_COLUMNS = [
     "cpu_variance",
     "ram_mean",
     "ram_growth_rate",
+    "swap_percent",
     "network_mean",
+    "network_symmetry",
+    "net_variance",
+    "udp_tcp_ratio",
     "disk_io_mean",
     "process_count_mean",
     "thread_count_mean",
+    "load_avg",
+    "ctx_switches_per_core",
+    "cpu_user_system_ratio",
+    "psi_cpu_some",
+    "psi_mem_some",
+    "psi_io_some",
     "vscode_active",
     "browser_active",
-    "compiler_active",
-]  
+    "compiler_active"
+]
 
 def collect_feature_vectors(
     db_path: str = DB_PATH,
@@ -647,13 +657,13 @@ if __name__ == "__main__":
  
     # ── Fill this in after first run, based on inspect_clusters() output ──,Numbers on the LEFT (0–4) come from KMeans,Strings on the RIGHT are what you name each cluster after reading output.,Your mapping WILL differ from this example — read inspect_clusters() output!
     MY_MAPPING = {
-    0: "Idle",
-    1: "Coding",
-    2: "Browsing",
-    3: "Compiling",
-    4: "Gaming",
-    5: "Compiling",
-}
+        0: "Video_Call",
+        1: "Browsing",
+        2: "Compiling",
+        3: "Gaming",
+        4: "Idle",
+        5: "Coding",
+    }
     
 # ← set to None on first run; fill in after inspection
  

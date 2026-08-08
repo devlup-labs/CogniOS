@@ -84,7 +84,10 @@ def extract_features(df: pd.DataFrame):
         )
 
         network_symmetry = df["network_symmetry"].mean()
-        ctx_switch_per_core = df["cpu_ctx_switches"].mean()/cpu_cores
+        if len(df) > 1 and "cpu_ctx_switches" in df.columns:
+            ctx_switch_per_core = (df["cpu_ctx_switches"].iloc[-1] - df["cpu_ctx_switches"].iloc[0]) / 120.0 / cpu_cores
+        else:
+            ctx_switch_per_core = 0.0
         psi_cpu_some = df["psi_metrics_cpu"].mean()
         psi_mem_some = df["psi_metrics_mem"].mean()
         psi_io_some = df["psi_metrics_io"].mean()
@@ -92,7 +95,12 @@ def extract_features(df: pd.DataFrame):
         net_variance = df["net_rate_mb_s"].var()
         udp_tcp_ratio = df["udp_tcp_ratio"].mean()
         load_avg = df["load_avg_1"].mean()
-        cpu_user_system_ratio = (df["cpu_user_time"]/(df["cpu_system_time"] + 1e-6)).mean()
+        if len(df) > 1:
+            user_delta = df["cpu_user_time"].iloc[-1] - df["cpu_user_time"].iloc[0]
+            system_delta = df["cpu_system_time"].iloc[-1] - df["cpu_system_time"].iloc[0]
+            cpu_user_system_ratio = user_delta / (system_delta + 1e-6)
+        else:
+            cpu_user_system_ratio = 0.0
       
         browser_active = int(
                   process_col.str.contains(
@@ -189,6 +197,7 @@ def extract_features(df: pd.DataFrame):
               }
       
         features_df = pd.DataFrame([features])
+        features_df = features_df.fillna(0.0)
       
         return features_df
       

@@ -16,7 +16,7 @@ SEED = 42
 random.seed(SEED)
 
 ROWS_PER_CLASS = 600  # 100 rows per tier x 2 tiers/sub-states
-OUTPUT_FILE = "focusos_training_data_v5.csv"
+OUTPUT_FILE = "focusos_training_data.csv"
 
 FEATURE_COLUMNS = [
     "cpu_mean",
@@ -26,13 +26,13 @@ FEATURE_COLUMNS = [
     "ram_growth_rate",
     "swap_percent",
     "network_mean",
-    "net_symmetry_ratio",
+    "network_symmetry",
     "net_variance",
-    "udp_tcp_socket_ratio",
+    "udp_tcp_ratio",
     "disk_io_mean",
     "process_count_mean",
     "thread_count_mean",
-    "load_1m_per_core",
+    "load_avg",
     "ctx_switches_per_core",
     "cpu_user_system_ratio",
     "psi_cpu_some",
