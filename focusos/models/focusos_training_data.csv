@@ -1,4 +1,4 @@
-cpu_mean,cpu_max,cpu_variance,ram_mean,ram_growth_rate,swap_percent,network_mean,net_symmetry_ratio,net_variance,udp_tcp_socket_ratio,disk_io_mean,process_count_mean,thread_count_mean,load_1m_per_core,ctx_switches_per_core,cpu_user_system_ratio,psi_cpu_some,psi_mem_some,psi_io_some,vscode_active,browser_active,compiler_active,workload_label
+cpu_mean,cpu_max,cpu_variance,ram_mean,ram_growth_rate,swap_percent,network_mean,network_symmetry,net_variance,udp_tcp_ratio,disk_io_mean,process_count_mean,thread_count_mean,load_avg,ctx_switches_per_core,cpu_user_system_ratio,psi_cpu_some,psi_mem_some,psi_io_some,vscode_active,browser_active,compiler_active,workload_label
 34.6199,42.2496,9.075,51.9346,2.6417,9.3299,0.0004,0.0038,0.1189,0.0243,3.4708,443,151.62,1.5141,3034.6993,7.5419,12.9228,3.3289,16.7152,1,0,1,Compiling
 19.422,31.7046,13.569,41.6911,0.6871,8.5803,0.0263,0.0209,3.7931,0.1355,1.9109,467,104.8592,0.3928,513.6395,2.7687,0.718,0.2519,0.0254,0,1,0,Browsing
 16.0033,26.0201,12.074,50.6712,0.5688,9.9977,0.0514,0.7114,0.0445,0.9957,1.0939,487,181.682,0.068,748.5425,1.8084,0.6577,0.1469,0.0761,0,1,0,Video_Call
