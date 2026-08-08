@@ -20,7 +20,7 @@ from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_te
 from blackbox.heartbeat import (
     create_heartbeat_table,
     update_heartbeat,
-    check_crash_on_startup,
+    full_crash_check,
     mark_graceful_shutdown,
 )
 from blackbox.rule_engine import check_rules
