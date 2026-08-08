@@ -45,3 +45,8 @@ logs/
 .DS_Store
 *.db-shm
 *.db-wal
+# -shm, -wal files
+cognios_telemetry.db-shm
+cognios_telemetry.db-wal
+blackbox.db-shm
+blackbox.db-wal
