@@ -1,0 +1,27 @@
+2026-08-08 23:26:28,105 - INFO - Starting Layer 2 collection.
+2026-08-08 23:26:33,115 - INFO - Stopping Layer 2 collection. Shutting down gracefully...
+2026-08-08 23:27:09,891 - INFO - Starting Layer 2 collection.
+2026-08-08 23:27:14,900 - INFO - Snapshot committed at t=1786211835 | top_cpu=python score=35.41 | top_ram=python score=153.471
+2026-08-08 23:27:19,908 - INFO - Snapshot committed at t=1786211840 | top_cpu=python score=3.42 | top_ram=python score=153.511
+2026-08-08 23:27:24,917 - INFO - Snapshot committed at t=1786211845 | top_cpu=python score=3.14 | top_ram=python score=153.512
+2026-08-08 23:27:29,926 - INFO - Snapshot committed at t=1786211850 | top_cpu=python score=0.68 | top_ram=python score=153.66
+2026-08-08 23:27:29,927 - INFO - Stopping Layer 2 collection. Shutting down gracefully...
+2026-08-08 23:27:39,331 - INFO - Starting Layer 2 collection.
+2026-08-08 23:27:44,342 - INFO - Snapshot committed at t=1786211864 | top_cpu=python score=137.56 | top_ram=python score=236.892
+2026-08-08 23:27:49,353 - INFO - Snapshot committed at t=1786211869 | top_cpu=python score=8.43 | top_ram=python score=238.06
+2026-08-08 23:27:54,363 - INFO - Snapshot committed at t=1786211874 | top_cpu=python score=30.0 | top_ram=python score=238.142
+2026-08-08 23:27:54,363 - INFO - Stopping Layer 2 collection. Shutting down gracefully...
+2026-08-08 23:39:07,007 - INFO - Starting Layer 2 collection.
+2026-08-08 23:39:12,027 - INFO - Snapshot committed at t=1786212552 | top_cpu=python score=134.46 | top_ram=python score=237.049
+2026-08-08 23:39:17,037 - INFO - Snapshot committed at t=1786212557 | top_cpu=python score=36.23 | top_ram=python score=238.197
+2026-08-08 23:39:22,048 - INFO - Snapshot committed at t=1786212562 | top_cpu=python score=54.26 | top_ram=python score=238.285
+2026-08-08 23:39:22,048 - INFO - Stopping Layer 2 collection. Shutting down gracefully...
+2026-08-08 23:39:57,689 - INFO - Starting Layer 2 collection.
+2026-08-08 23:40:02,699 - INFO - Snapshot committed at t=1786212603 | top_cpu=python score=71.54 | top_ram=python score=244.956
+2026-08-09 00:02:32,523 - INFO - Starting Layer 2 collection.
+2026-08-09 00:02:38,068 - INFO - Snapshot committed at t=1786213958 | top_cpu=chrome score=86.01 | top_ram=code score=814.753
+2026-08-09 00:02:43,508 - INFO - Snapshot committed at t=1786213964 | top_cpu=python3 score=35.21 | top_ram=code score=815.425
+2026-08-09 00:02:49,101 - INFO - Snapshot committed at t=1786213969 | top_cpu=code score=48.6 | top_ram=code score=817.614
+2026-08-09 00:02:54,665 - INFO - Snapshot committed at t=1786213975 | top_cpu=python3 score=92.98 | top_ram=code score=817.437
+2026-08-09 00:03:00,131 - INFO - Snapshot committed at t=1786213980 | top_cpu=chrome score=96.4 | top_ram=code score=813.977
+2026-08-09 00:03:00,131 - INFO - Stopping Layer 2 collection. Shutting down gracefully...

@@ -103,7 +103,7 @@ def create_blackbox_table(conn: sqlite3.Connection) -> None
 def write_telemetry(conn: sqlite3.Connection, metrics: dict) -> None
 ```
 
-**Purpose:** Writes one Layer 1 metrics dictionary row into `blackbox_telemetry`. Inserts current time if timestamp is missing. Triggers database pruning (`prune_old_records`) every 60 writes (batched, not on every write, to reduce `DELETE` overhead).
+**Purpose:** Writes one Layer 1 metrics dictionary row into `blackbox_telemetry`. Inserts current time if timestamp is missing, then prunes expired rows in the same transaction. The store therefore never retains telemetry older than the configured 30-minute window after a write.
 
 - **Input:** `conn`, `metrics` (dict)
 - **Output:** None
@@ -198,7 +198,7 @@ def check_crash_on_startup(conn: sqlite3.Connection) -> tuple[bool, float]
 def extract_feature_vector(rows: list[dict]) -> list[float] | None
 ```
 
-**Purpose:** Converts the last 120 raw telemetry rows into a single 8-dimensional statistical feature vector for anomaly detection.
+**Purpose:** Converts the last 120 raw telemetry rows into a single 8-dimensional statistical feature vector for anomaly detection. Disk spikes are expressed as a fraction of the observed rows, and context switches are converted from the OS's cumulative counter to switches per second.
 
 - **Input:** `rows` (list of dicts, minimum `BLACKBOX_WARMUP_SEC` = 60 rows required)
 - **Output:** `[mean_cpu, max_cpu, cpu_growth_rate, cpu_variance, mean_ram, memory_growth_rate, disk_spike_frequency, context_switch_rate]`. Returns `None` if data is insufficient.

@@ -29,7 +29,6 @@ def extract_feature_vector(rows: list[dict]) -> list[float] | None:
     cpu    = safe_list("cpu_usage_percent")
     mem    = safe_list("memory_percent")
     disk = safe_list("disk_read")
-    ctx    = safe_list("cpu_ctx_switches")
 
     if not cpu or not mem:
         return None
@@ -44,11 +43,27 @@ def extract_feature_vector(rows: list[dict]) -> list[float] | None:
     mean_ram       = float(np.mean(mem)) 
     memory_growth_rate     = float(mem[-1] - mem[0])
 
-    #disk features
-    disk_spike_freq = float(sum(1 for v in disk if v > 50)) if disk else 0.0
+    # Disk spike frequency, normalized so vectors from differently sized
+    # windows remain comparable.
+    disk_spike_freq = (
+        float(sum(1 for v in disk if v > 50) / len(disk)) if disk else 0.0
+    )
 
-    # Context switch rate (scheduler congestion indicator)
-    ctx_switch_rate = float(np.mean(ctx)) if ctx else 0.0
+    # ``cpu_ctx_switches`` is a cumulative OS counter, not a per-second value.
+    # Convert it to a rate using rows with both a timestamp and counter value.
+    ctx_samples = [
+        (r["timestamp"], r["cpu_ctx_switches"])
+        for r in rows
+        if isinstance(r.get("timestamp"), (int, float))
+        and isinstance(r.get("cpu_ctx_switches"), (int, float))
+    ]
+    if len(ctx_samples) >= 2:
+        first_ts, first_ctx = ctx_samples[0]
+        last_ts, last_ctx = ctx_samples[-1]
+        elapsed = last_ts - first_ts
+        ctx_switch_rate = float((last_ctx - first_ctx) / elapsed) if elapsed > 0 else 0.0
+    else:
+        ctx_switch_rate = 0.0
 
     return [
         mean_cpu,

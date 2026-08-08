@@ -1,0 +1,98 @@
+2026-08-08 23:26:28,105 - INFO - Starting Layer 1 collection. Saving metrics to '/home/ankit/Desktop/cog/CogniOS/cognios_telemetry.db' every 1 second.
+2026-08-08 23:26:28,119 - INFO - Previous session ended cleanly (gap = 61.9s)
+2026-08-08 23:26:28,130 - INFO - Isolation Forest model loaded — multi-metric detection enabled.
+2026-08-08 23:26:28,328 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:28.131091+00:00
+2026-08-08 23:26:29,521 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:29.328376+00:00
+2026-08-08 23:26:30,773 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:30.522255+00:00
+2026-08-08 23:26:32,044 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:31.773498+00:00
+2026-08-08 23:26:33,229 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:33.044705+00:00
+2026-08-08 23:26:34,423 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:34.229474+00:00
+2026-08-08 23:26:35,617 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:35.423896+00:00
+2026-08-08 23:26:36,814 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:36.617323+00:00
+2026-08-08 23:26:38,005 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:37.815233+00:00
+2026-08-08 23:26:39,202 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:39.005636+00:00
+2026-08-08 23:26:40,399 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:40.202297+00:00
+2026-08-08 23:26:41,686 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:41.399637+00:00
+2026-08-08 23:26:42,886 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:56:42.687208+00:00
+2026-08-08 23:26:43,886 - INFO - Stopping Layer 1 collection. Shutting down gracefully...
+2026-08-08 23:27:09,890 - INFO - Starting Layer 1 collection. Saving metrics to '/home/ankit/Desktop/cog/CogniOS/cognios_telemetry.db' every 1 second.
+2026-08-08 23:27:09,900 - INFO - Previous session ended cleanly (gap = 26.0s)
+2026-08-08 23:27:09,903 - INFO - Isolation Forest model loaded — multi-metric detection enabled.
+2026-08-08 23:27:10,103 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:09.903448+00:00
+2026-08-08 23:27:11,307 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:11.104169+00:00
+2026-08-08 23:27:12,507 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:12.307606+00:00
+2026-08-08 23:27:13,775 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:13.507311+00:00
+2026-08-08 23:27:14,971 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:14.775346+00:00
+2026-08-08 23:27:16,168 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:15.971262+00:00
+2026-08-08 23:27:17,365 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:17.168442+00:00
+2026-08-08 23:27:18,562 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:18.366009+00:00
+2026-08-08 23:27:19,756 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:19.562411+00:00
+2026-08-08 23:27:20,954 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:20.756437+00:00
+2026-08-08 23:27:22,150 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:21.954658+00:00
+2026-08-08 23:27:23,343 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:23.150716+00:00
+2026-08-08 23:27:24,532 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:24.343744+00:00
+2026-08-08 23:27:25,533 - INFO - Stopping Layer 1 collection. Shutting down gracefully...
+2026-08-08 23:27:39,330 - INFO - Starting Layer 1 collection. Saving metrics to '/home/ankit/Desktop/cog/CogniOS/cognios_telemetry.db' every 1 second.
+2026-08-08 23:27:39,335 - INFO - Previous session ended cleanly (gap = 13.8s)
+2026-08-08 23:27:39,339 - INFO - Isolation Forest model loaded — multi-metric detection enabled.
+2026-08-08 23:27:39,528 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:39.339862+00:00
+2026-08-08 23:27:40,728 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:40.528385+00:00
+2026-08-08 23:27:41,925 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:41.728315+00:00
+2026-08-08 23:27:43,126 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:42.925694+00:00
+2026-08-08 23:27:44,323 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:44.126390+00:00
+2026-08-08 23:27:45,517 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:45.324020+00:00
+2026-08-08 23:27:46,709 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:46.517805+00:00
+2026-08-08 23:27:47,905 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:47.709763+00:00
+2026-08-08 23:27:49,105 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:48.905404+00:00
+2026-08-08 23:27:50,300 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:50.105418+00:00
+2026-08-08 23:27:51,633 - INFO - Successfully saved metrics for timestamp: 2026-08-08T17:57:51.300990+00:00
+2026-08-08 23:27:52,634 - INFO - Stopping Layer 1 collection. Shutting down gracefully...
+2026-08-08 23:39:07,007 - INFO - Starting Layer 1 collection. Saving metrics to '/home/ankit/Desktop/cog/CogniOS/cognios_telemetry.db' every 1 second.
+2026-08-08 23:39:07,010 - INFO - Previous session ended cleanly (gap = 22.0s)
+2026-08-08 23:39:07,012 - INFO - Isolation Forest model loaded — multi-metric detection enabled.
+2026-08-08 23:39:07,197 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:09:07.012962+00:00
+2026-08-08 23:39:08,394 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:09:08.197464+00:00
+2026-08-08 23:39:09,583 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:09:09.395066+00:00
+2026-08-08 23:39:10,778 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:09:10.583807+00:00
+2026-08-08 23:39:12,131 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:09:11.779122+00:00
+2026-08-08 23:39:13,331 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:09:13.131847+00:00
+2026-08-08 23:39:14,529 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:09:14.332303+00:00
+2026-08-08 23:39:15,724 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:09:15.529874+00:00
+2026-08-08 23:39:16,924 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:09:16.725325+00:00
+2026-08-08 23:39:18,119 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:09:17.924966+00:00
+2026-08-08 23:39:19,120 - INFO - Stopping Layer 1 collection. Shutting down gracefully...
+2026-08-08 23:39:57,686 - INFO - Starting Layer 1 collection. Saving metrics to '/home/ankit/Desktop/cog/CogniOS/cognios_telemetry.db' every 1 second.
+2026-08-08 23:39:57,697 - INFO - Previous session ended cleanly (gap = 38.6s)
+2026-08-08 23:39:57,701 - INFO - Isolation Forest model loaded — multi-metric detection enabled.
+2026-08-08 23:39:57,888 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:09:57.701348+00:00
+2026-08-08 23:39:59,082 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:09:58.888613+00:00
+2026-08-08 23:40:00,274 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:10:00.083160+00:00
+2026-08-08 23:40:01,467 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:10:01.275287+00:00
+2026-08-08 23:40:02,656 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:10:02.467359+00:00
+2026-08-09 00:02:32,520 - INFO - Starting Layer 1 collection. Saving metrics to '/home/ankit/Desktop/cog/CogniOS/cognios_telemetry.db' every 1 second.
+2026-08-09 00:02:32,551 - WARNING - Previous session may have crashed! Gap = 1349.9s; signals = stale heartbeat
+2026-08-09 00:02:32,558 - WARNING - BlackBox pre-crash timeline:
+[23:38:39] CPU jumped 12% -> 53%
+2026-08-09 00:02:32,570 - INFO - Isolation Forest model loaded — multi-metric detection enabled.
+2026-08-09 00:02:32,854 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:32.571085+00:00
+2026-08-09 00:02:34,109 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:33.854493+00:00
+2026-08-09 00:02:35,395 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:35.109819+00:00
+2026-08-09 00:02:36,682 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:36.395971+00:00
+2026-08-09 00:02:37,970 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:37.682733+00:00
+2026-08-09 00:02:39,269 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:38.970977+00:00
+2026-08-09 00:02:40,565 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:40.269766+00:00
+2026-08-09 00:02:41,848 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:41.565851+00:00
+2026-08-09 00:02:43,133 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:42.848999+00:00
+2026-08-09 00:02:44,410 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:44.133354+00:00
+2026-08-09 00:02:45,766 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:45.410983+00:00
+2026-08-09 00:02:47,121 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:46.767224+00:00
+2026-08-09 00:02:48,406 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:48.121846+00:00
+2026-08-09 00:02:49,687 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:49.406571+00:00
+2026-08-09 00:02:50,972 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:50.687968+00:00
+2026-08-09 00:02:52,257 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:51.973101+00:00
+2026-08-09 00:02:53,573 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:53.261110+00:00
+2026-08-09 00:02:54,811 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:54.573885+00:00
+2026-08-09 00:02:56,060 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:55.811347+00:00
+2026-08-09 00:02:57,354 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:57.060527+00:00
+2026-08-09 00:02:58,645 - INFO - Successfully saved metrics for timestamp: 2026-08-08T18:32:58.354702+00:00
+2026-08-09 00:02:59,646 - INFO - Stopping Layer 1 collection. Shutting down gracefully...
