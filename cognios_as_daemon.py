@@ -40,13 +40,25 @@ def run_layer1_loop(stop_event):
     create_blackbox_table(bb_conn)
     create_heartbeat_table(bb_conn)
 
-    crashed, gap = check_crash_on_startup(bb_conn)
-    if crashed:
-        logger.warning(f"Previous session may have crashed! Gap = {gap}s")
+    crash_info = full_crash_check(bb_conn)
+    if crash_info["any_crash"]:
+        signals = []
+        if crash_info["heartbeat_crash"]:
+            signals.append("stale heartbeat")
+        if crash_info["systemd_crash"]:
+            signals.append("system journal")
+        logger.warning(
+            "Previous session may have crashed! "
+            f"Gap = {crash_info['heartbeat_gap']}s; "
+            f"signals = {', '.join(signals)}"
+        )
         result = replay(bb_conn)
         logger.warning("BlackBox pre-crash timeline:\n" + result['timeline_text'])
     else:
-        logger.info(f"Previous session ended cleanly (gap = {gap:.1f}s)")
+        logger.info(
+            "Previous session ended cleanly "
+            f"(heartbeat gap = {crash_info['heartbeat_gap']:.1f}s)"
+        )
 
     detectors = {
         'cpu':    ZScoreDetector(),

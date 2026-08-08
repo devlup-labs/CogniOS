@@ -89,5 +89,16 @@ def run_focusos():
         time.sleep(2)
 
 if __name__ == "__main__":
-    run_focusos()
-
+    try:
+        run_focusos()
+    except KeyboardInterrupt:
+        print("Stopping CogniOS System...")
+    finally:
+        if telemetry_process.poll() is None:
+            telemetry_process.terminate()
+            try:
+                telemetry_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                telemetry_process.kill()
+                telemetry_process.wait()
+        telemetry_log.close()

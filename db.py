@@ -39,64 +39,39 @@ def init_layer2_db(conn):
         CREATE TABLE IF NOT EXISTS layer2_proc (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp           REAL    NOT NULL,
+            cpu_1_pid INTEGER, cpu_1_ppid INTEGER, cpu_1_name TEXT, cpu_1_status TEXT, cpu_1_cpu_peak REAL,
+            cpu_2_pid INTEGER, cpu_2_ppid INTEGER, cpu_2_name TEXT, cpu_2_status TEXT, cpu_2_cpu_peak REAL,
+            cpu_3_pid INTEGER, cpu_3_ppid INTEGER, cpu_3_name TEXT, cpu_3_status TEXT, cpu_3_cpu_peak REAL,
+            cpu_4_pid INTEGER, cpu_4_ppid INTEGER, cpu_4_name TEXT, cpu_4_status TEXT, cpu_4_cpu_peak REAL,
+            cpu_5_pid INTEGER, cpu_5_ppid INTEGER, cpu_5_name TEXT, cpu_5_status TEXT, cpu_5_cpu_peak REAL,
+            ram_1_pid INTEGER, ram_1_ppid INTEGER, ram_1_name TEXT, ram_1_status TEXT, ram_1_peak REAL, ram_1_open_fds REAL,
+            ram_2_pid INTEGER, ram_2_ppid INTEGER, ram_2_name TEXT, ram_2_status TEXT, ram_2_peak REAL, ram_2_open_fds REAL,
+            ram_3_pid INTEGER, ram_3_ppid INTEGER, ram_3_name TEXT, ram_3_status TEXT, ram_3_peak REAL, ram_3_open_fds REAL,
+            ram_4_pid INTEGER, ram_4_ppid INTEGER, ram_4_name TEXT, ram_4_status TEXT, ram_4_peak REAL, ram_4_open_fds REAL,
+            ram_5_pid INTEGER, ram_5_ppid INTEGER, ram_5_name TEXT, ram_5_status TEXT, ram_5_peak REAL, ram_5_open_fds REAL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_layer2_proc_timestamp ON layer2_proc (timestamp)")
+    conn.commit()
 
-            cpu_1_pid           INTEGER,
-            cpu_1_ppid          INTEGER,
-            cpu_1_name          TEXT NOT NULL,
-            cpu_1_status        TEXT NOT NULL,
-            cpu_1_cpu_peak      REAL,
 
-            cpu_2_pid           INTEGER,
-            cpu_2_ppid          INTEGER,
-            cpu_2_name          TEXT NOT NULL,
-            cpu_2_status        TEXT NOT NULL,
-            cpu_2_cpu_peak      REAL,
+def write_layer2(conn, top_cpu, top_mem):
+    """Store one fixed-width Layer 2 snapshot, padding short process lists."""
+    values = [time.time()]
+    for processes, fields in (
+        (top_cpu, ("pid", "ppid", "name", "status", "cpu_peak")),
+        (top_mem, ("pid", "ppid", "name", "status", "ram_peak", "open_fds")),
+    ):
+        for index in range(5):
+            process = processes[index] if index < len(processes) else {}
+            values.extend(
+                process.get(field, "") if field in {"name", "status"} else process.get(field)
+                for field in fields
+            )
 
-            cpu_3_pid           INTEGER,
-            cpu_3_ppid          INTEGER,
-            cpu_3_name          TEXT NOT NULL,
-            cpu_3_status        TEXT NOT NULL,
-            cpu_3_cpu_peak      REAL,
-
-            cpu_4_pid           INTEGER,
-            cpu_4_ppid          INTEGER,
-            cpu_4_name          TEXT NOT NULL,
-            cpu_4_status        TEXT NOT NULL,
-            cpu_4_cpu_peak      REAL,
-
-            cpu_5_pid           INTEGER,
-            cpu_5_ppid          INTEGER,
-            cpu_5_name          TEXT NOT NULL,
-            cpu_5_status        TEXT NOT NULL,
-            cpu_5_cpu_peak      REAL,
-
-            ram_1_pid           INTEGER,
-            ram_1_ppid          INTEGER,
-            ram_1_name          TEXT NOT NULL,
-            ram_1_status        TEXT_NOT_NULL,
-            ram_1_peak          REAL,
-            ram_1_open_fds      REAL,
-
-            ram_2_pid           INTEGER,
-            ram_2_ppid          INTEGER,
-            ram_2_name          TEXT NOT NULL,
-            ram_2_status        TEXT_NOT_NULL,
-            ram_2_peak          REAL,
-            ram_2_open_fds      REAL,
-
-            ram_3_pid           INTEGER,
-            ram_3_ppid          INTEGER,
-            ram_3_name          TEXT NOT NULL,
-            ram_3_status        TEXT_NOT_NULL,
-            ram_3_peak          REAL,
-            ram_3_open_fds      REAL,
-
-            ram_4_pid           INTEGER,
-            ram_4_ppid          INTEGER,
-            ram_4_name          TEXT NOT NULL,
-            ram_4_status        TEXT_NOT_NULL,
-            ram_4_peak          REAL,
-            ram_4_open_fds      REAL,
+    placeholders = ", ".join("?" for _ in values)
+    conn.execute(f"INSERT INTO layer2_proc VALUES (NULL, {placeholders})", values)
+    conn.commit()
 
 def init_db():
     """Initializes the unified process_snapshot table for Layer 2 telemetry."""
