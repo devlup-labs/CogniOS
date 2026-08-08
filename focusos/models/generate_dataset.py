@@ -84,7 +84,7 @@ def generate_idle(hw_tier):
         round(clamp_nn(s(0.04, 0.02)), 4),   # net_symmetry_ratio
         round(clamp_nn(s(0.10, 0.05)), 4),   # net_variance
         round(clamp_nn(s(0.12, 0.04)), 4),   # udp_tcp_socket_ratio
-        round(clamp_nn(s(0.5, 0.3)), 4),     # disk_io_mean (Overlaps with Coding/Browsing)
+        round(clamp_nn(s(2.0, 0.5)), 4),     # disk_io_mean: HIGH CV (Occasional bursts)
         procs, threads, load,
         round(clamp_nn(s(150.0, 30.0)), 4),  # ctx_switches
         round(clamp_nn(s(3.0, 0.5)), 4),     # cpu_user_system_ratio
@@ -109,7 +109,7 @@ def generate_coding(hw_tier):
         round(clamp_nn(s(0.02, 0.01)), 4),   # net_symmetry_ratio: LOW
         round(clamp_nn(s(1.8, 0.5)), 4),     # net_variance
         round(clamp_nn(s(0.10, 0.03)), 4),   # udp_tcp_socket_ratio
-        round(clamp_nn(s(1.8, 0.8)), 4),     # disk_io_mean (Overlaps with Browsing)
+        round(clamp_nn(s(1.4, 0.4)), 4),     # disk_io_mean: MODERATE CV (Bursty saves)
         procs, threads, load,
         round(clamp_nn(s(480.0, 60.0)), 4),
         round(clamp_nn(s(4.2, 0.8)), 4),
@@ -136,7 +136,7 @@ def generate_compiling(hw_tier):
         round(clamp_nn(s(0.01, 0.005)), 4),  # net_symmetry_ratio
         round(clamp_nn(s(0.08, 0.03)), 4),   # net_variance
         round(clamp_nn(s(0.05, 0.02)), 4),   # udp_tcp_socket_ratio
-        round(clamp_nn(s(3.5, 1.5)), 4),     # disk_io_mean: OVERLAPS WITH BROWSING
+        round(clamp_nn(s(0.4, 0.15)), 4),    # disk_io_mean: LOW CV (Sustained I/O)
         procs, threads + 30, load + 1.2,
         round(clamp_nn(s(2200.0, 400.0)), 4),
         round(clamp_nn(s(7.5, 1.5)), 4),
@@ -161,7 +161,7 @@ def generate_gaming(hw_tier):
         round(clamp_nn(s(0.25, 0.05)), 4),   # net_symmetry_ratio
         round(clamp_nn(s(0.18, 0.05)), 4),   # net_variance
         round(clamp_nn(s(0.45, 0.08)), 4),   # udp_tcp_socket_ratio: ELEVATED UDP
-        round(clamp_nn(s(1.5, 0.6)), 4),     # disk_io_mean
+        round(clamp_nn(s(0.2, 0.08)), 4),    # disk_io_mean: VERY LOW CV (Steady asset streaming)
         procs, threads, load,
         round(clamp_nn(s(1600.0, 200.0)), 4),
         round(clamp_nn(s(5.5, 1.0)), 4),
@@ -186,7 +186,7 @@ def generate_video_call(hw_tier):
         round(clamp_nn(s(0.72, 0.08)), 4),   # net_symmetry_ratio: HIGH UPLOAD/DOWNLOAD (~0.72)
         round(clamp_nn(s(0.08, 0.02)), 4),   # net_variance: LOW (STEADY WEBRTC STREAM)
         round(clamp_nn(s(0.82, 0.10)), 4),   # udp_tcp_socket_ratio: HIGH UDP
-        round(clamp_nn(s(1.2, 0.4)), 4),     # disk_io_mean
+        round(clamp_nn(s(0.5, 0.15)), 4),    # disk_io_mean: LOW CV (Steady cache writes)
         procs, threads, load,
         round(clamp_nn(s(800.0, 100.0)), 4),
         round(clamp_nn(s(2.2, 0.4)), 4),     # cpu_user_system_ratio: LOWER (SYSTEM SOCKET INTERRUPTS)
@@ -211,7 +211,7 @@ def generate_browsing(hw_tier):
         round(clamp_nn(s(0.03, 0.01)), 4),   # net_symmetry_ratio: LOW (DOWNLOAD HEAVY)
         round(clamp_nn(s(3.6, 0.7)), 4),     # net_variance: HIGH BURSTINESS
         round(clamp_nn(s(0.12, 0.03)), 4),   # udp_tcp_socket_ratio: LOW (MOSTLY TCP)
-        round(clamp_nn(s(1.8, 0.5)), 4),     # disk_io_mean
+        round(clamp_nn(s(1.8, 0.4)), 4),     # disk_io_mean: HIGH CV (Bursty page loads)
         procs, threads, load,
         round(clamp_nn(s(520.0, 70.0)), 4),
         round(clamp_nn(s(4.1, 0.6)), 4),
