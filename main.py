@@ -37,7 +37,7 @@ print("Your terminal is free to use.")
 from focusos.models.classifier import WorkloadPredictor, FEATURE_COLUMNS
 from focusos.feature_engineer import extract_features
 from focusos.sliding_window import get_window_from_db
-from llm_explainer2 import generate_explanation
+from focusos.llm_explainer import generate_explanation
 import time 
 
 def run_focusos():
