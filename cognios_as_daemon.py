@@ -61,8 +61,13 @@ def run_daemon():
                     metrics['net_packets_received'],
                     metrics['net_errs'],
                     metrics['net_drops'],
+                    metrics['udp_tcp_ratio'],
+                    metrics['network_symmetry'],
                     json.dumps(metrics['process_data']),
-                    json.dumps(metrics['num_threads'])
+                    json.dumps(metrics['num_threads']),
+                    metrics['psi_cpu_some'],
+                    metrics['psi_mem_some'],
+                    metrics['psi_io_some']
                 )
                 logging.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
                 

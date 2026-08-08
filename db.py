@@ -155,17 +155,17 @@ def create_connection(db_path):
     cursor.execute("PRAGMA table_info(layer1_sys)")
     columns = [row[1] for row in cursor.fetchall()]
     if 'process_data' not in columns:
-                 cursor.execute("ALTER TABLE layer1_sys ADD COLUMN process_data TEXT")   
+        cursor.execute("ALTER TABLE layer1_sys ADD COLUMN process_data TEXT")   
 
-                 cursor.execute("PRAGMA table_info(layer1_sys)")
+    cursor.execute("PRAGMA table_info(layer1_sys)")
     columns = [row[1] for row in cursor.fetchall()]
     if 'udp_tcp_ratio' not in columns:
-                 cursor.execute("ALTER TABLE layer1_sys ADD COLUMN udp_tcp_ratio FLOAT")  
+        cursor.execute("ALTER TABLE layer1_sys ADD COLUMN udp_tcp_ratio FLOAT")  
 
-                 cursor.execute("PRAGMA table_info(layer1_sys)")
+    cursor.execute("PRAGMA table_info(layer1_sys)")
     columns = [row[1] for row in cursor.fetchall()]
     if 'load_avg_1' not in columns:   
-                 cursor.execute("ALTER TABLE layer1_sys ADD COLUMN load_avg_1 REAL")     
+        cursor.execute("ALTER TABLE layer1_sys ADD COLUMN load_avg_1 REAL")     
         
 
     conn.commit()
@@ -187,7 +187,7 @@ def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cp
             net_packets_sent, net_packets_recv, net_errs, net_drops, udp_tcp_ratio, network_symmetry, process_data,
             num_threads, psi_metrics_cpu, psi_metrics_mem, psi_metrics_io
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ? , ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (timestamp, 
           cpu_usage_percent, 
           cpu_freq, cpu_user_time, 
