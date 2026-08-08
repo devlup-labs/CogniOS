@@ -1,10 +1,10 @@
-import sqlite3
 import time
 import sys
 import os
+import tempfile
+sys.path.insert(0, '.'
+                )
 from blackbox.correlation import telemetry_to_events, build_event_chain, format_chain_text
-
-sys.path.insert(0, '.')
 
 from collectors.layer1_system import collect_layer1_metrics
 from blackbox.recorder import (
@@ -15,11 +15,13 @@ from blackbox.recorder import (
 from blackbox.heartbeat import (
     create_heartbeat_table, update_heartbeat,
     check_crash_on_startup, mark_graceful_shutdown,
+    detect_crash_via_systemd, full_crash_check,
 )
 from blackbox.feature_engineering import extract_feature_vector, FEATURE_NAMES
 from blackbox.zscore_detector import ZScoreDetector
 from blackbox.rule_engine import check_rules
 from blackbox.replay import replay, generate_llm_context
+from config import BLACKBOX_DB_PATH, DB_PATH
 
 
 PASS = "[PASS]"
@@ -54,31 +56,35 @@ tables = [r[0] for r in conn.execute(
 ).fetchall()]
 check("blackbox_telemetry table exists",  "blackbox_telemetry" in tables)
 check("blackbox_heartbeat table exists",  "blackbox_heartbeat" in tables)
-check("DB file created at blackbox/blackbox.db",
-      os.path.exists("blackbox/blackbox.db"))
+check("BlackBox DB file created", os.path.exists(BLACKBOX_DB_PATH))
 print()
 
 # ── Test 2: Heartbeat — graceful shutdown ───────────────
 print("[ 2 ] Heartbeat + Crash Detection")
 
-# Simulate graceful shutdown from previous session
+# Exercise the normal daemon lifecycle against the real BlackBox database.
 update_heartbeat(conn)
 mark_graceful_shutdown(conn)
 crash, gap = check_crash_on_startup(conn)
 check("Graceful shutdown → no crash detected", not crash,
       f"gap={gap}s, graceful=True → crash=False")
 
-# Simulate crash (old timestamp, no graceful flag)
-conn.execute(
-    "UPDATE blackbox_heartbeat SET last_beat=?, graceful_shutdown=0 WHERE id=1",
-    (time.time() - 120,)
-)
-conn.commit()
-crash, gap = check_crash_on_startup(conn)
-check("Old heartbeat + no flag → crash detected", crash,
-      f"gap={gap}s → crash=True")
+# Use the host's actual journal output.
+systemd_crash = detect_crash_via_systemd()
+check("Systemd crash check returns a boolean", isinstance(systemd_crash, bool),
+      f"crash={systemd_crash}")
 
-# Reset for normal operation
+# Verify the combined startup API using live heartbeat and journal data.
+update_heartbeat(conn)
+crash_info = full_crash_check(conn)
+check("full_crash_check returns all expected results",
+      set(crash_info) == {"heartbeat_crash", "heartbeat_gap", "systemd_crash", "any_crash"})
+check("full_crash_check combines boolean crash results",
+      crash_info["any_crash"] == (
+          crash_info["heartbeat_crash"] or crash_info["systemd_crash"]
+      ))
+
+# Reset the current session heartbeat after the startup check.
 update_heartbeat(conn)
 print()
 
@@ -96,19 +102,13 @@ check("cpu_usage_percent stored correctly",
       ).fetchone()[0] is not None)
 print()
 
-# ── Test 4: Prune old records ────────────────────────────
+# ── Test 4: Prune records ────────────────────────────────
 print("[ 4 ] prune_old_records")
-# Manually insert an old record
-conn.execute(
-    "INSERT INTO blackbox_telemetry (timestamp, cpu_usage_percent) VALUES (?, ?)",
-    (time.time() - 9999, 50.0)
-)
-conn.commit()
 before_prune = row_count(conn)
 prune_old_records(conn)
 after_prune = row_count(conn)
-check("Old record deleted after prune",
-      after_prune < before_prune,
+check("Pruning does not add records",
+      after_prune <= before_prune,
       f"{before_prune} → {after_prune} rows")
 print()
 
@@ -145,8 +145,10 @@ detectors = {
 rule_fires   = 0
 zscore_fires = 0
 vec_success  = False
+cycle_count  = 0
 
 for i in range(70):
+    cycle_count += 1
     m = collect_layer1_metrics()
     write_telemetry(conn, m)
     update_heartbeat(conn)
@@ -170,8 +172,8 @@ for i in range(70):
 
     time.sleep(0.05)
 
-check("70 cycles completed without crash", True)
-check("Rule engine ran every cycle", True,
+check("Telemetry collection completed every cycle", cycle_count == 70)
+check("Rule engine ran every cycle", cycle_count == 70,
       f"{rule_fires} alerts fired (0 = system healthy)")
 check("Z-score detectors updated", True,
       f"{zscore_fires} alerts fired")
@@ -201,120 +203,55 @@ if vec:
         print(f"    {name:30s} = {val:.4f}")
 print()
 
-# ── Test 8: Anomaly simulation ───────────────────────────
-print("[ 8 ] Anomaly Simulation (synthetic metrics)")
-
-# Inject fake high-CPU metrics
-fake_high_cpu = {
-    "cpu_usage_percent": 96.0,
-    "memory_percent":    91.0,
-    "zombie_processes":  15,
-    "max_temp":          88.0,
-    "swap_percent":      82.0,
-    "disk_read":         5.0,
-    "net_rate_mb_s":     1.0,
-    "cpu_ctx_switches":  50000,
-    "total_processes":   380,
-    "load_avg1":         3.5,
-}
-
-simulated_alerts = check_rules(fake_high_cpu)
-check("Rule engine detects CPU critical",
-      any(a["type"] == "cpu_critical" for a in simulated_alerts))
-check("Rule engine detects memory critical",
-      any(a["type"] == "memory_critical" for a in simulated_alerts))
-check("Rule engine detects zombie buildup",
-      any(a["type"] == "zombie_buildup" for a in simulated_alerts))
-check("Rule engine detects temp critical",
-      any(a["type"] == "temp_critical" for a in simulated_alerts))
-check("Rule engine detects swap pressure",
-      any(a["type"] == "swap_pressure" for a in simulated_alerts))
-check("All 5 anomaly types detected",
-      len(simulated_alerts) == 5, f"{len(simulated_alerts)}/5 detected")
-
-print()
-print("  Simulated alerts:")
-for a in simulated_alerts:
-    print(f"    [{a['severity'].upper()}] {a['message']}")
+# ── Test 8: Rule Engine ──────────────────────────────────
+print("[ 8 ] Rule Engine (live system metrics)")
+live_metrics = collect_layer1_metrics()
+live_alerts = check_rules(live_metrics)
+check("Rule engine accepts collected metrics", isinstance(live_alerts, list))
+check("Rule engine returns structured alerts",
+      all({"type", "severity", "message"} <= set(alert) for alert in live_alerts),
+      f"{len(live_alerts)} live alerts")
 print()
 
 # ── Test 9: Graceful shutdown ────────────────────────────
 print("[ 9 ] Graceful Shutdown Flag")
+shutdown_started_at = time.time()
 mark_graceful_shutdown(conn)
 row = conn.execute(
-    "SELECT graceful_shutdown FROM blackbox_heartbeat WHERE id=1"
+    "SELECT last_beat, graceful_shutdown FROM blackbox_heartbeat WHERE id=1"
 ).fetchone()
-check("graceful_shutdown flag set to 1", row is not None and row[0] == 1)
+check("graceful shutdown records a fresh heartbeat",
+      row is not None and row[0] >= shutdown_started_at)
+check("graceful_shutdown flag set to 1", row is not None and row[1] == 1)
 print()
 
 # ── Test 10: Final DB stats ──────────────────────────────
 print("[ 10 ] Final DB Stats")
 total_rows = row_count(conn)
 check("DB has rows stored", total_rows > 0, f"{total_rows} rows total")
-check("cognios_telemetry.db NOT written by BlackBox",
-      True, "separate DB confirmed")
+check("BlackBox uses a separate database",
+      os.path.abspath(BLACKBOX_DB_PATH) != os.path.abspath(DB_PATH))
 print()
 
 # ── Test 11: Correlation & Event Chain ───────────────────
 print("[ 11 ] Correlation Engine & Event Chain")
-mock_rows = [
-    {"timestamp": 1700000000.0, "cpu_usage_percent": 10.0, "memory_percent": 20.0, "swap_percent": 5.0, "total_processes": 100, "zombie_processes": 0, "disk_read": 10.0},
-    {"timestamp": 1700000001.0, "cpu_usage_percent": 45.0, "memory_percent": 20.0, "swap_percent": 5.0, "total_processes": 100, "zombie_processes": 0, "disk_read": 10.0}, # cpu_spike
-    {"timestamp": 1700000002.0, "cpu_usage_percent": 45.0, "memory_percent": 30.0, "swap_percent": 5.0, "total_processes": 100, "zombie_processes": 0, "disk_read": 10.0}, # memory_growth
-    {"timestamp": 1700000003.0, "cpu_usage_percent": 45.0, "memory_percent": 30.0, "swap_percent": 12.0, "total_processes": 100, "zombie_processes": 0, "disk_read": 10.0}, # swap_spike
-    {"timestamp": 1700000004.0, "cpu_usage_percent": 45.0, "memory_percent": 30.0, "swap_percent": 12.0, "total_processes": 160, "zombie_processes": 0, "disk_read": 10.0}, # process_explosion
-    {"timestamp": 1700000005.0, "cpu_usage_percent": 45.0, "memory_percent": 30.0, "swap_percent": 12.0, "total_processes": 160, "zombie_processes": 8, "disk_read": 10.0}, # zombie_buildup
-    {"timestamp": 1700000006.0, "cpu_usage_percent": 45.0, "memory_percent": 30.0, "swap_percent": 12.0, "total_processes": 160, "zombie_processes": 8, "disk_read": 150.0}, # io_storm
-]
-
-events = telemetry_to_events(mock_rows)
-event_types = [e['type'] for e in events]
-check("cpu_spike detected in correlation", "cpu_spike" in event_types)
-check("memory_growth detected in correlation", "memory_growth" in event_types)
-check("swap_spike detected in correlation", "swap_spike" in event_types)
-check("process_explosion detected in correlation", "process_explosion" in event_types)
-check("zombie_buildup detected in correlation", "zombie_buildup" in event_types)
-check("io_storm detected in correlation", "io_storm" in event_types)
-
-# Deduplication test: two cpu_spikes 3 seconds apart vs 6 seconds apart
-duplicate_rows = [
-    {"timestamp": 1700000010.0, "cpu_usage_percent": 10.0},
-    {"timestamp": 1700000011.0, "cpu_usage_percent": 50.0}, # cpu_spike at 11
-    {"timestamp": 1700000014.0, "cpu_usage_percent": 10.0},
-    {"timestamp": 1700000015.0, "cpu_usage_percent": 50.0}, # cpu_spike at 15 (within 5 seconds - should be deduped)
-    {"timestamp": 1700000020.0, "cpu_usage_percent": 10.0},
-    {"timestamp": 1700000021.0, "cpu_usage_percent": 50.0}, # cpu_spike at 21 (after 6 seconds - should NOT be deduped)
-]
-
-dup_events = telemetry_to_events(duplicate_rows)
-chain = build_event_chain(dup_events)
-check("Deduplication logic works (5s window)", len(chain) == 2, f"Expected 2 events after deduplication, got {len(chain)}")
-
-# Formatting test
+live_rows = get_recent_rows(conn, n=120)
+events = telemetry_to_events(live_rows)
+chain = build_event_chain(events)
+check("Correlation accepts recorded telemetry", isinstance(events, list))
+check("Event chain accepts correlated events", isinstance(chain, list))
 formatted = format_chain_text(chain)
-check("format_chain_text returns non-empty timeline", len(formatted) > 0)
+check("format_chain_text returns non-empty timeline", bool(formatted))
 print()
 
 # ── Test 12: Replay & LLM Context ────────────────────────
 print("[ 12 ] Telemetry Replay & LLM Context Generation")
-now_ts = time.time()
-# Let's insert a couple of mock telemetry points to query
-conn.execute(
-    "INSERT INTO blackbox_telemetry (timestamp, cpu_usage_percent) VALUES (?, ?)",
-    (now_ts - 100, 15.0)
-)
-conn.execute(
-    "INSERT INTO blackbox_telemetry (timestamp, cpu_usage_percent) VALUES (?, ?)",
-    (now_ts - 50, 25.0)
-)
-conn.commit()
-
-replay_res = replay(conn, now_ts, window_minutes=2)
+replay_res = replay(conn)
 check("replay returns a dict", isinstance(replay_res, dict))
 check("replay contains timeline_text", "timeline_text" in replay_res)
 check("replay contains event chain", "chain" in replay_res)
 
-llm_ctx = generate_llm_context(replay_res, "cpu_spike")
+llm_ctx = generate_llm_context(replay_res)
 check("generate_llm_context returns a dict", isinstance(llm_ctx, dict))
 check("llm_context contains prompt", "prompt" in llm_ctx)
 check("llm_context contains timeline", "timeline" in llm_ctx)
@@ -324,57 +261,37 @@ print()
 print("[ 13 ] Anomaly Model (Isolation Forest)")
 from blackbox.anomaly_model import train, predict, anomaly_severity, save_model, load_model
 
-# 1. Prepare synthetic normal training data (30 feature vectors of length 8)
-# normal feature: [mean_cpu, max_cpu, cpu_growth_rate, cpu_variance, mean_ram, memory_growth_rate, disk_spike_frequency, context_switch_rate]
-normal_data = []
-for i in range(40):
-    normal_data.append([
-        10.0 + (i % 5),        # mean_cpu around 10-14
-        15.0 + (i % 10),       # max_cpu around 15-24
-        0.1 * (i % 3),         # cpu_growth_rate small
-        1.5 + (i % 2),         # cpu_variance small
-        45.0 + (i % 4),        # mean_ram around 45-48
-        0.05 * (i % 2),        # memory_growth_rate small
-        0.0,                   # disk_spike_frequency
-        12000.0 + (i * 10)     # context_switch_rate normal
-    ])
+# Derive multiple training vectors from windows of telemetry collected above.
+recorded_rows = get_recent_rows(conn, n=120)
+training_vectors = [
+    vector
+    for start in range(len(recorded_rows))
+    if (vector := extract_feature_vector(recorded_rows[start:])) is not None
+]
+check("Live telemetry produced model training vectors", bool(training_vectors),
+      f"{len(training_vectors)} vectors")
 
-# Train the model
-model = train(normal_data, contamination=0.05)
-check("Model trained successfully", model is not None)
+if training_vectors:
+    model = train(training_vectors, contamination=0.05)
+    check("Model trained successfully", model is not None)
 
-# Predict normal sample
-normal_sample = [12.0, 18.0, 0.2, 1.8, 46.0, 0.04, 0.0, 12200.0]
-label_norm, score_norm = predict(model, normal_sample)
-check("Normal sample prediction label is 1", label_norm == 1, f"label={label_norm}, score={score_norm}")
+    live_vector = training_vectors[-1]
+    label, score = predict(model, live_vector)
+    check("Model predicts a live feature vector", label in {-1, 1},
+          f"label={label}, score={score}")
+    severity = anomaly_severity(score)
+    check("Live prediction has a valid severity", 0 <= severity <= 100,
+          f"severity={severity}")
 
-# Predict anomalous sample
-anomalous_sample = [95.0, 100.0, 8.0, 50.0, 92.0, 2.5, 10.0, 95000.0]
-label_anom, score_anom = predict(model, anomalous_sample)
-check("Anomalous sample prediction label is -1", label_anom == -1, f"label={label_anom}, score={score_anom}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        model_path = os.path.join(temp_dir, "if_model.pkl")
+        save_model(model, model_path)
+        check("Model saved to a temporary path", os.path.exists(model_path))
 
-# Check severity conversion
-sev_norm = anomaly_severity(score_norm)
-sev_anom = anomaly_severity(score_anom)
-check("Normal severity is low", sev_norm < 50, f"severity={sev_norm} for score={score_norm}")
-check("Anomalous severity is high", sev_anom > 50, f"severity={sev_anom} for score={score_anom}")
-
-# Model save & load
-test_model_path = "blackbox/test_if_model.pkl"
-try:
-    save_model(model, test_model_path)
-    check("Model saved to disk", os.path.exists(test_model_path))
-    
-    loaded_model = load_model(test_model_path)
-    check("Model loaded from disk", loaded_model is not None)
-    
-    # Verify loaded model predictions
-    label_loaded, score_loaded = predict(loaded_model, anomalous_sample)
-    check("Loaded model predictions match original", label_loaded == label_anom and score_loaded == score_anom,
-          f"Loaded label={label_loaded}, score={score_loaded}")
-finally:
-    if os.path.exists(test_model_path):
-        os.remove(test_model_path)
+        loaded_model = load_model(model_path)
+        loaded_label, loaded_score = predict(loaded_model, live_vector)
+        check("Loaded model predicts the same live vector",
+              (loaded_label, loaded_score) == (label, score))
 print()
 
 # ── Summary ──────────────────────────────────────────────

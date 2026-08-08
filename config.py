@@ -17,8 +17,16 @@ CALLS = ["zoom", "teams", "slack", "discord", "skype", "webex"]
 IDES = ["code", "code-insiders", "sublime", "vim", "nvim"]
 
 # Blackbox config
+from dotenv import load_dotenv
+
+load_dotenv()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
 BLACKBOX_DB_PATH         = "blackbox/blackbox.db"
 BLACKBOX_WINDOW_SEC = 1800  # 30 minutes
+
 BLACKBOX_WARMUP_SEC      = 60     # wait before detection starts
 BLACKBOX_CRASH_GAP_SEC = 30   # SIGKILL-only fallback, not the primary check
 
