@@ -1,3 +1,4 @@
+from config import SLIDING_WIND_N
 import os
 import sys
 import time
@@ -91,7 +92,7 @@ def collect_feature_vectors(
             print(f"[cluster_trainer] Total rows in layer1_sys: {total_rows}")
  
           
-            WINDOW_SIZE = 120  # matches SLIDING_WIND_N in config
+            WINDOW_SIZE = SLIDING_WIND_N  # matches SLIDING_WIND_N in config
  
             if total_rows < WINDOW_SIZE:
                 print(f"[cluster_trainer] ERROR: Need at least {WINDOW_SIZE} rows, "

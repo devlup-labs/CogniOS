@@ -9,7 +9,7 @@ from config import DB_PATH
 # Import the stateless database window function
 from focusos.sliding_window import get_window_from_db
 
-# sliding window fetching all the 120 rows via the sliding_window module
+# sliding window fetching all the SLIDING_WIND_N rows via the sliding_window module
 def extract_features(df: pd.DataFrame):
     try:
         if df is None or df.empty:
@@ -83,9 +83,14 @@ def extract_features(df: pd.DataFrame):
             ).any()
         )
 
-        network_symmetry = df["network_symmetry"].mean()
+        if len(df) > 1 and "net_bytes_sent" in df.columns and "net_bytes_recv" in df.columns:
+            sent_delta = df["net_bytes_sent"].iloc[-1] - df["net_bytes_sent"].iloc[0]
+            recv_delta = df["net_bytes_recv"].iloc[-1] - df["net_bytes_recv"].iloc[0]
+            network_symmetry = sent_delta / (sent_delta + recv_delta + 1e-6)
+        else:
+            network_symmetry = df["network_symmetry"].mean()
         if len(df) > 1 and "cpu_ctx_switches" in df.columns:
-            ctx_switch_per_core = (df["cpu_ctx_switches"].iloc[-1] - df["cpu_ctx_switches"].iloc[0]) / 120.0 / cpu_cores
+            ctx_switch_per_core = (df["cpu_ctx_switches"].iloc[-1] - df["cpu_ctx_switches"].iloc[0]) / float(len(df)) / cpu_cores
         else:
             ctx_switch_per_core = 0.0
         psi_cpu_some = df["psi_metrics_cpu"].mean()
