@@ -1,0 +1,123 @@
+import numpy as np
+from collections import deque
+from config import (
+    BLACKBOX_WINDOW_SEC,
+    BLACKBOX_Z_THRESHOLD,
+    BLACKBOX_WARMUP_SEC,
+    BLACKBOX_TREND_WINDOW,
+    BLACKBOX_SLOPE_THRESHOLD,
+    BLACKBOX_SUSTAINED_SEC,
+    BLACKBOX_SUSTAINED_RATIO,
+)
+
+
+class ZScoreDetector:
+
+    def __init__(self):
+        # Initializes the ZScoreDetector with a deque for historical values, a Z-score threshold, and a warmup period.
+        self.zscore_hist = deque(maxlen=BLACKBOX_WINDOW_SEC)
+        self.trend_hist = deque(maxlen=BLACKBOX_TREND_WINDOW)
+        self.z_threshold = BLACKBOX_Z_THRESHOLD
+        self.slope_threshold = BLACKBOX_SLOPE_THRESHOLD
+        self.sustained_hist = deque(maxlen=BLACKBOX_SUSTAINED_SEC)
+        self.sustained_ratio = BLACKBOX_SUSTAINED_RATIO
+        self.warmup_sec = BLACKBOX_WARMUP_SEC
+
+    # Appends the given metric value
+    def update(self, val):
+        self.zscore_hist.append(val)
+        self.trend_hist.append(val)
+        self.sustained_hist.append(val)
+
+    # Returns the current warmup progress as a percentage of the warmup threshold.
+    def warmup_pct(self):
+        return min(100, int(len(self.zscore_hist) / self.warmup_sec * 100))
+
+    # Returns True if the warmup period has been completed, otherwise False.
+    def _history_with_current(self, hist, val):
+        if len(hist) == 0:
+            return [val]
+        if hist[-1] == val:
+            return list(hist)
+        hist_vals = list(hist)
+        hist_vals.append(val)
+        if hist.maxlen is not None and len(hist_vals) > hist.maxlen:
+            hist_vals.pop(0)
+        return hist_vals
+
+    # Calculates the Z-score, mean, and standard deviation for the given value against the historical window. Returns None if there are fewer than 30 samples.
+    def _zscore(self, val):
+        hist = self._history_with_current(self.zscore_hist, val)
+        if len(hist) < 30:
+            return None
+        mean = np.mean(hist)
+        std  = np.std(hist) + 0.001
+        return (val - mean) / std, mean, std
+
+    # Calculates the slope of the trend line for the given value against the historical window. Returns None if there are fewer than 30 samples.
+    def _slope(self, val):
+        hist = self._history_with_current(self.trend_hist, val)
+        if len(hist) < 30:
+            return None
+        y = np.array(hist)
+        x = np.arange(len(y))
+        return np.polyfit(x, y, 1)[0]
+    
+    # Checks if the given value has been sustained above the threshold for the required ratio of the historical window. Returns True if sustained, otherwise False.
+    def _is_sustained(self, threshold_val, val):
+        hist = self._history_with_current(self.sustained_hist, val)
+        if len(hist) < self.sustained_hist.maxlen:
+            return False
+        sustained_count = sum(1 for v in hist if v > threshold_val)
+        return sustained_count / len(hist) >= self.sustained_ratio
+    
+    # Checks the given value against the historical window and returns a list of issues if the Z-score exceeds the threshold. Each issue includes severity, metric name, current value, mean, standard deviation, Z-score, and a message.
+    def check(self, val, metric_name="metric", unit="%"):
+        issues = []
+
+        # zscore 
+        result = self._zscore(val)
+        if result is not None:
+            z, mean, std = result
+            if abs(z) > self.z_threshold:
+                spike_thresh = mean + 2 * std
+                if self._is_sustained(spike_thresh, val):
+                    severity = "CRITICAL" if abs(z) > 5 else "HIGH" if abs(z) > 4 else "MEDIUM"
+                    issues.append({
+                         "check":    "sudden_spike",
+                         "severity": severity,
+                         "metric":   metric_name,
+                         "current":  round(val, 2),
+                         "mean":     round(mean, 2),
+                         "std":      round(std, 2),
+                         "z_score":  round(z, 2),
+                         "msg": (
+                             f"{metric_name} spike | "
+                             f"current={val:.1f}{unit} "
+                             f"baseline={mean:.1f}±{std:.1f}{unit} "
+                             f"Z={z:.1f}"
+                         )
+                    })
+
+        # Slope slow drift
+        slope = self._slope(val)
+        if slope is not None and slope > self.slope_threshold:
+            eta_min = None
+            if val < 90 and slope > 0:
+                eta_min = round((90 - val) / slope / 60, 0)
+            issues.append({
+                "check":       "slow_drift",
+                "severity":    "HIGH",
+                "metric":      metric_name,
+                "current":     round(val, 2),
+                "slope":       round(slope, 5),
+                "eta_minutes": eta_min,
+                "msg": (
+                    f"{metric_name} rising trend | "
+                    f"slope={slope:.4f}{unit}/s "
+                    f"current={val:.1f}{unit}"
+                    + (f" ETA critical ~{eta_min:.0f}min" if eta_min else "")
+                )
+            })            
+            
+        return issues

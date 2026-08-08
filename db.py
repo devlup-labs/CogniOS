@@ -4,8 +4,99 @@ import sqlite3
 import time
 from config import DB_PATH
 
+
+def _harden_connection(conn):
+    """Best-effort per-connection pragmas. journal_mode is a one-time, whole-file
+    switch — see ensure_wal_mode() for the race-free way to enable it up front."""
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+def ensure_wal_mode(db_path=DB_PATH):
+    """Switch the DB file to WAL mode once, via a single connection, before any
+    concurrent writers open their own connections. Doing this per-connection from
+    multiple threads/processes at once races on the initial (non-WAL -> WAL) file
+    header rewrite and can raise 'database is locked' even with busy_timeout set."""
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.close()
+
 # layer 2 db code starts here
 
+def create_layer2_connection(db_path=DB_PATH):
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    _harden_connection(conn)
+    return conn
+
+
+def init_layer2_db(conn):
+    """Initializes the unified layer2_proc table for Layer 2 telemetry."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS layer2_proc (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp           REAL    NOT NULL,
+
+            cpu_1_pid           INTEGER,
+            cpu_1_ppid          INTEGER,
+            cpu_1_name          TEXT NOT NULL,
+            cpu_1_status        TEXT NOT NULL,
+            cpu_1_cpu_peak      REAL,
+
+            cpu_2_pid           INTEGER,
+            cpu_2_ppid          INTEGER,
+            cpu_2_name          TEXT NOT NULL,
+            cpu_2_status        TEXT NOT NULL,
+            cpu_2_cpu_peak      REAL,
+
+            cpu_3_pid           INTEGER,
+            cpu_3_ppid          INTEGER,
+            cpu_3_name          TEXT NOT NULL,
+            cpu_3_status        TEXT NOT NULL,
+            cpu_3_cpu_peak      REAL,
+
+            cpu_4_pid           INTEGER,
+            cpu_4_ppid          INTEGER,
+            cpu_4_name          TEXT NOT NULL,
+            cpu_4_status        TEXT NOT NULL,
+            cpu_4_cpu_peak      REAL,
+
+            cpu_5_pid           INTEGER,
+            cpu_5_ppid          INTEGER,
+            cpu_5_name          TEXT NOT NULL,
+            cpu_5_status        TEXT NOT NULL,
+            cpu_5_cpu_peak      REAL,
+
+            ram_1_pid           INTEGER,
+            ram_1_ppid          INTEGER,
+            ram_1_name          TEXT NOT NULL,
+            ram_1_status        TEXT_NOT_NULL,
+            ram_1_peak          REAL,
+            ram_1_open_fds      REAL,
+
+            ram_2_pid           INTEGER,
+            ram_2_ppid          INTEGER,
+            ram_2_name          TEXT NOT NULL,
+            ram_2_status        TEXT_NOT_NULL,
+            ram_2_peak          REAL,
+            ram_2_open_fds      REAL,
+
+            ram_3_pid           INTEGER,
+            ram_3_ppid          INTEGER,
+            ram_3_name          TEXT NOT NULL,
+            ram_3_status        TEXT_NOT_NULL,
+            ram_3_peak          REAL,
+            ram_3_open_fds      REAL,
+
+            ram_4_pid           INTEGER,
+            ram_4_ppid          INTEGER,
+            ram_4_name          TEXT NOT NULL,
+            ram_4_status        TEXT_NOT_NULL,
+            ram_4_peak          REAL,
+            ram_4_open_fds      REAL,
 
 def init_db():
     """Initializes the unified process_snapshot table for Layer 2 telemetry."""
@@ -53,20 +144,16 @@ def insert_process_snapshot(top_cpu, top_ram):
 
 # layer 1 db code starts here
 
-
 db_path = DB_PATH
 
-# Creating table for all the metrics collected from the system
-
 def create_connection(db_path):
-    conn = sqlite3.connect(db_path,timeout=10.0)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    _harden_connection(conn)
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS layer1_sys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT NOT NULL,
 
-            --CPU Metrics
             cpu_usage_percent REAL,
             cpu_freq REAL,
             cpu_user_time REAL,
@@ -74,26 +161,23 @@ def create_connection(db_path):
             cpu_idle_time REAL,
             cpu_iowait_time REAL,
             cpu_busy_time REAL,
-            cpu_ctx_switches REAL,   
+            cpu_ctx_switches REAL,
 
-            --Memory Metrics
             memory_percent REAL,
-            memory_used INTEGER,     
+            memory_used INTEGER,
             memory_available INTEGER,
             memory_cached INTEGER,
             memory_buffers INTEGER,
             swap_percent REAL,
             swap_sin INTEGER,
             swap_sout INTEGER,
-                   
-            --Disk Metrics
+
             disk_usage_percent REAL,
             disk_read_mb_s REAL,
             disk_write_mb_s REAL,
             disk_read_time INTEGER,
             disk_write_time INTEGER,
-                   
-            --Network Metrics
+
             net_rate_mb_s REAL,
             net_bytes_sent INTEGER,
             net_bytes_recv INTEGER,
@@ -101,8 +185,7 @@ def create_connection(db_path):
             net_packets_recv INTEGER,
             net_errs INTEGER,
             net_drops INTEGER,
-                   
-            --System Metrics
+
             load_avg_1 REAL,
             load_avg_5 REAL,
             load_avg_15 REAL,
@@ -110,8 +193,7 @@ def create_connection(db_path):
             running_processes INTEGER,
             sleeping_processes INTEGER,
             zombie_processes INTEGER,
-                   
-            --Hardware Metrics
+
             avg_temp REAL,
             max_temp REAL,
             battery_percent REAL,
