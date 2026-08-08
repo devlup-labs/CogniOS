@@ -37,7 +37,10 @@ print("Your terminal is free to use.")
 from focusos.models.classifier import WorkloadPredictor, FEATURE_COLUMNS
 from focusos.feature_engineer import extract_features
 from focusos.sliding_window import get_window_from_db
-from llm_explainer2 import generate_explanation
+
+import focusos.llm_explainer2 as llm
+
+#from llm_explainer2 import generate_explanation
 import time 
 
 def run_focusos():
@@ -80,7 +83,7 @@ def run_focusos():
                     # Generate explanation with rate limiting/caching
                     current_time = time.time()
                     if (workload != last_workload) or (current_time - last_explanation_time >= COOLDOWN_SECONDS):
-                        last_explanation = generate_explanation(workload, confidence, top_features)
+                        last_explanation = llm.generate_explanation(workload, confidence, top_features)
                         last_workload = workload
                         last_explanation_time = current_time
                         print(f"Explanation (Updated): {last_explanation}\n")

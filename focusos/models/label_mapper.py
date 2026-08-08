@@ -3,13 +3,17 @@
 # Values are the workload name that we will decided from reading the cluster summary
 
 CLUSTER_TO_WORKLOAD = {
-         0: "Video_Call",
-         1: "Gaming",
-         2: "Idle",
-         3: "Coding",
-         4: "Compiling",
-         5: "Browsing",
+    0: "Idle",
+    1: "Coding",
+    2: "Browsing",
+    3: "Compiling",
+    4: "Gaming",
+    5: "Compiling",
 }
+
+
+
+
 
 #FUNCTION to check the correct mapping here
 # Reverse mapping — useful for debugging

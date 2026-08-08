@@ -647,14 +647,15 @@ if __name__ == "__main__":
  
     # ── Fill this in after first run, based on inspect_clusters() output ──,Numbers on the LEFT (0–4) come from KMeans,Strings on the RIGHT are what you name each cluster after reading output.,Your mapping WILL differ from this example — read inspect_clusters() output!
     MY_MAPPING = {
-         
-            0: "Video_Call",
-            1: "Gaming",
-            2: "Idle",
-            3: "Coding",
-            4: "Compiling",
-            5: "Browsing",
-    } # ← set to None on first run; fill in after inspection
+    0: "Idle",
+    1: "Coding",
+    2: "Browsing",
+    3: "Compiling",
+    4: "Gaming",
+    5: "Compiling",
+}
+    
+# ← set to None on first run; fill in after inspection
  
     run_training_pipeline(
         #db_path=DB_PATH,

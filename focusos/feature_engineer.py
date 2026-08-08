@@ -85,13 +85,13 @@ def extract_features(df: pd.DataFrame):
 
         network_symmetry = df["network_symmetry"].mean()
         ctx_switch_per_core = df["cpu_ctx_switches"].mean()/cpu_cores
-        psi_cpu_some = df["psi_cpu_some"].mean()
-        psi_mem_some = df["psi_mem_some"].mean()
-        psi_io_some = df["psi_io_some"].mean()
+        psi_cpu_some = df["psi_metrics_cpu"].mean()
+        psi_mem_some = df["psi_metrics_mem"].mean()
+        psi_io_some = df["psi_metrics_io"].mean()
         swap_percent = df["swap_percent"].mean()
         net_variance = df["net_rate_mb_s"].var()
         udp_tcp_ratio = df["udp_tcp_ratio"].mean()
-        load_avg = df["load_avg1"].mean()
+        load_avg = df["load_avg_1"].mean()
         cpu_user_system_ratio = (df["cpu_user_time"]/(df["cpu_system_time"] + 1e-6)).mean()
       
         browser_active = int(

@@ -17,13 +17,23 @@ FEATURE_COLUMNS = [
     "cpu_variance",
     "ram_mean",
     "ram_growth_rate",
+    "swap_percent",
     "network_mean",
+    "network_symmetry",
+    "net_variance",
+    "udp_tcp_ratio",
     "disk_io_mean",
     "process_count_mean",
     "thread_count_mean",
+    "load_avg",
+    "ctx_switches_per_core",
+    "cpu_user_system_ratio",
+    "psi_cpu_some",
+    "psi_mem_some",
+    "psi_io_some"
     "vscode_active",
     "browser_active",
-    "compiler_active",
+    "compiler_active"
 ]
 class WorkloadPredictor:
     def __init__(self, models_dir=MODELS_DIR):
