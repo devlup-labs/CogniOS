@@ -36,6 +36,7 @@ def apply_optimization(workload: str, confidence: float) -> bool:
 			background_cores = [c for c in range(total_cores) if c % 2 != 0] or [total_cores - 1]
 
 	top_cpu, top_mem = get_top_processes(5)
+	unique_processes = list({proc['pid']: proc for proc in top_cpu + top_mem}.values())
 	workload_clean = workload.lower().replace("_", " ")
 
 	if workload_clean != "video call":

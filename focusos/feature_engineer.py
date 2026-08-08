@@ -66,12 +66,12 @@ def extract_features(df: pd.DataFrame):
                       return 0
       
                   thread_count_mean = (
-                      df["num_threads"].apply(safe_sum_threads).mean() / cpu_cores
+                      df["num_threads"].apply(safe_sum_threads).mean()
                   )
         else:
                   thread_count_mean = (
                       df["total_processes"].mean() * 2.5
-                  ) / cpu_cores
+                  )
       
               # Process detection
         process_col = df["process_data"].fillna("").str.lower()
