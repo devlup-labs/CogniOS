@@ -178,8 +178,8 @@ def collect_layer1_metrics():
 	except (FileNotFoundError, IndexError, ValueError, PermissionError):
 		pass
 
-	udp_mean =sockets["tcp_sockets_inuse"]
-	tcp_mean =sockets["udp_sockets_inuse"]
+	udp_mean = sockets["udp_sockets_inuse"]
+	tcp_mean = sockets["tcp_sockets_inuse"]
 	udp_tcp_ratio = float(udp_mean / (tcp_mean + 1e-5))
 	# Temperature and Battery Metrics (if available)
 	temp_avg, temp_max = None, None

@@ -67,10 +67,14 @@ def extract_features(df: pd.DataFrame):
       
                   thread_count_mean = (
                       df["num_threads"].apply(safe_sum_threads).mean()
+                      # NOTE: NOT divided by cpu_cores — training data uses absolute
+                      # total thread count (65–160 range). Hardware-tier variation
+                      # in generate_dataset.py already handles hardware-agnosticism.
                   )
         else:
                   thread_count_mean = (
                       df["total_processes"].mean() * 2.5
+                      # NOT divided by cpu_cores — matches training data scale
                   )
       
               # Process detection
