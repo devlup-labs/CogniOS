@@ -58,6 +58,7 @@ def write_to_alerts_table(data, metadata):
     metadata: Dictionary containing raw system telemetry
     """
     conn = create_connection(ALERTS_DB_PATH)
+<<<<<<< HEAD
 
     timestamp = time.time()
     anomaly_type = metadata.get("issue", "high_cpu")
@@ -66,6 +67,13 @@ def write_to_alerts_table(data, metadata):
     explanation = data.get("cause", "System anomaly detected.")
     suggested_action = data.get("suggested_action", "Check background tasks.")
     raw_metadata = json.dumps(metadata, separators=(',', ':'))
+=======
+    init_alerts_db(conn)
+    row = [
+        json.dumps(metadata, separators=(',', ':')),
+        json.dumps(data, separators=(',',':'))
+    ]
+>>>>>>> without_llm
 
     conn.execute(
         f'''INSERT INTO {ALERTS_TABLE_NAME} 

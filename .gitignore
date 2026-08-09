@@ -37,6 +37,7 @@ blackbox/blackbox.db-wal
 # Logs
 logs/
 
+<<<<<<< HEAD
 # Environment and secret files
 .env
 .env.local 
@@ -50,3 +51,7 @@ cognios_telemetry.db-shm
 cognios_telemetry.db-wal
 blackbox.db-shm
 blackbox.db-wal
+=======
+# API Keys
+.env
+>>>>>>> without_llm
