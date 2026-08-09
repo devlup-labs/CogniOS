@@ -111,23 +111,25 @@ def get_daemon_status():
             pass
 
     uptime_str = "0m"
-    if daemon_proc:
-        try:
-            uptime_seconds = time.time() - daemon_proc.info['create_time']
-            hours, rem = divmod(uptime_seconds, 3600)
-            minutes, _ = divmod(rem, 60)
-            if hours > 0:
-                uptime_str = f"{int(hours)}h {int(minutes)}m"
-            else:
-                uptime_str = f"{int(minutes)}m"
-        except Exception:
-            pass
+    try:
+        uptime_seconds = time.time() - psutil.boot_time()
+        hours, rem = divmod(uptime_seconds, 3600)
+        minutes, _ = divmod(rem, 60)
+        days, hours = divmod(hours, 24)
+        if days > 0:
+            uptime_str = f"{int(days)}d {int(hours)}h {int(minutes)}m"
+        elif hours > 0:
+            uptime_str = f"{int(hours)}h {int(minutes)}m"
+        else:
+            uptime_str = f"{int(minutes)}m"
+    except Exception:
+        uptime_str = "N/A"
 
     return {
         "is_running": is_running,
         "pid": daemon_pid,
         "db_mode": "WAL" if wal_mode else "DELETE",
-        "uptime_str": uptime_str if is_running else "Offline",
+        "uptime_str": uptime_str,
         "latency_ms": latency_ms if is_running else 0
     }
 
