@@ -1,8 +1,10 @@
 """FocusOS Workload Optimization Engine View matching Stitch design."""
 
+import re
 import streamlit as st
 import dashboard.data_provider as dp
 import config
+
 
 
 def render():
@@ -11,29 +13,50 @@ def render():
     events = dp.get_focusos_events()
     state = dp.get_latest_focusos_state()
 
-    # Determine dynamic active optimizations based on workload
-    w_clean = workload_data["workload"].lower().replace("_", " ")
-    
-    nice_val = "0"
-    io_val = "Best Effort (b7)"
-    tc_val = "OFF"
-    
-    if w_clean == "compiling":
-        nice_val = "-12"
-        io_val = "Idle IO (background)"
-    elif w_clean == "gaming":
-        nice_val = "-10"
-        io_val = "Best Effort (b1)"
-    elif w_clean == "coding":
-        nice_val = "-5"
-        io_val = "Best Effort (b7)"
-    elif w_clean == "video call":
-        nice_val = "-5"
-        tc_val = "ON"
-        io_val = "Best Effort (b7)"
-    elif w_clean == "browsing":
-        nice_val = "0"
-        io_val = "Idle IO (background)"
+    # --- Derive Active Optimizations from ACTUAL applied actions in DB ---
+    # state["actions"] is the ground truth written by log_optimization_result()
+    # after apply_optimization() ran — NOT assumed from the workload label.
+    actions = state.get("actions", []) if state else []
+
+    nice_val = "N/A"
+    io_val   = "N/A"
+    tc_val   = "OFF"
+
+    for action in actions:
+        a = action.lower()
+        # Parse nice value: look for "nice" keyword followed by a number
+        if "nice" in a:
+            m = re.search(r"nice[:\s]+(-?\d+)", a)
+            if m:
+                nice_val = m.group(1)
+            elif "prioriti" in a:
+                # fallback: map workload to expected nice from optimisation.py constants
+                wl = workload_data["workload"].lower().replace("_", " ")
+                nice_map = {"compiling": "-12", "gaming": "-10",
+                            "coding": "-5", "video call": "-5", "browsing": "0"}
+                nice_val = nice_map.get(wl, "0")
+
+        # Parse I/O class
+        if "idle io" in a or "ionice" in a:
+            if "idle" in a:
+                io_val = "Idle IO (class 3)"
+            elif "realtime" in a or "rt" in a:
+                io_val = "Realtime (class 1)"
+            else:
+                io_val = "Best Effort (class 2)"
+        elif "best effort" in a or "ioclass" in a:
+            io_val = "Best Effort (class 2)"
+
+        # Parse network queue state
+        if "fq_codel" in a or "tc " in a or "network" in a:
+            tc_val = "ON"
+
+    # If daemon has never run, state is None — be explicit about it
+    if not state:
+        nice_val = "N/A (daemon not run)"
+        io_val   = "N/A (daemon not run)"
+        tc_val   = "N/A"
+
 
     # AI Diagnostics Explanation HTML
     llm_html = ""
