@@ -37,10 +37,10 @@ _predictor = None
 def get_predictor():
     global _predictor
     if _predictor is None and HAS_FOCUSOS:
-        model_path = os.path.join(BASE_DIR, "focusos", "models", "rf_classifier.pkl")
-        if os.path.exists(model_path):
+        models_dir = os.path.join(BASE_DIR, "focusos", "models_saved")
+        if os.path.exists(models_dir):
             try:
-                _predictor = WorkloadPredictor(model_path)
+                _predictor = WorkloadPredictor(models_dir)
             except Exception:
                 pass
     return _predictor
@@ -266,12 +266,15 @@ def get_focusos_detected_workload():
     try:
         predictor = get_predictor()
         if predictor and os.path.exists(DB_PATH):
-            df_win = get_window_from_db(DB_PATH, window_size=30)
-            if not df_win.empty and len(df_win) >= 5:
+            df_win = get_window_from_db(DB_PATH, limit=30)
+            if df_win is not None and not df_win.empty and len(df_win) >= 5:
                 feats = extract_features(df_win)
-                label, conf = predictor.predict(feats)
-                return {"workload": label.upper(), "confidence": int(conf * 100)}
-    except Exception:
+                if feats is not None and not feats.empty:
+                    pred = predictor.predict(feats)
+                    if pred:
+                        return {"workload": pred["workload"].upper(), "confidence": int(pred["confidence"])}
+    except Exception as e:
+        print(f"Fallback predictor error: {e}")
         pass
 
     metrics = get_live_system_metrics()
@@ -285,6 +288,8 @@ def get_focusos_detected_workload():
 
 def get_latest_focusos_state():
     """Fetches the most recent workload state and explanation from DB."""
+    if not get_daemon_status().get("is_running"):
+        return None
     try:
         if os.path.exists(DB_PATH):
             conn = sqlite3.connect(DB_PATH, timeout=2.0)
@@ -339,6 +344,8 @@ def get_processor_affinity_matrix():
 
 def get_focusos_events():
     """Returns optimization events log dynamically from database."""
+    if not get_daemon_status().get("is_running"):
+        return None
     try:
         if os.path.exists(DB_PATH):
             conn = sqlite3.connect(DB_PATH, timeout=2.0)

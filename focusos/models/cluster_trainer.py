@@ -648,8 +648,8 @@ if __name__ == "__main__":
     # ── Fill this in after first run, based on inspect_clusters() output ──,Numbers on the LEFT (0–4) come from KMeans,Strings on the RIGHT are what you name each cluster after reading output.,Your mapping WILL differ from this example — read inspect_clusters() output!
     MY_MAPPING = {
          
-            0: "Video_Call",
-            1: "Gaming",
+            0: "Gaming",
+            1: "Video_Call",
             2: "Idle",
             3: "Coding",
             4: "Compiling",
