@@ -5,7 +5,6 @@ import pandas as pd
 from os_doctor.alerts_db import write_to_alerts_table
 from os_doctor.featuring import get_inference_payload_predict
 from os_doctor.i_forest_train import expected_columns
-from os_doctor.llm_layer import generate_llm_explanation 
 from config import DB_PATH, MODEL_PATH, SCALER_PATH
 
 FEATURE_COLUMNS = expected_columns[1:]
