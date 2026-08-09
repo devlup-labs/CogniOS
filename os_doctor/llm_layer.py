@@ -12,11 +12,18 @@ from google.genai import types
 from os_doctor.alerts_db import create_connection, ensure_wal_mode, init_alerts_db
 from config import ALERTS_DB_PATH, ALERTS_TABLE_NAME
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-GEMMA_API_KEY = os.environ.get("GEMMA_API_KEY")
+GEMMA_API_KEY = (
+    os.environ.get("GEMMA_API_KEY")
+    or os.environ.get("GEMINI_API_KEY")
+    or os.environ.get("gem_api_key")
+)
 GEMMA_MODEL = os.environ.get("GEMMA_MODEL", "gemma-4-26b-a4b-it")
 
 REQUEST_TIMEOUT_MS = 15_000        # fail fast rather than block the daemon loop
@@ -261,14 +268,34 @@ Respond with the JSON object described in your instructions."""
 # Gemma call (cloud, via Gemini API) — swapped from Ollama
 # ---------------------------------------------------------------------------
 
+import requests
+
+OLLAMA_URL = "http://localhost:11434/api/generate"
+
 def call_gemma(user_prompt: str, model: str = GEMMA_MODEL, retries: int = 2) -> Optional[str]:
     """
-    Calls hosted Gemma through the Gemini API. Returns the raw text
-    response, or None on failure (network error, timeout, rate limit,
-    auth error, etc.) — callers must handle None gracefully.
+    Calls local Ollama (gemma2:2b) first, falling back to hosted Gemini API if needed.
     """
+    # 1. Try local Ollama server (no API key required)
+    try:
+        payload = {
+            "model": "gemma2:2b",
+            "system": SYSTEM_PROMPT,
+            "prompt": user_prompt,
+            "stream": False,
+            "options": {"temperature": 0.2},
+        }
+        resp = requests.post(OLLAMA_URL, json=payload, timeout=15)
+        if resp.status_code == 200:
+            text = resp.json().get("response", "")
+            if text:
+                return text
+    except Exception:
+        pass
+
+    # 2. Fallback to Gemini API if GEMMA_API_KEY is configured
     if not GEMMA_API_KEY:
-        print("[llm_layer] GEMINI_API_KEY is not set — skipping Gemma call.")
+        print("[llm_layer] Local Ollama call failed and GEMMA_API_KEY is not set.")
         return None
 
     last_error = None
@@ -284,15 +311,12 @@ def call_gemma(user_prompt: str, model: str = GEMMA_MODEL, retries: int = 2) -> 
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_PROMPT,
                     response_mime_type="application/json",
-                    thinking_config=types.ThinkingConfig(thinking_level="minimal"),
                     temperature=0.2,
                     max_output_tokens=200,
                 ),
             )
             return getattr(response, "text", None)
         except Exception as e:
-            # Covers network failures, timeouts, HTTP 429 rate limits,
-            # and any other API-side failure.
             last_error = e
             time.sleep(1.5 * (attempt + 1))
 

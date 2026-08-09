@@ -64,6 +64,7 @@ def flag_anomaly():
                         data = {
                             "raw": raw_input.to_dict(orient='records')[0],
                             "scaled": scaled_df.to_dict(orient='records')[0],
+                            "anomaly_score": float(anomaly_score[0]),
                         }
                         write_to_alerts_table(data, metadata)
                 else:
