@@ -1,14 +1,10 @@
 """Isolation Forest anomaly model for OS Doctor."""
 from sklearn.ensemble import IsolationForest
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, precision_recall_curve, average_precision_score
 from sklearn.preprocessing import StandardScaler
 import pandas as pd
-import numpy as np
 from sqlalchemy import create_engine
 import os
 import joblib
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 expected_columns = [
     "id",                              
@@ -98,12 +94,6 @@ def train_isolation_forest_model():
     scaler.set_output(transform="pandas")  # To get dataframe as output instead of numpy array
     df = scaler.fit_transform(df)
     # print(df)
-
-    # Correlation Matrix
-    # correlation_matrix = df.corr()
-    # print(correlation_matrix)
-    # sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt=".2f")
-    # plt.show()
 
     #HyperParameters 
     n_estimators = 100

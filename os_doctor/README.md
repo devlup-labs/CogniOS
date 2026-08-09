@@ -66,7 +66,7 @@ os_doctor/
 │── README.md             # Project overview and setup guide
 ```
 
-# `feature.py`
+# `featuring.py`
 
 This module bridges the gap between transactional database storage and in-memory multi-dimensional math. It queries the running SQLite database in WAL mode, extracts the latest historical sliding window, standardizes missing rows, and computes derived statistical features for the anomaly detection pipeline.
 
@@ -116,107 +116,43 @@ This module bridges the gap between transactional database storage and in-memory
 ---
 
 
-# `i_forest.py`
+# `i_forest_train.py`
 
-## 1. `initialize_model()`
+**Description:** Handles offline/batch training for OSDoctor's anomaly detection model. It queries historical telemetry datasets from SQLite, trains an unsupervised Isolation Forest model, and serializes the trained artifacts (scaler.joblib and iso_forest_model.joblib) for real-time inference.
 
-- **Input:** None (uses predefined strict configuration parameters: `n_estimators=100`, `max_samples=120`, `contamination='auto'`).
-- **Output:** An initialized and configured `IsolationForest` model instance.
+## 1. `train_isolation_forest_model()`
+**Description:** Connects to the local SQLite database to fetch the training telemetry dataset, preprocesses and scales feature vectors, fits an Isolation Forest model, and persists the model and scaler artifacts to disk.
 
-## 2. `evaluate_matrix(feature_matrix)`
+- **Inputs:** None (reads directly from os_doctor_train table in os_doctor.db).
+- **Outputs:** None (side-effect function: saves scaler.joblib and iso_forest_model.joblib files to disk).
 
-- **Input:** The perfectly formatted, in-memory 120-sample feature matrix passed directly from the `feature.py` layer.
-- **Output:** A numerical anomaly score (`-1` for anomalous, `1` for normal).
+**Workflow:**
+- Establishes a database engine via sqlalchemy and loads os_doctor_train table into a Pandas DataFrame.
+- Applies explicit column naming matching expected_columns and removes non-feature metadata (id, timestamp).
+- Cleans missing values (dropna()).
+- Standardizes feature vectors using StandardScaler to ensure uniform feature weight distribution.Configures and fits IsolationForest hyperparameters ($n\_estimators=100$, $contamination=0.01$, $max\_samples=256$, $max\_features=7$).
+- Exports scaler.joblib and iso_forest_model.joblib using joblib.dump().
 
-## 3. `trigger_alert(anomaly_data)`
+# `i_forest_predict.py`
+**Description:** Implements the real-time inference loop for OSDoctor's anomaly detection engine. It continuously pulls engineered telemetry data from the database, applies feature scaling, evaluates system behavior using the pre-trained Isolation Forest model, and records detected performance anomalies for downstream diagnostic analysis.
 
-- **Input:** The current anomalous system and process metrics (the relevant matrix data packaged into a Python dictionary).
-- **Output:** A database insertion (JSON payload) directly into the SQLite `alerts` table.
+## 1. `flag_anomaly()`
+**Description:** Runs an active monitoring loop (pulling every 5 seconds) that loads the saved Isolation Forest model and feature scaler to evaluate system health.
+
+- **Inputs:** None (fetches incoming inference payloads dynamically from the SQLite database via get_inference_payload_predict(DB_PATH)).
+
+- **Outputs:** None (side-effect function: logs anomaly status to console and appends detected anomaly payloads to the database via write_to_alerts_table()).
+
+**Workflow:**
+
+- Loads iso_forest_model.joblib and scaler.joblib into memory.
+
+- Fetches incoming raw telemetry feature vectors and process metadata.
+
+- Preprocesses data and scales the feature set while preserving the original raw metrics.
+
+- Computes decision scores and checks for anomaly classification (predict == -1).
+
+Upon anomaly detection, packages both raw (human-readable) and scaled metric payloads into the alerts table for the LLM explanation layer and dashboard.
 
 # `llm_layer.py`
-
-## 1. `watch_alerts_table()`
-
-- **Input:** None (Database connection context)
-- **Output:** `anomaly_id` (Returns the ID of the new anomaly with `PENDING_LLM` status)
-
-## 2. `extract_historical_context(anomaly_id)`
-
-- **Input:** `anomaly_id`
-- **Output:** `telemetry_data` (The historical 120-sample sliding window matrix of the exact process that broke the system)
-
-## 3. `build_prompt_template(telemetry_data)`
-
-- **Input:** `telemetry_data` (Engineered anomaly vectors and historical snapshots)
-- **Output:** `prompt` (A structured JSON prompt template engineered for the LLM)
-
-## 4. `execute_llm_call(prompt)`
-
-- **Input:** `prompt`
-- **Output:** `explanation_text` (A specific, actionable natural language breakdown returned by the LLM API)
-
-## 5. `resolve_alert(anomaly_id, explanation_text)`
-
-- **Input:** `anomaly_id`, `explanation_text`
-- **Output:** Database Update (Updates SQLite row status to `RESOLVED` and appends the final explanation for the Streamlit dashboard)
-
-# `streamlit.py`
-
-## Streamlit Dashboard (`streamlit.py`) - Function Definitions
-
-This document outlines the core functions required to build the `streamlit.py` presentation layer for DoctorOS. These functions follow the passive-observer pattern, smoothly bridging the Hot Path (live system telemetry) and the Cold Path (out-of-band LLM explanations) via the centralized SQLite database.
-
----
-
-## 1. `fetch_latest_telemetry`
-
-- **Input:**
-  - `db_path` (string): The path to the centralized SQLite database.
-  - `time_window_seconds` (int, default=120): The lookback window to fetch data for the graphs.
-- **Output:**
-  - `pandas.DataFrame`: A dataframe containing the historical time-series data for CPU, RAM, Disk I/O, and Network load over the requested window.
-
-## 2. `fetch_summary_metrics`
-
-- **Input:**
-  - `db_path` (string): The path to the centralized SQLite database.
-- **Output:**
-  - `dict`: A dictionary containing the absolute latest single-point metrics from the `system_telemetry` table (e.g., `{"cpu": 85, "ram": 72, "disk": 45, "network": 12}`).
-
-## 3. `fetch_alerts`
-
-- **Input:**
-  - `db_path` (string): The path to the centralized SQLite database.
-  - `limit` (int, default=5): The maximum number of recent alerts to fetch from the `alerts` table.
-- **Output:**
-  - `pandas.DataFrame`: A dataframe of recent anomalies flagged by the Isolation Forest. Crucially, this includes `llm_status` (e.g., `PENDING_LLM` or `RESOLVED`) and `llm_explanation` (the generated text).
-
-## 4. `render_summary_cards`
-
-- **Input:**
-  - `metrics_dict` (dict): The output from `fetch_summary_metrics`.
-- **Output:**
-  - `None`: (UI Side Effect) Uses `st.columns` and `st.metric` to render the high-level gauge cards at the very top of the dashboard.
-
-## 5. `render_resource_graphs`
-
-- **Input:**
-  - `telemetry_df` (pandas.DataFrame): The time-series data output from `fetch_latest_telemetry`.
-- **Output:**
-  - `None`: (UI Side Effect) Renders live updating line charts (via `st.line_chart` or a Plotly equivalent) for system resources mapped to the FocusOS visual footprint.
-
-## 6. `render_alerts_panel`
-
-- **Input:**
-  - `alerts_df` (pandas.DataFrame): The anomaly data output from `fetch_alerts`.
-- **Output:**
-  - `None`: (UI Side Effect) Iterates through the alerts.
-    - If `llm_status == 'PENDING_LLM'`, it renders an `st.spinner` or loading state ("Analyzing anomaly...").
-    - If `llm_status == 'RESOLVED'`, it renders an `st.expander` containing the LLM's natural language explanation and suggested actions.
-
-## 7. `main`
-
-- **Input:**
-  - `None`
-- **Output:**
-  - `None`: (Execution) Acts as the entry point. Orchestrates the dashboard layout, manages the `st_autorefresh` (or polling loop), calls the fetching functions, and passes the retrieved data to the rendering functions.
