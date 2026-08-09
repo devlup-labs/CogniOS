@@ -19,4 +19,5 @@ dependencies = [
     "xgboost>=3.4.0",
     "streamlit>=1.61.1",
     "plotly>=6.9.0",
+    "streamlit-autorefresh>=1.0.1",
 ]

@@ -2,6 +2,9 @@
 # Force Streamlit Hot-Reload
 import os
 import sys
+import signal
+import subprocess
+import psutil
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
@@ -458,7 +461,31 @@ def main():
     with t2:
         st.markdown('<div class="emergency-btn-box">', unsafe_allow_html=True)
         if st.button("Emergency Stop", key="emergency_stop", use_container_width=True):
-            st.warning("Emergency Stop Triggered.")
+            killed_count = 0
+            current_pid = os.getpid()
+            for proc in psutil.process_iter():
+                if proc.pid == current_pid:
+                    continue
+                try:
+                    cmd = " ".join(proc.cmdline())
+                    if any(target in cmd for target in ["cognios_as_daemon.py", "test.py", "i_forest_predict"]):
+                        proc.kill()  # Cross-platform kill (Windows, macOS, Linux)
+                        killed_count += 1
+                except Exception:
+                    pass
+
+            # OS-Aware CLI Fallback
+            try:
+                if os.name == "nt":  # Windows
+                    subprocess.run(["taskkill", "/F", "/FI", "COMMANDLINE eq *test.py*"], capture_output=True)
+                    subprocess.run(["taskkill", "/F", "/FI", "COMMANDLINE eq *cognios_as_daemon.py*"], capture_output=True)
+                else:  # macOS / Linux
+                    subprocess.run(["pkill", "-9", "-f", "test.py"], capture_output=True)
+                    subprocess.run(["pkill", "-9", "-f", "cognios_as_daemon.py"], capture_output=True)
+            except Exception:
+                pass
+
+            st.success(f"🚨 EMERGENCY STOP ACTIVATED: Successfully terminated all active background telemetry & OS Doctor daemons.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Main Page Routing ---

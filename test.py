@@ -32,22 +32,6 @@ from os_doctor.llm_layer import run_llm_daemon
 from config import DB_PATH
 
 if __name__ == "__main__":
-<<<<<<< HEAD
-    threading.Thread(target=execute_os_doctor_db, daemon=True).start()
-    # threading.Thread(target=flag_anomaly, daemon=True).start()
-    run_daemon()
-    # extract_and_engineer_sys(DB_PATH)
-    # extract_and_engineer_processes(DB_PATH)
-    # train_isolation_forest_model()
-    # flag_anomaly()
-    # execute_os_doctor_db()
-    # conn = create_connection()
-    # init_alerts_db(conn)
-
-=======
-    # threading.Thread(target=execute_os_doctor_db, daemon=True).start()
     threading.Thread(target=flag_anomaly, daemon=True).start()
     threading.Thread(target=run_llm_daemon, daemon=True).start()
     run_daemon()
->>>>>>> without_llm
-    

@@ -5,14 +5,8 @@ import pandas as pd
 from os_doctor.alerts_db import write_to_alerts_table
 from os_doctor.featuring import get_inference_payload_predict
 from os_doctor.i_forest_train import expected_columns
-from os_doctor.llm_layer import generate_llm_explanation 
-from config import DB_PATH, MODEL_PATH, SCALER_PATH
+from config import DB_PATH
 
-<<<<<<< HEAD
-def flag_anomaly():
-    model = joblib.load(MODEL_PATH)
-    scaler = joblib.load(SCALER_PATH)
-=======
 FEATURE_COLUMNS = expected_columns[1:]
 
 # IF ANOMALY SCORE >= BEST THRESHOLD WRITE TO ALERTS TABLE
@@ -26,37 +20,11 @@ def flag_anomaly():
     '''
     model = joblib.load('iso_forest_model.joblib')
     scaler = joblib.load('scaler.joblib')
->>>>>>> without_llm
     print("Model loaded. Listening for data...")
     
     try:
         while True:
             try:
-<<<<<<< HEAD
-                new_input, metadata = get_inference_payload(DB_PATH)
-                if new_input is not None:
-                    # 1. Clean input copy for ML processing
-                    clean_input = new_input.copy()
-                    clean_input.columns = expected_columns[1:]
-                    clean_input = clean_input.drop(columns=["timestamp"]).dropna()
-
-                    # 2. Scale features for Isolation Forest
-                    scaled_input = scaler.transform(clean_input)
-                    anomaly_score = model.decision_function(scaled_input)
-                    print(f"Anomaly score: {round(anomaly_score[0], 2)}")
-                    # 3. Check for anomaly flag (-1)
-                    if model.predict(scaled_input)[0] == -1:
-                        print(f"Anomaly detected! Score: {round(anomaly_score[0], 2)}")
-                        
-                        # 4. Generate LLM explanation using raw metadata
-                        llm_explanation = generate_llm_explanation(metadata)
-                        
-                        # 5. Write to alerts DB (data = LLM output, metadata = raw system info)
-                        write_to_alerts_table(data=llm_explanation, metadata=metadata)
-                        print("Alert & LLM explanation successfully saved to database.")
-
-                else: 
-=======
                 # CHANGED: unpack 3 values now (raw, scaled, metadata).
                 # We pass no scaler here — this file owns scaling itself,
                 # since it loads its own scaler.joblib separately.
@@ -80,26 +48,22 @@ def flag_anomaly():
                         scaled_array, columns=raw_input.columns, index=raw_input.index
                     )
 
+                    ANOMALY_THRESHOLD = -0.1
+
                     anomaly_score = model.decision_function(scaled_array)
-                    print(f"Anomaly score: {round(anomaly_score[0], 2)}")
+                    score_val = float(anomaly_score[0])
+                    print(f"Anomaly score: {round(score_val, 2)}")
 
-                    if model.predict(scaled_array)[0] == -1:
-                        print(f"Anomaly detected! Score: {round(anomaly_score[0], 2)}")
+                    if score_val <= ANOMALY_THRESHOLD:
+                        print(f"Anomaly detected! Score: {round(score_val, 2)} (Threshold: {ANOMALY_THRESHOLD})")
 
-                        # CHANGED: store BOTH raw (human-readable, for the
-                        # LLM layer / dashboard) and scaled (for anomaly-
-                        # magnitude ranking) — old code tried to call
-                        # .to_dict() on `new_input` AFTER it had already
-                        # been overwritten by scaler.transform(), which
-                        # returns a plain numpy array with no .to_dict().
                         data = {
                             "raw": raw_input.to_dict(orient='records')[0],
                             "scaled": scaled_df.to_dict(orient='records')[0],
-                            "anomaly_score": float(anomaly_score[0]),
+                            "anomaly_score": score_val,
                         }
                         write_to_alerts_table(data, metadata)
                 else:
->>>>>>> without_llm
                     print("No new data available for anomaly detection.")
             except Exception as e:
                 print("Error in flag anomaly:", e)
@@ -107,8 +71,4 @@ def flag_anomaly():
             time.sleep(5)
             
     except KeyboardInterrupt:
-<<<<<<< HEAD
         print("\nAnomaly detection stopped.")
-=======
-        print("\nAnomaly detection stopped.")
->>>>>>> without_llm

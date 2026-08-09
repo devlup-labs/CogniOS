@@ -134,9 +134,11 @@ def get_daemon_status():
     }
 
 
+_telemetry_history_buffer = []
+
 def get_live_system_metrics():
     """Fetches real-time system metrics (CPU, RAM, Disk I/O, Network)."""
-    global _last_io_counters
+    global _last_io_counters, _telemetry_history_buffer
     cpu_pct = psutil.cpu_percent(interval=None)
     mem = psutil.virtual_memory()
 
@@ -183,12 +185,28 @@ def get_live_system_metrics():
         except Exception:
             pass
 
+    # Dynamic Process RAM usage (2 decimal places for real-time responsiveness)
+    mem_used_gb = round(mem.used / (1024**3), 2)
+    mem_total_gb = round(mem.total / (1024**3), 1)
+    mem_pct = round((mem.used / mem.total) * 100, 1)
+
+    now_str = time.strftime("%H:%M:%S")
+    _telemetry_history_buffer.append({
+        "timestamp": now_str,
+        "cpu": cpu_pct,
+        "ram": mem_pct,
+        "disk_read": disk_read_mb,
+        "disk_write": disk_write_mb
+    })
+    if len(_telemetry_history_buffer) > 120:
+        _telemetry_history_buffer.pop(0)
+
     return {
-        "timestamp": time.strftime("%H:%M:%S"),
+        "timestamp": now_str,
         "cpu_pct": cpu_pct,
-        "memory_pct": mem.percent,
-        "memory_used_gb": round(mem.used / (1024**3), 1),
-        "memory_total_gb": round(mem.total / (1024**3), 1),
+        "memory_pct": mem_pct,
+        "memory_used_gb": mem_used_gb,
+        "memory_total_gb": mem_total_gb,
         "load_avg1": round(load1, 2),
         "load_avg5": round(load5, 2),
         "load_avg15": round(load15, 2),
@@ -203,31 +221,44 @@ def get_live_system_metrics():
 
 
 def get_telemetry_history(limit=60):
-    """Retrieves real history of CPU & RAM metrics from layer1_sys or blackbox."""
+    """Retrieves fresh history of CPU & RAM metrics from DB or live rolling ring-buffer."""
     try:
         if os.path.exists(DB_PATH):
             conn = sqlite3.connect(DB_PATH, timeout=2.0)
             df = pd.read_sql(f"""
-                SELECT timestamp, cpu_usage_percent as cpu, memory_percent as ram, 
+                SELECT id, timestamp, cpu_usage_percent as cpu, memory_percent as ram, 
                        disk_read_mb_s as disk_read, disk_write_mb_s as disk_write
                 FROM layer1_sys 
                 ORDER BY id DESC LIMIT {limit}
             """, conn)
             conn.close()
             if not df.empty:
-                df = df[::-1].reset_index(drop=True)
-                df['timestamp'] = df['timestamp'].apply(_parse_timestamp)
-                return df
+                latest_ts = df.iloc[0]['timestamp']
+                is_fresh = False
+                try:
+                    ts_val = pd.to_datetime(latest_ts).timestamp()
+                    if time.time() - ts_val < 15:
+                        is_fresh = True
+                except Exception:
+                    pass
+
+                if is_fresh:
+                    df = df[::-1].reset_index(drop=True)
+                    df['timestamp'] = df['timestamp'].apply(_parse_timestamp)
+                    return df
     except Exception:
         pass
+
+    if _telemetry_history_buffer:
+        return pd.DataFrame(_telemetry_history_buffer[-limit:])
 
     times = [time.strftime("%H:%M:%S", time.localtime(time.time() - (limit - i))) for i in range(limit)]
     return pd.DataFrame({
         "timestamp": times,
-        "cpu": [20 + (i % 15) for i in range(limit)],
-        "ram": [35 + (i % 5) for i in range(limit)],
-        "disk_read": [10 for _ in range(limit)],
-        "disk_write": [5 for _ in range(limit)]
+        "cpu": [psutil.cpu_percent(interval=None) for _ in range(limit)],
+        "ram": [round((psutil.virtual_memory().used / psutil.virtual_memory().total) * 100, 1) for _ in range(limit)],
+        "disk_read": [0 for _ in range(limit)],
+        "disk_write": [0 for _ in range(limit)]
     })
 
 
@@ -604,26 +635,36 @@ System operating normally with active real-time telemetry streaming.
 # --- OS Doctor Data Methods ---
 
 def get_os_doctor_anomaly_score():
-    """Runs Isolation Forest predict or calculates anomaly score (0-100) from real telemetry."""
+    """Calculates dynamic Isolation Forest anomaly score (0-100) from alerts.db & live telemetry."""
     score = 12
     status = "LOW RISK"
 
     try:
-        if os.path.exists(BLACKBOX_DB_PATH) or os.path.exists(DB_PATH):
-            target_db = BLACKBOX_DB_PATH if os.path.exists(BLACKBOX_DB_PATH) else DB_PATH
-            conn = sqlite3.connect(target_db, timeout=2.0)
-            df = pd.read_sql("SELECT * FROM layer1_sys ORDER BY id DESC LIMIT 10", conn) if os.path.exists(DB_PATH) else pd.read_sql("SELECT * FROM blackbox_telemetry ORDER BY id DESC LIMIT 10", conn)
+        if os.path.exists(ALERTS_DB_PATH):
+            conn = sqlite3.connect(ALERTS_DB_PATH, timeout=2.0)
+            cursor = conn.cursor()
+            check_tbl = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='alerts'").fetchone()
+            if check_tbl:
+                row = cursor.execute("SELECT data FROM alerts ORDER BY id DESC LIMIT 1").fetchone()
+                if row and row[0]:
+                    data_obj = json.loads(row[0])
+                    anom_score = data_obj.get("anomaly_score")
+                    if anom_score is not None:
+                        score = min(99, max(15, int(abs(anom_score) * 450)))
             conn.close()
-            
-            if not df.empty:
-                latest = df.iloc[-1].to_dict()
-                cpu = float(latest.get("cpu_usage_percent", 0) or 0)
-                mem = float(latest.get("memory_percent", 0) or 0)
-                score = min(99, max(5, int((cpu * 0.6) + (mem * 0.4))))
-                if score > 75:
-                    status = "HIGH RISK"
-                elif score > 45:
-                    status = "ELEVATED RISK"
+
+        if score == 12:
+            metrics = get_live_system_metrics()
+            cpu = metrics.get('cpu_pct', 0)
+            mem = metrics.get('memory_pct', 0)
+            score = min(99, max(8, int((cpu * 0.55) + (mem * 0.45))))
+
+        if score > 75:
+            status = "HIGH RISK"
+        elif score > 45:
+            status = "ELEVATED RISK"
+        else:
+            status = "LOW RISK"
     except Exception:
         pass
 
@@ -861,4 +902,125 @@ def retrain_blackbox_model():
             return {"success": True, "message": f"Successfully retrained Isolation Forest model on {len(vectors)} vectors."}
     except Exception as e:
         return {"success": False, "message": f"Retrain failed: {str(e)}"}
+
+
+# --- OS Doctor Human-Readable LLM Diagnoses Data Methods ---
+
+def get_os_doctor_diagnoses(limit=20, severity_filter=None, search_query=None):
+    """
+    Fetches human-readable LLM diagnostic explanations from os_doctor/alerts.db.
+    Joins 'diagnoses' table with 'alerts' table.
+    """
+    diagnoses = []
+    try:
+        if os.path.exists(ALERTS_DB_PATH):
+            conn = sqlite3.connect(ALERTS_DB_PATH, timeout=2.0)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            check_tbl = cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='diagnoses'"
+            ).fetchone()
+            
+            if check_tbl:
+                query = """
+                    SELECT d.id, d.alert_id, d.issue, d.cause, d.severity,
+                           d.suggested_action, d.confidence, d.created_at,
+                           a.metadata, a.data
+                    FROM diagnoses d
+                    JOIN alerts a ON d.alert_id = a.id
+                    ORDER BY d.id DESC
+                    LIMIT ?
+                """
+                rows = cursor.execute(query, (limit * 2,)).fetchall()
+                
+                for r in rows:
+                    row_dict = dict(r)
+                    
+                    sev = row_dict.get("severity") or "Low"
+                    if severity_filter and severity_filter != "All" and sev.lower() != severity_filter.lower():
+                        continue
+                        
+                    cause = row_dict.get("cause") or ""
+                    issue = row_dict.get("issue") or ""
+                    action = row_dict.get("suggested_action") or ""
+                    
+                    if search_query:
+                        sq = search_query.lower()
+                        if sq not in cause.lower() and sq not in issue.lower() and sq not in action.lower():
+                            continue
+                            
+                    try:
+                        meta_obj = json.loads(row_dict.get("metadata") or "{}")
+                    except Exception:
+                        meta_obj = {}
+                        
+                    try:
+                        data_obj = json.loads(row_dict.get("data") or "{}")
+                    except Exception:
+                        data_obj = {}
+
+                    diagnoses.append({
+                        "id": row_dict.get("id"),
+                        "alert_id": row_dict.get("alert_id"),
+                        "issue": issue,
+                        "cause": cause,
+                        "severity": sev,
+                        "suggested_action": action,
+                        "confidence": float(row_dict.get("confidence") or 60.0),
+                        "created_at": _parse_timestamp(row_dict.get("created_at")),
+                        "metadata": meta_obj,
+                        "raw_metrics": data_obj.get("raw", {}),
+                        "scaled_metrics": data_obj.get("scaled", {}),
+                    })
+                    
+                    if len(diagnoses) >= limit:
+                        break
+            conn.close()
+    except Exception as e:
+        print(f"[dashboard] Error fetching OS Doctor diagnoses: {e}")
+        
+    return diagnoses
+
+
+def get_os_doctor_summary_stats():
+    """Calculates summary statistics for OS Doctor AI diagnoses."""
+    stats = {
+        "total_diagnoses": 0,
+        "critical_high_count": 0,
+        "avg_confidence": 0.0,
+        "latest_issue": "None",
+        "provider": "Ollama (gemma2:2b)"
+    }
+    try:
+        if os.path.exists(ALERTS_DB_PATH):
+            conn = sqlite3.connect(ALERTS_DB_PATH, timeout=2.0)
+            cursor = conn.cursor()
+            
+            check_tbl = cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='diagnoses'"
+            ).fetchone()
+            
+            if check_tbl:
+                row = cursor.execute("""
+                    SELECT COUNT(*), 
+                           SUM(CASE WHEN LOWER(severity) IN ('high', 'critical') THEN 1 ELSE 0 END),
+                           AVG(confidence)
+                    FROM diagnoses
+                """).fetchone()
+                
+                if row and row[0]:
+                    stats["total_diagnoses"] = row[0]
+                    stats["critical_high_count"] = row[1] or 0
+                    stats["avg_confidence"] = round(row[2] or 60.0, 1)
+                    
+                latest_row = cursor.execute("SELECT issue FROM diagnoses ORDER BY id DESC LIMIT 1").fetchone()
+                if latest_row and latest_row[0]:
+                    stats["latest_issue"] = latest_row[0]
+                    
+            conn.close()
+    except Exception:
+        pass
+        
+    return stats
 
