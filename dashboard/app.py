@@ -448,7 +448,7 @@ def main():
     with t1:
         st.html(f"""
             <div style="display:flex; gap:12px; align-items:center; margin-bottom: 16px;">
-                <span class="top-status-pill"><i class="fa-solid fa-circle" style="color:#00f5c4; font-size:8px;"></i> Uptime: {daemon_status['uptime_pct']}%</span>
+                <span class="top-status-pill"><i class="fa-solid fa-circle" style="color:#00f5c4; font-size:8px;"></i> Uptime: {daemon_status.get('uptime_str', 'N/A')}</span>
                 <span class="top-status-pill"><i class="fa-solid fa-database" style="color:#38bdf8;"></i> DB: {daemon_status['db_mode']}</span>
                 <span class="top-status-pill"><i class="fa-solid fa-bolt" style="color:#f59e0b;"></i> Latency: {daemon_status['latency_ms']}ms</span>
             </div>

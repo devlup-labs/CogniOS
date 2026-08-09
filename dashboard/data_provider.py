@@ -77,26 +77,49 @@ def get_daemon_status():
     daemon_pid = None
     is_running = False
 
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+    daemon_proc = None
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
         try:
             cmdline = proc.info.get('cmdline') or []
             cmd_str = " ".join(cmdline)
             if "cognios_as_daemon.py" in cmd_str:
                 daemon_pid = proc.info['pid']
+                daemon_proc = proc
                 is_running = True
                 break
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
 
     wal_mode = False
+    latency_ms = 0
     db_to_check = DB_PATH if os.path.exists(DB_PATH) else (BLACKBOX_DB_PATH if os.path.exists(BLACKBOX_DB_PATH) else None)
     if db_to_check and os.path.exists(db_to_check):
         try:
+            start_t = time.perf_counter()
             conn = sqlite3.connect(db_to_check, timeout=1.0)
             res = conn.execute("PRAGMA journal_mode;").fetchone()
+            end_t = time.perf_counter()
+            
+            latency_ms = int((end_t - start_t) * 1000)
+            if latency_ms == 0: latency_ms = 1
+            
             if res and str(res[0]).lower() == "wal":
                 wal_mode = True
             conn.close()
+        except Exception:
+            latency_ms = -1
+            pass
+
+    uptime_str = "0m"
+    if daemon_proc:
+        try:
+            uptime_seconds = time.time() - daemon_proc.info['create_time']
+            hours, rem = divmod(uptime_seconds, 3600)
+            minutes, _ = divmod(rem, 60)
+            if hours > 0:
+                uptime_str = f"{int(hours)}h {int(minutes)}m"
+            else:
+                uptime_str = f"{int(minutes)}m"
         except Exception:
             pass
 
@@ -104,8 +127,8 @@ def get_daemon_status():
         "is_running": is_running,
         "pid": daemon_pid,
         "db_mode": "WAL" if wal_mode else "DELETE",
-        "uptime_pct": 99.9 if is_running else 0.0,
-        "latency_ms": 1 if is_running else 0
+        "uptime_str": uptime_str if is_running else "Offline",
+        "latency_ms": latency_ms if is_running else 0
     }
 
 
