@@ -265,10 +265,11 @@ def get_telemetry_history(limit=60):
 def get_top_processes_list(limit=10):
     """Retrieves live active process list (PID, Name, CPU%, RAM%)."""
     procs = []
+    num_cores = psutil.cpu_count() or 1
     for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
         try:
             info = p.info
-            cpu = info.get('cpu_percent') or 0.0
+            cpu = (info.get('cpu_percent') or 0.0) / num_cores
             ram = info.get('memory_percent') or 0.0
             if cpu > 0 or ram > 0.1:
                 procs.append({
