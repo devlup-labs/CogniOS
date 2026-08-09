@@ -28,7 +28,7 @@ def create_connection(db_path=ALERTS_DB_PATH):
 
 def init_alerts_db(conn=None):
     """
-    Initializes os_doctor_alerts table matching OS Doctor specifications.
+    Initializes alerts table matching OS Doctor specifications.
     """
     should_close = False
     if conn is None:
@@ -37,14 +37,10 @@ def init_alerts_db(conn=None):
 
     conn.execute(f'''
         CREATE TABLE IF NOT EXISTS {ALERTS_TABLE_NAME} (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp        REAL NOT NULL,
-            anomaly_type     TEXT NOT NULL,
-            severity         TEXT NOT NULL,
-            confidence       REAL NOT NULL,
-            explanation      TEXT NOT NULL,
-            suggested_action TEXT NOT NULL,
-            raw_metadata     TEXT NOT NULL
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp REAL NOT NULL,
+            metadata  TEXT NOT NULL,
+            data      TEXT NOT NULL
         )
     ''')
     conn.commit()
@@ -53,16 +49,20 @@ def init_alerts_db(conn=None):
 
 def write_to_alerts_table(data, metadata):
     """
-    Extracts LLM output fields and stores them alongside raw metadata.
-    data: Dictionary returned by generate_llm_explanation()
-    metadata: Dictionary containing raw system telemetry
+    Stores detected anomaly payload (raw + scaled) alongside metadata.
+    data: Dictionary containing "raw" and "scaled" metrics
+    metadata: Dictionary containing process/system metadata
     """
     conn = create_connection(ALERTS_DB_PATH)
     init_alerts_db(conn)
-    row = [
-        json.dumps(metadata, separators=(',', ':')),
-        json.dumps(data, separators=(',',':'))
-    ]
-
+    conn.execute(
+        f"INSERT INTO {ALERTS_TABLE_NAME} (timestamp, metadata, data) VALUES (?, ?, ?)",
+        (
+            time.time(),
+            json.dumps(metadata, separators=(',', ':')),
+            json.dumps(data, separators=(',', ':'))
+        )
+    )
     conn.commit()
     conn.close()
+
