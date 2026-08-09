@@ -3,7 +3,7 @@
 import streamlit as st
 import plotly.graph_objects as go
 import dashboard.data_provider as dp
-
+import config
 
 def render():
     diag_score = dp.get_os_doctor_anomaly_score()

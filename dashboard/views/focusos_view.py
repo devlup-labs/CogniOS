@@ -2,6 +2,7 @@
 
 import streamlit as st
 import dashboard.data_provider as dp
+import config
 
 
 def render():

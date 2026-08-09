@@ -1,5 +1,5 @@
 """Streamlit Dashboard main entry point for CogniOS matching Stitch design specs."""
-
+# Force Streamlit Hot-Reload
 import os
 import sys
 import streamlit as st
@@ -18,6 +18,7 @@ if BASE_DIR not in sys.path:
 
 import dashboard.data_provider as dp
 from dashboard.views import system_overview, focusos_view, blackbox_view, os_doctor_view, research_view
+import config
 
 # Inject Font Awesome, Google Fonts and Custom Dark Cyberpunk Button/Card CSS
 st.markdown("""
@@ -472,6 +473,12 @@ def main():
         os_doctor_view.render()
     elif curr == "research":
         research_view.render()
+
+    # --- Robust Auto Refresh Loop ---
+    import time
+    if hasattr(config, 'AUTO_REFRESH') and config.AUTO_REFRESH:
+        time.sleep(config.AUTO_REFRESH)
+        st.rerun()
 
 
 if __name__ == "__main__":

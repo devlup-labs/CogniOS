@@ -3,6 +3,7 @@
 import streamlit as st
 import plotly.graph_objects as go
 import dashboard.data_provider as dp
+import config
 
 
 def render():

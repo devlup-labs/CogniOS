@@ -3,7 +3,7 @@
 import streamlit as st
 import plotly.graph_objects as go
 import dashboard.data_provider as dp
-
+import config
 
 def render():
     st.html("""<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;"><div><h1 style="margin:0; font-size: 28px; font-weight: 800; color: #ffffff;">Live Telemetry</h1><p style="margin: 4px 0 0 0; color: #64748b; font-size: 14px;">System observability matrix initialized.</p></div></div>""")
