@@ -2,7 +2,7 @@ import sqlite3
 import time
 from sqlalchemy import create_engine
 
-from os_doctor.featuring import get_inference_payload
+from os_doctor.featuring import get_inference_payload_train
 from config import DB_PATH
 
 OS_DOCTOR_DB_PATH = "os_doctor.db"
@@ -99,9 +99,9 @@ def execute_os_doctor_db():
         print("Starting the appending procces for os_doctor_train. Press Ctrl+C to stop")
         while True:
             try:
-                ml_features_df, metadata = get_inference_payload(DB_PATH)
-                if ml_features_df is not None:
-                    write_to_os_doctor_train(ml_features_df, OS_DOCTOR_DB_PATH)
+                ml_features_scaled_df, metadata = get_inference_payload_train(DB_PATH)
+                if ml_features_scaled_df is not None:
+                    write_to_os_doctor_train(ml_features_scaled_df, OS_DOCTOR_DB_PATH)
                     print("Successfully appended to os_doctor_train")
             except Exception as e:
                 print(e)
