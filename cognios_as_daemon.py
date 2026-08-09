@@ -30,6 +30,12 @@ from blackbox.anomaly_model import load_model, predict, anomaly_severity
 from blackbox.replay import replay
 from config import ANOMALY_CHECK_INTERVAL_SEC 
 
+from focusos.models.classifier import WorkloadPredictor, FEATURE_COLUMNS
+from focusos.feature_engineer import extract_features
+from focusos.sliding_window import get_window_from_db
+from focusos.llm_explainer import generate_explanation
+from focusos.optimisation import apply_optimization
+
 
 def run_layer1_loop(stop_event):
     logger = get_layer_logger("layer1")
@@ -190,6 +196,60 @@ def run_layer2_loop(stop_event):
         conn.close()
 
 
+def run_focusos_loop(stop_event):
+    logger = get_layer_logger("focusos")
+    logger.info("Starting FocusOS inference loop.")
+    
+    try:
+        predictor = WorkloadPredictor()
+    except Exception as e:
+        logger.error(f"Failed to load WorkloadPredictor: {e}")
+        return
+
+    last_workload = None
+    last_explanation = ""
+    last_explanation_time = 0
+    COOLDOWN_SECONDS = 30
+    
+    try:
+        while not stop_event.is_set():
+            try:
+                df_window = get_window_from_db()
+                if df_window is not None and not df_window.empty and len(df_window) >= 5:
+                    features = extract_features(df_window)
+                    if features is not None:
+                        result = predictor.predict(features)
+                        if result:
+                            workload = result['workload']
+                            confidence = result['confidence']
+                            
+                            try:
+                                importances = predictor.xgb.feature_importances_
+                                top_indices = importances.argsort()[::-1][:3]
+                                top_features = {}
+                                for idx in top_indices:
+                                    feat_name = FEATURE_COLUMNS[idx]
+                                    feat_val = float(features[feat_name].iloc[0])
+                                    top_features[feat_name] = round(feat_val, 4)
+                            except Exception as e:
+                                logger.error(f"Error extracting top features: {e}")
+                                top_features = {}
+
+                            current_time = time.time()
+                            if (workload != last_workload) or (current_time - last_explanation_time >= COOLDOWN_SECONDS):
+                                last_explanation = generate_explanation(workload, confidence, top_features)
+                                last_workload = workload
+                                last_explanation_time = current_time
+                                logger.info(f"Detected: {workload} ({confidence}%). New explanation generated.")
+                                apply_optimization(workload, confidence, last_explanation)
+            except Exception as e:
+                logger.error(f"Error in FocusOS inference loop: {e}")
+
+            time.sleep(2)
+    finally:
+        logger.info("Stopping FocusOS inference loop.")
+
+
 def run_daemon():
     ensure_wal_mode(DB_PATH)
 
@@ -200,19 +260,30 @@ def run_daemon():
     signal.signal(signal.SIGINT, _request_shutdown)
     signal.signal(signal.SIGTERM, _request_shutdown)
 
+    # Import OS Doctor modules
+    from os_doctor.i_forest_predict import flag_anomaly
+    from os_doctor.llm_layer import run_llm_daemon
+
     t1 = threading.Thread(target=run_layer1_loop, args=(stop_event,), daemon=True)
     t2 = threading.Thread(target=run_layer2_loop, args=(stop_event,), daemon=True)
+    t3 = threading.Thread(target=run_focusos_loop, args=(stop_event,), daemon=True)
+    t4 = threading.Thread(target=flag_anomaly, daemon=True)
+    t5 = threading.Thread(target=run_llm_daemon, daemon=True)
+    
     t1.start()
     t2.start()
+    t3.start()
+    t4.start()
+    t5.start()
 
     try:
-        while t1.is_alive() or t2.is_alive():
+        while t1.is_alive() or t2.is_alive() or t3.is_alive():
             time.sleep(1)
     except KeyboardInterrupt:
         stop_event.set()
         t1.join(timeout=2)
         t2.join(timeout=2)
-
+        t3.join(timeout=2)
 
 if __name__ == "__main__":
     run_daemon()
