@@ -38,6 +38,7 @@ from focusos.models.classifier import WorkloadPredictor, FEATURE_COLUMNS
 from focusos.feature_engineer import extract_features
 from focusos.sliding_window import get_window_from_db
 from focusos.llm_explainer import generate_explanation
+from focusos.optimisation import apply_optimization
 import time 
 
 def run_focusos():
@@ -84,6 +85,8 @@ def run_focusos():
                         last_workload = workload
                         last_explanation_time = current_time
                         print(f"Explanation (Updated): {last_explanation}\n")
+                        # Trigger dynamic system optimizations and log to DB
+                        apply_optimization(workload, confidence, last_explanation)
                     else:
                         print(f"Explanation (Cached): {last_explanation}\n")
         time.sleep(2)

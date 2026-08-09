@@ -15,7 +15,7 @@ from config import IDES
 from config import GAMES
 '''These lists are not yet written in cofig file, will be updated soon'''
 
-def apply_optimization(workload: str, confidence: float) -> bool:
+def apply_optimization(workload: str, confidence: float, explanation: str = "") -> bool:
 	if confidence < 80:
 		print(f"Optimisation aborted: Confidence for {workload} is less than 80%")
 		return False
@@ -36,6 +36,9 @@ def apply_optimization(workload: str, confidence: float) -> bool:
 			background_cores = [c for c in range(total_cores) if c % 2 != 0] or [total_cores - 1]
 
 	top_cpu, top_mem = get_top_processes(5)
+	unique_processes_dict = {p['pid']: p for p in top_cpu + top_mem}
+	unique_processes = list(unique_processes_dict.values())
+	
 	workload_clean = workload.lower().replace("_", " ")
 
 	if workload_clean != "video call":
@@ -149,7 +152,7 @@ def apply_optimization(workload: str, confidence: float) -> bool:
 
 	if len(actions) > 0:
 		try:
-			log_optimization_result(workload, confidence, actions)
+			log_optimization_result(workload, confidence, actions, explanation)
 			print(f"Optimization Successful: {actions[-1]}")
 			return True
 		except Exception as e:
@@ -289,7 +292,7 @@ def get_cores():
 		return p_cores, e_cores #returns empty lists if p and e core bifurcation does not exist
 
 
-def log_optimization_result(workload: str, confidence: float, actions: list[str]):
+def log_optimization_result(workload: str, confidence: float, actions: list[str], explanation: str = ""):
 		"""Log all optimisation events to the focusos_events database table."""
 		conn = None
 		try:
@@ -303,10 +306,15 @@ def log_optimization_result(workload: str, confidence: float, actions: list[str]
 								actions    TEXT
 						)
 				""")
+				try:
+						cur.execute("ALTER TABLE focusos_events ADD COLUMN explanation TEXT")
+				except sqlite3.OperationalError:
+						pass  # Column already exists
+				
 				cur.execute(
-						"""INSERT INTO focusos_events (timestamp, workload, confidence, actions)
-							 VALUES (?, ?, ?, ?)""",
-						(time.time(), workload, confidence, json.dumps(actions))
+						"""INSERT INTO focusos_events (timestamp, workload, confidence, actions, explanation)
+							 VALUES (?, ?, ?, ?, ?)""",
+						(time.time(), workload, confidence, json.dumps(actions), explanation)
 				)
 				conn.commit()
 		except Exception as e:
