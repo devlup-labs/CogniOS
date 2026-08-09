@@ -194,7 +194,13 @@ def get_top_processes_list(limit=10):
 # --- FocusOS Data Methods ---
 
 def get_focusos_detected_workload():
-    """Infers current workload using FocusOS Machine Learning model."""
+    """Infers current workload using FocusOS Machine Learning model or latest DB state."""
+    # First, try to get the latest state from the database daemon
+    state = get_latest_focusos_state()
+    if state and state.get("workload"):
+        return {"workload": state["workload"].upper(), "confidence": int(state["confidence"])}
+
+    # Fallback to local prediction
     try:
         predictor = get_predictor()
         if predictor and os.path.exists(DB_PATH):
@@ -213,6 +219,36 @@ def get_focusos_detected_workload():
         return {"workload": "IO_INTENSIVE", "confidence": 88}
     else:
         return {"workload": "BALANCED", "confidence": 95}
+
+
+def get_latest_focusos_state():
+    """Fetches the most recent workload state and explanation from DB."""
+    try:
+        if os.path.exists(DB_PATH):
+            conn = sqlite3.connect(DB_PATH, timeout=2.0)
+            # Handle schema where explanation column might not exist yet
+            try:
+                row = conn.execute("SELECT workload, confidence, actions, explanation FROM focusos_events ORDER BY rowid DESC LIMIT 1").fetchone()
+            except sqlite3.OperationalError:
+                row = conn.execute("SELECT workload, confidence, actions, '' as explanation FROM focusos_events ORDER BY rowid DESC LIMIT 1").fetchone()
+            conn.close()
+            
+            if row:
+                workload, confidence, actions_raw, explanation = row
+                try:
+                    actions = json.loads(actions_raw)
+                except Exception:
+                    actions = []
+                return {
+                    "workload": workload,
+                    "confidence": confidence,
+                    "explanation": explanation,
+                    "actions": actions
+                }
+    except Exception:
+        pass
+    
+    return None
 
 
 def get_processor_affinity_matrix():
@@ -240,7 +276,47 @@ def get_processor_affinity_matrix():
 
 
 def get_focusos_events():
-    """Returns optimization events log."""
+    """Returns optimization events log dynamically from database."""
+    try:
+        if os.path.exists(DB_PATH):
+            conn = sqlite3.connect(DB_PATH, timeout=2.0)
+            df = pd.read_sql("SELECT timestamp, workload, actions FROM focusos_events ORDER BY rowid DESC LIMIT 20", conn)
+            conn.close()
+            
+            if not df.empty:
+                events = []
+                for _, r in df.iterrows():
+                    ts = _parse_timestamp(r['timestamp'])
+                    actions = []
+                    try:
+                        actions = json.loads(r['actions'])
+                    except Exception:
+                        pass
+                    
+                    if actions:
+                        # Append each action as a separate event
+                        for act in actions:
+                            evt_type = "OPT"
+                            act_lower = act.lower()
+                            if "nice" in act_lower or "priorit" in act_lower:
+                                evt_type = "PRIO"
+                            elif "core" in act_lower or "pinned" in act_lower or "affinity" in act_lower:
+                                evt_type = "SCHED"
+                            elif "io" in act_lower or "network" in act_lower:
+                                evt_type = "IO"
+                                
+                            events.append({
+                                "time": ts,
+                                "type": evt_type,
+                                "message": act
+                            })
+                
+                if events:
+                    return events
+    except Exception:
+        pass
+
+    # Fallback dummy events
     now = time.time()
     return [
         {
