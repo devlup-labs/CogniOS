@@ -639,21 +639,21 @@ def get_process_drilldown(pid):
             try:
                 open_files = len(p.open_files())
             except Exception:
-                open_files = 142
+                open_files = "N/A"
             
             try:
                 cpu_times = p.cpu_times()
                 u_time = round(cpu_times.user, 1)
                 s_time = round(cpu_times.system, 1)
             except Exception:
-                u_time, s_time = 120.4, 45.2
+                u_time, s_time = "N/A", "N/A"
                 
             try:
                 ctx = p.num_ctx_switches()
                 vol_ctx = ctx.voluntary
                 invol_ctx = ctx.involuntary
             except Exception:
-                vol_ctx, invol_ctx = 48291, 1204
+                vol_ctx, invol_ctx = "N/A", "N/A"
                 
             sockets = []
             try:
@@ -669,12 +669,6 @@ def get_process_drilldown(pid):
                     })
             except Exception:
                 pass
-                
-            if not sockets:
-                sockets = [
-                    {"protocol": "TCP", "local": "127.0.0.1:9222", "foreign": "127.0.0.1:43866", "status": "ESTABLISHED"},
-                    {"protocol": "TCP", "local": "127.0.0.1:9222", "foreign": "*:*", "status": "LISTEN"}
-                ]
 
             return {
                 "pid": pid,
