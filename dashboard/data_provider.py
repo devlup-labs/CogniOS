@@ -62,6 +62,14 @@ def _parse_timestamp(raw_ts):
     return ts_str
 
 
+_last_io_counters = {
+    "time": 0.0,
+    "disk_read": 0,
+    "disk_write": 0,
+    "net_in": 0,
+    "net_out": 0
+}
+
 # --- Global Observability Data Methods ---
 
 def get_daemon_status():
@@ -103,6 +111,7 @@ def get_daemon_status():
 
 def get_live_system_metrics():
     """Fetches real-time system metrics (CPU, RAM, Disk I/O, Network)."""
+    global _last_io_counters
     cpu_pct = psutil.cpu_percent(interval=None)
     mem = psutil.virtual_memory()
 
@@ -111,15 +120,43 @@ def get_live_system_metrics():
     except Exception:
         load1, load5, load15 = 0.5, 0.4, 0.3
 
+    now = time.time()
+    dt = now - _last_io_counters["time"] if _last_io_counters["time"] > 0 else 1.0
+    if dt <= 0: dt = 1.0
+
     disk_io = psutil.disk_io_counters()
-    disk_read_mb = round((disk_io.read_bytes / (1024 * 1024)) % 100, 1) if disk_io else 0.0
-    disk_write_mb = round((disk_io.write_bytes / (1024 * 1024)) % 100, 1) if disk_io else 0.0
+    d_read = disk_io.read_bytes if disk_io else 0
+    d_write = disk_io.write_bytes if disk_io else 0
 
     net_io = psutil.net_io_counters()
-    net_in_mb = round((net_io.bytes_recv / (1024 * 1024)) % 50, 1) if net_io else 0.0
-    net_out_mb = round((net_io.bytes_sent / (1024 * 1024)) % 50, 1) if net_io else 0.0
+    n_in = net_io.bytes_recv if net_io else 0
+    n_out = net_io.bytes_sent if net_io else 0
+
+    if _last_io_counters["time"] == 0.0:
+        disk_read_mb, disk_write_mb = 0.0, 0.0
+        net_in_mb, net_out_mb = 0.0, 0.0
+    else:
+        disk_read_mb = max(0.0, round((d_read - _last_io_counters["disk_read"]) / (1024 * 1024 * dt), 1))
+        disk_write_mb = max(0.0, round((d_write - _last_io_counters["disk_write"]) / (1024 * 1024 * dt), 1))
+        net_in_mb = max(0.0, round((n_in - _last_io_counters["net_in"]) / (1024 * 1024 * dt), 1))
+        net_out_mb = max(0.0, round((n_out - _last_io_counters["net_out"]) / (1024 * 1024 * dt), 1))
+
+    _last_io_counters.update({
+        "time": now,
+        "disk_read": d_read,
+        "disk_write": d_write,
+        "net_in": n_in,
+        "net_out": n_out
+    })
 
     running_procs = len(psutil.pids())
+
+    active_iface = "eth0"
+    if HAS_FOCUSOS:
+        try:
+            active_iface = get_active_network_interface() or "eth0"
+        except Exception:
+            pass
 
     return {
         "timestamp": time.strftime("%H:%M:%S"),
@@ -134,9 +171,9 @@ def get_live_system_metrics():
         "disk_write_mb": disk_write_mb,
         "net_in_mb": net_in_mb,
         "net_out_mb": net_out_mb,
-        "total_procs": running_procs + 50,
+        "total_procs": running_procs,
         "running_procs": running_procs,
-        "net_interface": "eth0"
+        "net_interface": active_iface
     }
 
 
