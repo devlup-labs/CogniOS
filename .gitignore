@@ -55,3 +55,4 @@ blackbox.db-wal
 # API Keys
 .env
 >>>>>>> without_llm
+telemetry_daemon.log
