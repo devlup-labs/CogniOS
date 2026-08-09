@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import threading
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -88,12 +89,30 @@ def run_focusos():
                         print(f"Explanation (Cached): {last_explanation}\n")
         time.sleep(2)
 
+from os_doctor.i_forest_predict import flag_anomaly
+def run_os_doctor():
+    flag_anomaly()
+    
 if __name__ == "__main__":
     try:
-        run_focusos()
+        print("Starting FocusOS and OS Doctor concurrently...")
+        
+        # 1. Define the threads
+        focusos_thread = threading.Thread(target=run_focusos, daemon=True)
+        os_doctor_thread = threading.Thread(target=run_os_doctor, daemon=True)
+        
+        # 2. Start the threads
+        focusos_thread.start()
+        os_doctor_thread.start()
+        
+        # 3. Keep the main thread alive to listen for KeyboardInterrupt (Ctrl+C)
+        while True:
+            time.sleep(1)
+            
     except KeyboardInterrupt:
-        print("Stopping CogniOS System...")
+        print("\nStopping CogniOS System...")
     finally:
+        # Cleanup telemetry process
         if telemetry_process.poll() is None:
             telemetry_process.terminate()
             try:
