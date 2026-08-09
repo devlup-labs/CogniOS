@@ -3,6 +3,7 @@
 import os
 import sys
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(
     page_title="CogniOS — System Observability & AI Diagnostics",
@@ -474,11 +475,9 @@ def main():
     elif curr == "research":
         research_view.render()
 
-    # --- Robust Auto Refresh Loop ---
-    import time
-    if hasattr(config, 'AUTO_REFRESH') and config.AUTO_REFRESH:
-        time.sleep(config.AUTO_REFRESH)
-        st.rerun()
+    # --- Non-blocking Auto Refresh (browser-side timer) ---
+    refresh_interval_ms = int(getattr(config, 'AUTO_REFRESH', 2) * 1000)
+    st_autorefresh(interval=refresh_interval_ms, key="dashboard_autorefresh")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,8 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "cognios_telemetry.db")
 SLIDING_WIND_N = 120
+AUTO_REFRESH = 2  # seconds between dashboard refreshes
+
 
 # OS Doctor Config
 OS_DOCTOR_DB_PATH = "os_doctor.db"
