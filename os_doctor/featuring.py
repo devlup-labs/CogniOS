@@ -268,7 +268,7 @@ def scale_features(ml_features_df, scaler):
         index=ml_features_df.index,
     )
 
-def get_inference_payload(db_path, scaler=None):
+def get_inference_payload_predict(db_path, scaler=None):
     """
     Centralized orchestration function called by the main daemon loop.
  
@@ -320,13 +320,58 @@ def get_inference_payload(db_path, scaler=None):
             ml_features_scaled_df = scale_features(ml_features_raw_df, scaler)
  
         return ml_features_raw_df, ml_features_scaled_df, metadata
- 
     except Exception as e:
         print(f"Critical error during feature engineering pipeline orchestration: {e}")
         return None, None, None
 
-    
-    
+def get_inference_payload_train(db_path, scaler=None):
+    # Run safety check to ensure database has enough historical data
+    # We need a minimum of 120 rows (120 seconds) of system metrics to build our vectors
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM layer2_proc;")
+            row_count_layer2 = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM layer1_sys;")
+            row_count_layer1 = cursor.fetchone()[0]
+            
+        
+        if row_count_layer1 < 120 or row_count_layer2 < 24:
+           
+            print(f"Pipeline Warm-up Phase: {row_count_layer1}/120 records collected. Skipping tick.")
+            print(f"Pipeline Warm-up Phase: {row_count_layer2}/24 records collected. Skipping tick.")
+            return None, None
+            
+    except sqlite3.Error as e:
+        print(f"Database error during warm-up check: {e}")
+        return None, None
+
+    # Sequential execution 
+    try:
+        # 1. Fetch system vector
+        sys_vec = extract_and_engineer_sys(db_path)
+        
+        # 2. Fetch process vectors 
+        proc_vec = extract_and_engineer_processes(db_path)
+        
+        # 3. Check for empty payloads before stitching to prevent concat failures
+        if sys_vec.empty or proc_vec.empty:
+            print("Warning: One of the sub-vectors returned an empty frame. Skipping inference.")
+            return None, None
+            
+        # 4. Consolidate and strip metadata 
+        ml_features_df, metadata = build_unified_vector(sys_vec, proc_vec)
+
+        # NEW: 5. Scale numerical features only (transform-only, no fit)
+        if scaler is not None:
+            ml_features_df = scale_features(ml_features_df, scaler)
+        
+        return ml_features_df, metadata
+
+    except Exception as e:
+        print(f"Critical error during feature engineering pipeline orchestration: {e}")
+        return None, None
 
 if __name__ == "__main__":
     # extract_and_engineer_sys()

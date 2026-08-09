@@ -5,7 +5,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
 from os_doctor.alerts_db import write_to_alerts_table
-from os_doctor.featuring import get_inference_payload
+from os_doctor.featuring import get_inference_payload_predict
 from os_doctor.i_forest_train import expected_columns
 from config import DB_PATH, ALERTS_DB_PATH
 
@@ -29,7 +29,7 @@ def flag_anomaly():
                 # CHANGED: unpack 3 values now (raw, scaled, metadata).
                 # We pass no scaler here — this file owns scaling itself,
                 # since it loads its own scaler.joblib separately.
-                raw_input, _, metadata = get_inference_payload(DB_PATH)
+                raw_input, _, metadata = get_inference_payload_predict(DB_PATH)
 
                 if raw_input is not None:
                     raw_input.columns = FEATURE_COLUMNS
