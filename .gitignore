@@ -23,3 +23,6 @@ data/traces/*
 
 # Logs
 logs/
+
+# API Keys
+.env
