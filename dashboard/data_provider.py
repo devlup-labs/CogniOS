@@ -165,6 +165,15 @@ def get_live_system_metrics():
     else:
         disk_read_mb = max(0.0, round((d_read - _last_io_counters["disk_read"]) / (1024 * 1024 * dt), 1))
         disk_write_mb = max(0.0, round((d_write - _last_io_counters["disk_write"]) / (1024 * 1024 * dt), 1))
+        
+        if disk_read_mb == 0.0 and disk_write_mb == 0.0:
+            _last_io_counters["zero_disk_count"] = _last_io_counters.get("zero_disk_count", 0) + 1
+            if _last_io_counters["zero_disk_count"] > 120:
+                print("[Warning] Disk I/O has been 0.0 for over 120 consecutive samples. /proc/diskstats might be unavailable or read is failing.")
+                _last_io_counters["zero_disk_count"] = 0
+        else:
+            _last_io_counters["zero_disk_count"] = 0
+
         net_in_mb = max(0.0, round(((n_in - _last_io_counters["net_in"]) * 8) / (1000 * 1000 * dt), 2))
         net_out_mb = max(0.0, round(((n_out - _last_io_counters["net_out"]) * 8) / (1000 * 1000 * dt), 2))
 
