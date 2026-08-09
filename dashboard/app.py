@@ -6,6 +6,7 @@ import signal
 import subprocess
 import psutil
 import streamlit as st
+# pyrefly: ignore [missing-import]
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(
