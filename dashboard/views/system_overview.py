@@ -10,10 +10,19 @@ def render():
 
     metrics = dp.get_live_system_metrics()
 
+    # --- Dynamic CPU status badge ---
+    cpu_pct = metrics['cpu_pct']
+    if cpu_pct > 85:
+        cpu_status, badge_color = "CRITICAL", "#ef4444"
+    elif cpu_pct > 60:
+        cpu_status, badge_color = "ELEVATED", "#f59e0b"
+    else:
+        cpu_status, badge_color = "NORMAL", "#00f5c4"
+
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
-        st.html(f"""<div class="cognios-card"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;"><span style="color:#94a3b8; font-size:13px; font-weight:600;">CPU Usage %</span><span style="color:#00f5c4;"><i class="fa-solid fa-microchip"></i></span></div><div class="cognios-metric-val">{int(metrics['cpu_pct'])}%</div><div style="margin-top: 12px; display:flex; justify-content:space-between; align-items:center;"><span class="cognios-badge">NORMAL</span><span style="font-size:12px; color:#64748b; font-family:'JetBrains Mono';">Load: {metrics['load_avg1']}, {metrics['load_avg5']}, {metrics['load_avg15']}</span></div></div>""")
+        st.html(f"""<div class="cognios-card"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;"><span style="color:#94a3b8; font-size:13px; font-weight:600;">CPU Usage %</span><span style="color:#00f5c4;"><i class="fa-solid fa-microchip"></i></span></div><div class="cognios-metric-val">{int(metrics['cpu_pct'])}%</div><div style="margin-top: 12px; display:flex; justify-content:space-between; align-items:center;"><span style="background:rgba(0,0,0,0.2); color:{badge_color}; border:1px solid {badge_color}; border-radius:4px; padding:2px 8px; font-size:11px; font-weight:700; font-family:'JetBrains Mono';">{cpu_status}</span><span style="font-size:12px; color:#64748b; font-family:'JetBrains Mono';">Load: {metrics['load_avg1']}, {metrics['load_avg5']}, {metrics['load_avg15']}</span></div></div>""")
 
     with c2:
         st.html(f"""<div class="cognios-card"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;"><span style="color:#94a3b8; font-size:13px; font-weight:600;">Memory Usage %</span><span style="color:#00f5c4;"><i class="fa-solid fa-memory"></i></span></div><div class="cognios-metric-val">{int(metrics['memory_pct'])}%</div><div style="margin-top: 12px; font-size:12px; color:#94a3b8; font-family:'JetBrains Mono';">{metrics['memory_used_gb']}GB / {metrics['memory_total_gb']}GB</div><div style="background:#1a2436; height:6px; border-radius:3px; margin-top:8px; overflow:hidden;"><div style="background:#00f5c4; width:{metrics['memory_pct']}%; height:100%;"></div></div></div>""")
