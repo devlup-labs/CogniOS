@@ -684,17 +684,14 @@ def get_process_drilldown(pid):
     except Exception:
         return {
             "pid": pid,
-            "name": f"process_{pid}",
-            "thread_count": 12,
-            "open_files": 142,
-            "user_time": 420.5,
-            "sys_time": 110.2,
-            "vol_ctx": 52891,
-            "invol_ctx": 2910,
-            "sockets": [
-                {"protocol": "TCP", "local": "127.0.0.1:8080", "foreign": "127.0.0.1:51204", "status": "ESTABLISHED"},
-                {"protocol": "TCP", "local": "127.0.0.1:8080", "foreign": "*:*", "status": "LISTEN"}
-            ]
+            "name": f"process_{pid} (unavailable)",
+            "thread_count": "N/A",
+            "open_files": "N/A",
+            "user_time": "N/A",
+            "sys_time": "N/A",
+            "vol_ctx": "N/A",
+            "invol_ctx": "N/A",
+            "sockets": []
         }
 
 
