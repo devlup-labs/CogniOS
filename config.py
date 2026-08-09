@@ -1,22 +1,4 @@
 import os
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "cognios_telemetry.db")
-SLIDING_WIND_N = 120
-
-# OS Doctor Config
-OS_DOCTOR_DB_PATH = "os_doctor.db"
-ALERTS_DB_PATH = "os_doctor/alerts.db"
-ALERTS_TABLE_NAME = "alerts"
-MODEL_PATH = "iso_forest_model.joblib"
-SCALER_PATH = "scaler.joblib"
-
-# FocusOS config
-COMPILERS = ["gcc", "g++", "clang", "make", "ninja", "rustc", "javac"]
-BROWSERS = ["chrome", "firefox", "brave", "msedge"]
-CALLS = ["zoom", "teams", "slack", "discord", "skype", "webex"]
-IDES = ["code", "code-insiders", "sublime", "vim", "nvim"]
-
-# Blackbox config
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,6 +6,7 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+DB_PATH = "cognios_telemetry.db"
 BLACKBOX_DB_PATH         = "blackbox/blackbox.db"
 BLACKBOX_WINDOW_SEC = 1800  # 30 minutes
 
@@ -46,4 +29,3 @@ TRAINING_DATA_PATH = "blackbox/training_vectors.jsonl"
 COLLECT_INTERVAL_SEC = 30
 ROWS_PER_VECTOR = 120  # ~2 min of telemetry per feature vector
 ANOMALY_CHECK_INTERVAL_SEC = 120  # Isolation Forest check cadence
-

@@ -1,22 +1,21 @@
-import threading
-from os_doctor.os_doctor_db import execute_os_doctor_db
-from cognios_as_daemon import run_daemon
-from os_doctor.i_forest_predict import flag_anomaly
-from os_doctor.i_forest_train import train_isolation_forest_model
-from os_doctor.featuring import extract_and_engineer_sys, extract_and_engineer_processes, build_unified_vector, get_inference_payload
-from os_doctor.alerts_db import create_connection, init_alerts_db, write_to_alerts_table, _harden_connection, ensure_wal_mode
+"""CogniOS Layer 2 telemetry daemon entry point."""
+import time
+from collectors.layer2_process import collect_process_telemetry
+from db import init_db, insert_process_snapshot
 
-from config import DB_PATH
 if __name__ == "__main__":
-    # threading.Thread(target=execute_os_doctor_db, daemon=True).start()
-    threading.Thread(target=flag_anomaly, daemon=True).start()
-    run_daemon()
-    # extract_and_engineer_sys(DB_PATH)
-    # extract_and_engineer_processes(DB_PATH)
-    # train_isolation_forest_model()
-    # flag_anomaly()
-    # execute_os_doctor_db()
-    # conn = create_connection()
-    # init_alerts_db(conn)
+    init_db()
+    baselines = {}
+    print("CogniOS Telemetry Daemon started. Press Ctrl+C to stop.")
 
-    
+    try:
+        while True:
+            top_cpu, top_mem, baselines = collect_process_telemetry(baselines)
+            insert_process_snapshot(top_cpu, top_mem)
+            print(
+                f"Snapshot committed at t={time.time():.0f} | "
+                f"top_cpu={top_cpu[0]['name']} score={top_cpu[0]['cpu_score']} | "
+                f"top_ram={top_mem[0]['name']} score={top_mem[0]['ram_score']}"
+            )
+    except KeyboardInterrupt:
+        print("\nDaemon safely terminated.")

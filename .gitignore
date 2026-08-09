@@ -7,41 +7,22 @@ __pycache__/
 .venv/
 venv/
 
-# Environment & Config (IMPORTANT)
-.env
-config.ini
-
 # Local data and generated artifacts
-cognios_telemetry.db
-*.db
-*.db-shm
-*.db-wal
+data/cognios.db
 data/models/*.pt
 data/traces/*
 blackbox/blackbox.db-shm
 blackbox/blackbox.db-wal
 
 # Keep data directories present in git if marker files are added.
+!data/models/.gitkeep
 !data/traces/.gitkeep
-
-# OS / IDE
-.DS_Store
-.vscode/
-.idea/
 
 # Ignore SQLite database files
 *.db
 *.sqlite3
 *.sqlite
 
-# Logs
-logs/
-
-# Environment and secret files
+# Environment variables
 .env
-.env.local 
-*.env 
 
-.DS_Store
-*.db-shm
-*.db-wal
