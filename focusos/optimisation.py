@@ -5,19 +5,20 @@ import time
 import sys
 import json
 import subprocess
-from collectors import get_top_processes
+from focusos.collector import get_top_processes
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH
-from config import COMPILERS  
-from config import BROWSERS     
-from config import CALLS        
+from config import COMPILERS
 from config import IDES
+from config import BROWSERS
 from config import GAMES
+from config import CALLS
 '''These lists are not yet written in cofig file, will be updated soon'''
 
 def apply_optimization(workload: str, confidence: float, explanation: str = "") -> bool:
 	if confidence < 80:
 		print(f"Optimisation aborted: Confidence for {workload} is less than 80%")
+		log_optimization_result(workload, confidence, ["Optimization skipped (Confidence < 80%)"], explanation)
 		return False
 	actions = []
 

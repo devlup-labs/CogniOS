@@ -15,6 +15,7 @@ COMPILERS = ["gcc", "g++", "clang", "make", "ninja", "rustc", "javac"]
 BROWSERS = ["chrome", "firefox", "brave", "msedge"]
 CALLS = ["zoom", "teams", "slack", "discord", "skype", "webex"]
 IDES = ["code", "code-insiders", "sublime", "vim", "nvim"]
+GAMES = ["steam", "csgo", "dota2", "hl2_linux", "minecraft"]
 
 # Blackbox config
 from dotenv import load_dotenv
