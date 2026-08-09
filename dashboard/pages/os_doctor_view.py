@@ -1,1 +1,0 @@
-"""OS Doctor dashboard page."""
