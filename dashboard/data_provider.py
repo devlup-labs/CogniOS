@@ -188,7 +188,7 @@ def get_live_system_metrics():
     # Dynamic Process RAM usage (2 decimal places for real-time responsiveness)
     mem_used_gb = round(mem.used / (1024**3), 2)
     mem_total_gb = round(mem.total / (1024**3), 1)
-    mem_pct = round((mem.used / mem.total) * 100, 1)
+    mem_pct = mem.percent
 
     now_str = time.strftime("%H:%M:%S")
     _telemetry_history_buffer.append({
