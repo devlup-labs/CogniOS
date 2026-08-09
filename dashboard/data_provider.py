@@ -165,8 +165,8 @@ def get_live_system_metrics():
     else:
         disk_read_mb = max(0.0, round((d_read - _last_io_counters["disk_read"]) / (1024 * 1024 * dt), 1))
         disk_write_mb = max(0.0, round((d_write - _last_io_counters["disk_write"]) / (1024 * 1024 * dt), 1))
-        net_in_mb = max(0.0, round((n_in - _last_io_counters["net_in"]) / (1024 * 1024 * dt), 1))
-        net_out_mb = max(0.0, round((n_out - _last_io_counters["net_out"]) / (1024 * 1024 * dt), 1))
+        net_in_mb = max(0.0, round(((n_in - _last_io_counters["net_in"]) * 8) / (1000 * 1000 * dt), 2))
+        net_out_mb = max(0.0, round(((n_out - _last_io_counters["net_out"]) * 8) / (1000 * 1000 * dt), 2))
 
     _last_io_counters.update({
         "time": now,
