@@ -61,8 +61,45 @@ def render():
     # AI Diagnostics Explanation HTML
     llm_html = ""
     if state and state.get("explanation"):
-        exp = state["explanation"]
-        llm_html = f"""<div style="margin-top:24px; padding:16px; background:linear-gradient(180deg, rgba(0, 245, 196, 0.1) 0%, rgba(0, 0, 0, 0.2) 100%); border-left:3px solid #00f5c4; border-radius:6px;"><div style="font-size:11px; font-weight:800; color:#00f5c4; text-transform:uppercase; margin-bottom:8px; font-family:'JetBrains Mono';"><i class="fa-solid fa-sparkles"></i> AI Diagnostics Explanation</div><div style="font-size:13px; color:#e2e8f0; line-height:1.5;">{exp}</div></div>"""
+        raw_exp = state["explanation"]
+
+        # Strip legacy source prefixes written by older versions of llm_explainer
+        # e.g. "[Gemma 4 API] ...", "[Template Fallback] ...", "[Gemini API] ..."
+        source_match = re.match(r'^\[(.*?)\]\s*', raw_exp)
+        source_label = source_match.group(1) if source_match else None
+        exp_clean    = re.sub(r'^\[.*?\]\s*', '', raw_exp).strip()
+
+
+        # Build source badge only if a known source was detected
+        source_badge = ""
+        if source_label:
+            badge_color = {
+                "Gemma 4": "#a78bfa",   # purple
+                "Gemma 4 API": "#a78bfa",
+                "Gemini": "#38bdf8",    # sky blue
+                "Gemini API": "#38bdf8",
+                "Template": "#64748b",  # grey
+                "Template Fallback": "#64748b",
+            }.get(source_label, "#64748b")
+            source_badge = (
+                f'<span style="font-size:10px; color:{badge_color}; border:1px solid {badge_color}; '
+                f'border-radius:4px; padding:1px 7px; font-family:\'JetBrains Mono\'; '
+                f'font-weight:700; margin-left:8px; vertical-align:middle;">'
+                f'{source_label}</span>'
+            )
+
+        llm_html = (
+            f'<div style="margin-top:24px; padding:16px; '
+            f'background:linear-gradient(180deg, rgba(0,245,196,0.1) 0%, rgba(0,0,0,0.2) 100%); '
+            f'border-left:3px solid #00f5c4; border-radius:6px;">'
+            f'<div style="font-size:11px; font-weight:800; color:#00f5c4; text-transform:uppercase; '
+            f'margin-bottom:8px; font-family:\'JetBrains Mono\';">'
+            f'<i class="fa-solid fa-sparkles"></i> AI Diagnostics Explanation{source_badge}'
+            f'</div>'
+            f'<div style="font-size:13px; color:#e2e8f0; line-height:1.5;">{exp_clean}</div>'
+            f'</div>'
+        )
+
 
     # Model Inference UI
     w_detected = workload_data['workload']
