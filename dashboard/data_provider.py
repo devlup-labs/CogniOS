@@ -740,12 +740,33 @@ def get_blackbox_heartbeat_status():
 def get_blackbox_rule_engine_alerts():
     """Runs threshold rule checks (CPU, RAM, Zombie, Swap, Temp) against live metrics."""
     metrics = get_live_system_metrics()
+    
+    try:
+        zombies = len([p for p in psutil.process_iter(['status']) if p.info['status'] == psutil.STATUS_ZOMBIE])
+    except Exception:
+        zombies = 0
+
+    try:
+        hw_temps = psutil.sensors_temperatures()
+        if hw_temps:
+            temps_list = [sensor.current for sensors in hw_temps.values() for sensor in sensors if sensor.current > 0]
+            max_temp = max(temps_list) if temps_list else 45.0
+        else:
+            max_temp = 45.0
+    except Exception:
+        max_temp = 45.0
+
+    try:
+        swap_percent = psutil.swap_memory().percent
+    except Exception:
+        swap_percent = 0.0
+
     rule_dict = {
         "cpu_usage_percent": metrics['cpu_pct'],
         "memory_percent": metrics['memory_pct'],
-        "zombie_processes": 0,
-        "max_temp": 48.5,
-        "swap_percent": 12.4
+        "zombie_processes": zombies,
+        "max_temp": max_temp,
+        "swap_percent": swap_percent
     }
     
     fired_alerts = []
@@ -769,9 +790,9 @@ def get_blackbox_rule_engine_alerts():
     thresholds = [
         {"name": "CPU Critical", "limit": f"{BLACKBOX_CPU_CRITICAL}%", "current": f"{metrics['cpu_pct']:.1f}%", "fired": metrics['cpu_pct'] > BLACKBOX_CPU_CRITICAL},
         {"name": "Memory Critical", "limit": f"{BLACKBOX_MEM_CRITICAL}%", "current": f"{metrics['memory_pct']:.1f}%", "fired": metrics['memory_pct'] > BLACKBOX_MEM_CRITICAL},
-        {"name": "Zombie Limit", "limit": f"{BLACKBOX_ZOMBIE_LIMIT}", "current": "0", "fired": False},
-        {"name": "Thermal Limit", "limit": f"{BLACKBOX_TEMP_CRITICAL}°C", "current": "48.5°C", "fired": False},
-        {"name": "Swap Pressure", "limit": f"{BLACKBOX_SWAP_CRITICAL}%", "current": "12.4%", "fired": False}
+        {"name": "Zombie Limit", "limit": f"{BLACKBOX_ZOMBIE_LIMIT}", "current": str(zombies), "fired": zombies >= BLACKBOX_ZOMBIE_LIMIT},
+        {"name": "Thermal Limit", "limit": f"{BLACKBOX_TEMP_CRITICAL}°C", "current": f"{max_temp:.1f}°C", "fired": max_temp >= BLACKBOX_TEMP_CRITICAL},
+        {"name": "Swap Pressure", "limit": f"{BLACKBOX_SWAP_CRITICAL}%", "current": f"{swap_percent:.1f}%", "fired": swap_percent >= BLACKBOX_SWAP_CRITICAL}
     ]
 
     return {
