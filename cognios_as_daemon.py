@@ -177,23 +177,28 @@ def run_layer1_loop(stop_event):
 
 def run_layer2_loop(stop_event):
     logger = get_layer_logger("layer2")
-    conn = create_layer2_connection()
-    init_layer2_db(conn)
-    baselines = {}
-    logger.info("Starting Layer 2 collection.")
-
     try:
+        conn = create_layer2_connection()
+        init_layer2_db(conn)
+        baselines = {}
+        logger.info("Starting Layer 2 collection.")
+
         while not stop_event.is_set():
-            top_cpu, top_mem, baselines = collect_layer2_metrics(baselines)
-            write_layer2(conn, top_cpu, top_mem)
-            logger.info(
-                f"Snapshot committed at t={time.time():.0f} | "
-                f"top_cpu={top_cpu[0]['name']} score={top_cpu[0]['cpu_score']} | "
-                f"top_ram={top_mem[0]['name']} score={top_mem[0]['ram_score']}"
-            )
+            try:
+                top_cpu, top_mem, baselines = collect_layer2_metrics(baselines)
+                write_layer2(conn, top_cpu, top_mem)
+                logger.info(
+                    f"Snapshot committed at t={time.time():.0f} | "
+                    f"top_cpu={top_cpu[0]['name']} score={top_cpu[0]['cpu_score']} | "
+                    f"top_ram={top_mem[0]['name']} score={top_mem[0]['ram_score']}"
+                )
+            except Exception as e:
+                logger.warning(f"Layer 2 write skipped (schema mismatch or error): {e}")
+                stop_event.wait(timeout=5)
+    except Exception as e:
+        logger.warning(f"Layer 2 loop disabled — not used by FocusOS ({e})")
     finally:
-        logger.info("Stopping Layer 2 collection. Shutting down gracefully...")
-        conn.close()
+        logger.info("Layer 2 thread exited.")
 
 
 def run_focusos_loop(stop_event):
