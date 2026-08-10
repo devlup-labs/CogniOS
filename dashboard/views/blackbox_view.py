@@ -94,13 +94,13 @@ def render():
                 </div>
             </div>
         """)
-        if st.button("Retrain ML Model", key="retrain_if_model", use_container_width=True):
-            with st.spinner("Training Isolation Forest model on vectors..."):
-                res = dp.retrain_blackbox_model()
-                if res['success']:
-                    st.success(res['message'])
-                else:
-                    st.error(res['message'])
+        # if st.button("Retrain ML Model", key="retrain_if_model", use_container_width=True):
+        #     with st.spinner("Training Isolation Forest model on vectors..."):
+        #         res = dp.retrain_blackbox_model()
+        #         if res['success']:
+        #             st.success(res['message'])
+        #         else:
+        #             st.error(res['message'])
 
     # Middle Row: Z-Score Anomaly Detector & AI Synthesis
     col_chart, col_ai = st.columns([3, 2])
