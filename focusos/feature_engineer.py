@@ -39,10 +39,7 @@ def extract_features(df: pd.DataFrame):
         disk_combined = df["disk_write_mb_s"] + df["disk_read_mb_s"]
         disk_mean_raw = disk_combined.mean()
       
-        if disk_mean_raw > 0:
-                  disk_io_mean = float(disk_combined.std() / disk_mean_raw)
-        else:
-                  disk_io_mean = 0.0
+        disk_io_mean = float(disk_mean_raw)
       
               # Process statistics
         process_count_mean = int(df["total_processes"].mean())
