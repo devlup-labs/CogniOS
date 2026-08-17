@@ -4,7 +4,7 @@ import os
 import json
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import DB_PATH
+from config import DB_PATH, COMPILERS
 
 # Import the stateless database window function
 from focusos.sliding_window import get_window_from_db
@@ -113,64 +113,13 @@ def extract_features(df: pd.DataFrame):
       
             #changes this compiler active detection for testing compilation
       
-        def detect_compiler_active(df):
-                  """
-                  Detects compilation in two ways:
-      
-                  1. Direct compiler process names.
-                  2. VSCode consuming high CPU while compiling.
-                  """
-      
-                  compiler_names = {
-                      "gcc",
-                      "cc1",
-                      "cc1plus",
-                      "g++",
-                      "clang",
-                      "clang++",
-                      "rustc",
-                      "javac",
-                      "make",
-                      "ninja",
-                      "cargo",
-                      "ld",
-                      "as",
-                      "collect2",
-                      "cmake",
-                  }
-      
-                  for _, row in df.iterrows():
-      
-                      try:
-                          raw = row.get("process_data", "")
-      
-                          if not raw or not isinstance(raw, str):
-                              continue
-      
-                          processes = json.loads(raw)
-      
-                          for proc in processes:
-      
-                              if not proc or len(proc) < 2:
-                                  continue
-      
-                              name = str(proc[0]).lower()
-                              cpu = float(proc[1]) if len(proc) > 1 else 0
-      
-                              # Way 1: compiler process detected
-                              if any(comp in name for comp in compiler_names):
-                                  return 1
-      
-                              # Way 2: VSCode using high CPU
-                              if "code" in name and cpu > 50:
-                                  return 1
-      
-                      except (json.JSONDecodeError, ValueError, IndexError, TypeError):
-                          continue
-      
-                  return 0
-      
-        compiler_active = detect_compiler_active(df)
+        compiler_regex = "|".join(COMPILERS)
+        compiler_active = int(
+            process_col.tail(10).str.contains(
+                compiler_regex,
+                regex=True,
+            ).any()
+        )
       
               # Feature vector
         features = {
