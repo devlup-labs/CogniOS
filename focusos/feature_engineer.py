@@ -136,7 +136,7 @@ def extract_features(df: pd.DataFrame):
                   "disk_io_mean": disk_io_mean,
                   "process_count_mean": process_count_mean,
                   "thread_count_mean": thread_count_mean,
-                  "load_1m_per_core": load_1m_per_core,                  
+                  "load_avg": load_1m_per_core,                  
                   "ctx_switches_per_core": ctx_switch_per_core,
                   "cpu_user_system_ratio": cpu_user_system_ratio,
                   "psi_cpu_some": psi_cpu_some,
