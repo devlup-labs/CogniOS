@@ -1,7 +1,7 @@
 import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "cognios_telemetry.db")
-SLIDING_WIND_N = 30
+SLIDING_WIND_N = 10
 COMPILERS = ["gcc", "g++", "clang", "make", "ninja", "rustc", "javac"]
 BROWSERS = ["chrome", "firefox", "brave", "msedge"]
 CALLS = ["zoom", "teams", "slack", "discord", "skype", "webex"]

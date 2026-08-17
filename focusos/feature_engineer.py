@@ -30,14 +30,10 @@ def extract_features(df: pd.DataFrame):
       
               # Network features
         net_combined = df["net_bytes_sent"] + df["net_bytes_recv"]
-        net_mean = net_combined.mean()
-      
-        if net_mean > 0:
-                  net_mean = float(
-                      (net_combined.iloc[-1] - net_combined.iloc[0]) / net_mean
-                  )
-        else:
-                  net_mean = 0.0
+        # Bytes transferred during the window
+        bytes_transferred = float(net_combined.iloc[-1] - net_combined.iloc[0]) if len(df) > 0 else 0.0
+        # Convert to MB/s (assuming 1-second sample intervals)
+        net_mean = (bytes_transferred / len(df)) / (1024 * 1024)
       
               # Disk I/O coefficient of variation
         disk_combined = df["disk_write_mb_s"] + df["disk_read_mb_s"]
