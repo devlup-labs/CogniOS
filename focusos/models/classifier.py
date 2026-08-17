@@ -123,6 +123,8 @@ def train_classifier():
         max_depth=5,
         learning_rate=0.1,
         random_state=42,
+        colsample_bytree=0.8,
+        subsample=0.8,
         eval_metric='mlogloss'
     )
     model.fit(X_train, y_train)
