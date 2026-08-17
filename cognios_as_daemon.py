@@ -227,7 +227,7 @@ def run_focusos_loop(stop_event):
                         if result:
                             workload = result['workload']
                             confidence = result['confidence']
-                            
+
                             try:
                                 importances = predictor.xgb.feature_importances_
                                 top_indices = importances.argsort()[::-1][:3]
@@ -241,12 +241,37 @@ def run_focusos_loop(stop_event):
                                 top_features = {}
 
                             current_time = time.time()
+
+                            # Regenerate LLM explanation only on workload change or cooldown
                             if (workload != last_workload) or (current_time - last_explanation_time >= COOLDOWN_SECONDS):
                                 last_explanation = generate_explanation(workload, confidence, top_features)
                                 last_workload = workload
                                 last_explanation_time = current_time
-                                logger.info(f"Detected: {workload} ({confidence}%). New explanation generated.")
-                                apply_optimization(workload, confidence, last_explanation)
+
+                            # Write fresh prediction every cycle → dashboard stays live.
+                            # apply_optimization() skipped intentionally (wired in later).
+                            try:
+                                import json as _json
+                                import sqlite3 as _sq
+                                # last_explanation may be a dict from generate_explanation
+                                _expl = last_explanation if isinstance(last_explanation, str) else _json.dumps(last_explanation)
+                                _conn = _sq.connect(DB_PATH, timeout=5.0)
+                                _conn.execute(
+                                    "INSERT INTO focusos_events "
+                                    "(timestamp, workload, confidence, actions, explanation) "
+                                    "VALUES (?, ?, ?, ?, ?)",
+                                    (
+                                        time.time(), workload, confidence,
+                                        _json.dumps([f"Detected: {workload} ({confidence:.1f}%)"]),
+                                        _expl,
+                                    )
+                                )
+                                _conn.commit()
+                                _conn.close()
+                            except Exception as _e:
+                                logger.warning(f"focusos_events write failed: {_e}")
+                            logger.info(f"FocusOS: {workload} ({confidence:.1f}%)") 
+
             except Exception as e:
                 logger.error(f"Error in FocusOS inference loop: {e}")
 
