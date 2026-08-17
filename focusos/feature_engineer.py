@@ -96,7 +96,7 @@ def extract_features(df: pd.DataFrame):
         swap_percent = df["swap_percent"].mean()
         net_variance = df["net_rate_mb_s"].var()
         udp_tcp_ratio = df["udp_tcp_ratio"].mean()
-        load_avg = df["load_avg_1"].mean()
+        load_1m_per_core = float(df["load_avg_1"].mean() / cpu_cores)
         if len(df) > 1:
             user_delta = df["cpu_user_time"].iloc[-1] - df["cpu_user_time"].iloc[0]
             system_delta = df["cpu_system_time"].iloc[-1] - df["cpu_system_time"].iloc[0]
@@ -187,7 +187,7 @@ def extract_features(df: pd.DataFrame):
                   "disk_io_mean": disk_io_mean,
                   "process_count_mean": process_count_mean,
                   "thread_count_mean": thread_count_mean,
-                  "load_avg": load_avg,                  
+                  "load_1m_per_core": load_1m_per_core,                  
                   "ctx_switches_per_core": ctx_switch_per_core,
                   "cpu_user_system_ratio": cpu_user_system_ratio,
                   "psi_cpu_some": psi_cpu_some,
