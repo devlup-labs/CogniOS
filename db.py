@@ -160,7 +160,10 @@ def create_connection(db_path):
             net_packets_recv INTEGER,
             net_errs INTEGER,
             net_drops INTEGER,
-
+            udp_tcp_ratio FLOAT,
+            network_symmetry FLOAT,
+                   
+            --System Metrics
             load_avg_1 REAL,
             load_avg_5 REAL,
             load_avg_15 REAL,
@@ -174,6 +177,9 @@ def create_connection(db_path):
             battery_percent REAL,
             process_data TEXT,
             num_threads INTEGER
+            psi_metrics_cpu FLOAT,
+            psi_metrics_mem FLOAT,
+            psi_metrics_io FLOAT
         )
     ''')
 
@@ -183,12 +189,49 @@ def create_connection(db_path):
     if 'num_threads' not in columns:
         cursor.execute("ALTER TABLE layer1_sys ADD COLUMN num_threads INTEGER")
 
+    cursor.execute("PRAGMA table_info(layer1_sys)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'network_symmetry' not in columns:
+            cursor.execute("ALTER TABLE layer1_sys ADD COLUMN network_symmetry FLOAT")
+
+    cursor.execute("PRAGMA table_info(layer1_sys)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'psi_metrics_cpu' not in columns:
+                 cursor.execute("ALTER TABLE layer1_sys ADD COLUMN psi_metrics_cpu FLOAT")
+
+
+    cursor.execute("PRAGMA table_info(layer1_sys)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'psi_metrics_mem' not in columns:
+                 cursor.execute("ALTER TABLE layer1_sys ADD COLUMN psi_metrics_mem FLOAT")
+
+    cursor.execute("PRAGMA table_info(layer1_sys)")
+    columns = [row[1] for row in cursor.fetchall()]     
+    if 'psi_metrics_io' not in columns:
+                 cursor.execute("ALTER TABLE layer1_sys ADD COLUMN psi_metrics_io FLOAT")
+
+    cursor.execute("PRAGMA table_info(layer1_sys)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'process_data' not in columns:
+        cursor.execute("ALTER TABLE layer1_sys ADD COLUMN process_data TEXT")   
+
+    cursor.execute("PRAGMA table_info(layer1_sys)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'udp_tcp_ratio' not in columns:
+        cursor.execute("ALTER TABLE layer1_sys ADD COLUMN udp_tcp_ratio FLOAT")  
+
+    cursor.execute("PRAGMA table_info(layer1_sys)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'load_avg_1' not in columns:   
+        cursor.execute("ALTER TABLE layer1_sys ADD COLUMN load_avg_1 REAL")     
+        
+
     conn.commit()
     return conn
 
 # Function to write the collected metrics into the database
 
-def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, process_data,num_threads):
+def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, udp_tcp_ratio, network_symmetry,process_data, num_threads, psi_metrics_cpu, psi_metrics_mem, psi_metrics_io):
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO layer1_sys (
@@ -199,10 +242,10 @@ def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cp
             disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15,
             total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp,
             max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv,
-            net_packets_sent, net_packets_recv, net_errs, net_drops, process_data,
-            num_threads
+            net_packets_sent, net_packets_recv, net_errs, net_drops, udp_tcp_ratio, network_symmetry, process_data,
+            num_threads, psi_metrics_cpu, psi_metrics_mem, psi_metrics_io
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (timestamp, 
           cpu_usage_percent, 
           cpu_freq, cpu_user_time, 
@@ -241,6 +284,14 @@ def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cp
           net_packets_recv,
           net_errs,
           net_drops,
+          udp_tcp_ratio,
+          network_symmetry,
           process_data,
-          num_threads))
+          num_threads,
+          psi_metrics_cpu,
+          psi_metrics_mem,
+          psi_metrics_io))
     conn.commit()
+
+
+

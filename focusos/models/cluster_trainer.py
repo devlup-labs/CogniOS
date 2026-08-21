@@ -1,3 +1,4 @@
+from config import SLIDING_WIND_N
 import os
 import sys
 import time
@@ -41,14 +42,24 @@ FEATURE_COLUMNS = [
     "cpu_variance",
     "ram_mean",
     "ram_growth_rate",
+    "swap_percent",
     "network_mean",
+    "network_symmetry",
+    "net_variance",
+    "udp_tcp_ratio",
     "disk_io_mean",
     "process_count_mean",
     "thread_count_mean",
+    "load_avg",
+    "ctx_switches_per_core",
+    "cpu_user_system_ratio",
+    "psi_cpu_some",
+    "psi_mem_some",
+    "psi_io_some",
     "vscode_active",
     "browser_active",
-    "compiler_active",
-]  
+    "compiler_active"
+]
 
 def collect_feature_vectors(
     db_path: str = DB_PATH,
@@ -81,7 +92,7 @@ def collect_feature_vectors(
             print(f"[cluster_trainer] Total rows in layer1_sys: {total_rows}")
  
           
-            WINDOW_SIZE = 120  # matches SLIDING_WIND_N in config
+            WINDOW_SIZE = SLIDING_WIND_N  # matches SLIDING_WIND_N in config
  
             if total_rows < WINDOW_SIZE:
                 print(f"[cluster_trainer] ERROR: Need at least {WINDOW_SIZE} rows, "
@@ -647,14 +658,15 @@ if __name__ == "__main__":
  
     # ── Fill this in after first run, based on inspect_clusters() output ──,Numbers on the LEFT (0–4) come from KMeans,Strings on the RIGHT are what you name each cluster after reading output.,Your mapping WILL differ from this example — read inspect_clusters() output!
     MY_MAPPING = {
-         
-            0: "Video_Call",
-            1: "Gaming",
-            2: "Idle",
-            3: "Coding",
-            4: "Compiling",
-            5: "Browsing",
-    } # ← set to None on first run; fill in after inspection
+        0: "Video_Call",
+        1: "Browsing",
+        2: "Compiling",
+        3: "Gaming",
+        4: "Idle",
+        5: "Coding",
+    }
+    
+# ← set to None on first run; fill in after inspection
  
     run_training_pipeline(
         #db_path=DB_PATH,

@@ -1,15 +1,20 @@
-# Fill this in after reading inspect_clusters() output from cluster_trainer.py.
-# Keys are cluster IDs from KMeans (always 0 to N_CLUSTERS-1 = 0 to 4)
-# Values are the workload name that we will decided from reading the cluster summary
+# IMPORTANT: These cluster IDs come from the KMeans model saved in models_saved/.
+# This mapping MUST match MY_MAPPING in cluster_trainer.py that was used
+# when pseudo_labeled_dataset.csv was generated. If you retrain KMeans,
+# re-inspect clusters and update BOTH this file AND cluster_trainer.py's MY_MAPPING.
 
 CLUSTER_TO_WORKLOAD = {
-         0: "Video_Call",
-         1: "Gaming",
-         2: "Idle",
-         3: "Coding",
-         4: "Compiling",
-         5: "Browsing",
+    0: "Video_Call",
+    1: "Browsing",
+    2: "Compiling",
+    3: "Gaming",
+    4: "Idle",
+    5: "Coding",
 }
+
+
+
+
 
 #FUNCTION to check the correct mapping here
 # Reverse mapping — useful for debugging

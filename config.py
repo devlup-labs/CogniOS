@@ -11,6 +11,7 @@ MODEL_PATH = "iso_forest_model.joblib"
 SCALER_PATH = "scaler.joblib"
 
 # FocusOS config
+SLIDING_WIND_N = 10
 COMPILERS = ["gcc", "g++", "clang", "make", "ninja", "rustc", "javac"]
 BROWSERS = ["chrome", "firefox", "brave", "msedge"]
 CALLS = ["zoom", "teams", "slack", "discord", "skype", "webex"]
@@ -47,3 +48,6 @@ COLLECT_INTERVAL_SEC = 30
 ROWS_PER_VECTOR = 120  # ~2 min of telemetry per feature vector
 ANOMALY_CHECK_INTERVAL_SEC = 120  # Isolation Forest check cadence
 
+GAMES = ["cs2", "dota2", "valorant", "vgc", "fortniteclient", 
+    "r5apex", "pubg", "tslgame", "gta5", "gtav", "cod", "overwatch","cyberpunk2077", "eldenring", "bg3", "pathofexile", "witcher3", "minecraft",
+    "gamemoded", "winedevice", "easyanticheat", "battleye"]

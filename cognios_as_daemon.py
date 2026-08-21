@@ -123,41 +123,16 @@ def run_layer1_loop(stop_event):
                     metrics['net_packets_received'],
                     metrics['net_errs'],
                     metrics['net_drops'],
+                    metrics['udp_tcp_ratio'],
+                    metrics['network_symmetry'],
                     json.dumps(metrics['process_data']),
-                    sum(metrics['num_threads']) if isinstance(metrics.get('num_threads'), list) else int(metrics.get('num_threads') or 0)
+                    json.dumps(metrics['num_threads']),
+                    metrics['psi_cpu_some'],
+                    metrics['psi_mem_some'],
+                    metrics['psi_io_some']
                 )
-
-                # --- Write to BlackBox rolling-window DB ---
-                write_telemetry(bb_conn, metrics)
-                update_heartbeat(bb_conn)
-
-                # --- Rule engine (always runs, no warmup needed) ---
-                rule_alerts = check_rules(metrics)
-                for alert in rule_alerts:
-                    logger.warning(f"[Rule] {alert['message']}")
-
-                # --- Z-score detection ---
-                for key, mkey in [('cpu', 'cpu_usage_percent'), ('memory', 'memory_percent')]:
-                    val = metrics.get(mkey) or 0
-                    detectors[key].update(val)
-                    for issue in detectors[key].check(val, metric_name=key):
-                        logger.warning(f"[ZScore] {issue['msg']}")
-
-                # --- Isolation Forest (every ANOMALY_CHECK_INTERVAL_SEC) ---
-                if anomaly_model is not None and tick % ANOMALY_CHECK_INTERVAL_SEC == 0:
-                    rows = get_recent_rows(bb_conn, n=120)
-                    vec = extract_feature_vector(rows)
-                    if vec is not None:
-                        label, score = predict(anomaly_model, vec)
-                        if label == -1:
-                            severity = anomaly_severity(score)
-                            logger.warning(
-                                f"[IsolationForest] ANOMALY detected — "
-                                f"score={score:.4f} severity={severity}/100"
-                            )
-
-                logger.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
-
+                logging.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
+                
             except Exception as e:
                 logger.error(f"Error collecting or writing metrics: {e}")
 
