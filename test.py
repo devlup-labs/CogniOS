@@ -9,6 +9,10 @@ from os_doctor.llm_layer import run_llm_daemon
 
 from config import DB_PATH
 
+def run_osd():
+    threading.Thread(target=flag_anomaly, daemon=True).start()
+    threading.Thread(target=run_llm_daemon, daemon=True).start()
+    run_daemon()
 if __name__ == "__main__":
     # threading.Thread(target=execute_os_doctor_db, daemon=True).start()
     threading.Thread(target=flag_anomaly, daemon=True).start()
