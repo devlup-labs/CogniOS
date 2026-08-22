@@ -5,6 +5,10 @@ import pandas as pd
 from sqlalchemy import create_engine
 import os
 import joblib
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import shap
 
 expected_columns = [
     "id",                              
@@ -33,6 +37,14 @@ expected_columns = [
     "load_avg_1",                
     "avg_temp_deviation",
     "avg_temp",
+    "num_threads_deviation",
+    "num_threads",
+    "psi_metrics_cpu_deviation",
+    "psi_metrics_cpu",
+    "psi_metrics_mem_deviation",
+    "psi_metrics_mem",
+    "psi_metrics_io_deviation",
+    "psi_metrics_io",             
 
     "timestamp", 
                    
@@ -83,21 +95,22 @@ def train_isolation_forest_model():
     # Dropping timestamp as it is TEXT
     # print("Columns before dropping timestamp and id:", df.columns)
     df.columns = expected_columns
-    df = df.drop(columns=["timestamp", "id"])
+    features = df[expected_columns]
+    features = features.drop(columns=["timestamp", "id"])
 
     # Dropping rows with any cell = Null
-    df = df.dropna()
+    features = features.dropna()
     # print(df.info)
 
     # Scaling
     scaler = StandardScaler()
     scaler.set_output(transform="pandas")  # To get dataframe as output instead of numpy array
-    df = scaler.fit_transform(df)
+    features = scaler.fit_transform(features)
     # print(df)
 
     #HyperParameters 
     n_estimators = 100
-    contamination = 0.01
+    contamination = 0.1
     sample_size = 256
     random_state = 42
     max_features = 7 # It is better to set max_features = sqrt(total features)
@@ -105,8 +118,62 @@ def train_isolation_forest_model():
                                 max_samples=sample_size, random_state=random_state, max_features=max_features)
 
     # print(df)
-    model.fit(df)
+    model.fit(features)
 
-    joblib.dump(scaler, 'scaler.joblib')
-    joblib.dump(model, 'iso_forest_model.joblib')
-    print("Model saved successfully.")
+    # joblib.dump(scaler, 'scaler.joblib')
+    # joblib.dump(model, 'iso_forest_model.joblib')
+    # print("Model saved successfully.")
+
+    df['anomaly'] = model.predict(features)
+    df['anomaly_score'] = model.decision_function(features)
+    df['anomaly'].value_counts()
+
+    normal = df[df['anomaly'] == 1]
+    anomalies = df[df["anomaly"] == -1]
+
+    # print(normal.describe())
+
+    normal_sample = normal_sample = np.random.choice(normal.index,size=220,replace=False)
+    sample = np.append(anomalies.index,normal_sample)
+
+    # print(len(sample))
+
+    # masker = shap.maskers.Tabular(max_samples=246)
+    explainer = shap.Explainer(model.decision_function, features)
+    shap_values = explainer(features.iloc[sample])
+
+    abs_shap = np.abs(shap_values.values)
+
+    global_mean = abs_shap.mean(axis=0)
+
+    df_global_importance = pd.DataFrame({
+        'feauture': features.columns,
+        'global_importance': global_mean
+    })
+
+    df_global = df_global_importance.sort_values(by='global_importance')
+
+    print(df_global.describe())
+
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.width', None)
+
+# Print your full DataFrame
+    print(df_global)
+
+# Optional: Reset the options back to default afterwards
+    pd.reset_option('display.max_rows')
+    pd.reset_option('display.max_columns')
+    pd.reset_option('display.width')
+
+
+
+    # # shap.plots.waterfall(shap_values[0])
+    # # # shap.plots.waterfall(shap_values[100])
+    # # # shap.plots.waterfall(shap_values[20])
+    # plt.figure(figsize=(14,20))
+    # shap.plots.waterfall(shap_values, max_display=62, show=False)
+    # plt.tight_layout()
+    # plt.show()
+

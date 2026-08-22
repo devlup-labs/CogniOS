@@ -22,7 +22,7 @@ def extract_and_engineer_sys(db_path, window_size=120):
             memory_percent, swap_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time,
             disk_write_time, net_rate_mb_s, net_errs, net_drops, load_avg_1, total_processes,
             running_processes, sleeping_processes, zombie_processes, avg_temp,
-            max_temp, battery_percent
+            max_temp, battery_percent, num_threads, psi_metrics_cpu, psi_metrics_mem, psi_metrics_io 
         FROM layer1_sys
         ORDER BY timestamp DESC
         LIMIT ?
@@ -65,7 +65,11 @@ def extract_and_engineer_sys(db_path, window_size=120):
             'memory_percent',
             'swap_percent',
             'load_avg_1',
-            'avg_temp'
+            'avg_temp',
+            'num_threads',
+            'psi_metrics_cpu',
+            'psi_metrics_mem',
+            'psi_metrics_io'
         ]
 
     cols_to_clean = gradient_cols + deviation_cols

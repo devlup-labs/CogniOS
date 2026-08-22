@@ -39,6 +39,14 @@ def create_connection(os_doctor_db_path):
             load_avg_1                          REAL,
             avg_temp_deviation                  REAL,
             avg_temp                            REAL,
+            num_threads_deviation               REAL,
+            num_threads                         REAL,
+            psi_metrics_cpu_deviation           REAL,
+            psi_metrics_cpu                     REAL,
+            psi_metrics_mem_deviation           REAL,
+            psi_metrics_mem                     REAL,
+            psi_metrics_io_deviation            REAL,
+            psi_metrics_io                      REAL,
 
             timestamp                           TEXT NOT NULL,
             

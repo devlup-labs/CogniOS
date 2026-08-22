@@ -131,7 +131,7 @@ def run_layer1_loop(stop_event):
                     metrics['psi_mem_some'],
                     metrics['psi_io_some']
                 )
-                logging.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
+                # logging.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
                 
             except Exception as e:
                 logger.error(f"Error collecting or writing metrics: {e}")
