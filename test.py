@@ -19,8 +19,9 @@ def run_osd():
 
 if __name__ == "__main__":
     # threading.Thread(target=execute_os_doctor_db, daemon=True).start()
-    # threading.Thread(target=flag_anomaly, daemon=True).start()
-    # threading.Thread(target=run_llm_daemon, daemon=True).start()
-    # run_daemon()
-    run_osd()
+    # # threading.Thread(target=flag_anomaly, daemon=True).start()
+    # # threading.Thread(target=run_llm_daemon, daemon=True).start()
+    # # run_daemon()
+    # run_osd()
+    train_isolation_forest_model()
     

@@ -84,7 +84,7 @@ expected_columns = [
 def train_isolation_forest_model():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(current_dir)
-    db_path = os.path.join(parent_dir, "os_doctor.db")
+    db_path = os.path.join(parent_dir, "os_doctor_copy.db")
     engine = create_engine(f"sqlite:///{db_path}")
 
     df = pd.read_sql_table(
@@ -166,8 +166,6 @@ def train_isolation_forest_model():
     pd.reset_option('display.max_rows')
     pd.reset_option('display.max_columns')
     pd.reset_option('display.width')
-
-
 
     # # shap.plots.waterfall(shap_values[0])
     # # # shap.plots.waterfall(shap_values[100])
