@@ -5,20 +5,12 @@ import time
 import threading
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+from check_requirements import ensure_requirements
 
 _stop_watchdog = threading.Event()
-
-REQUIRED_MODULES = [
-    ("psutil", "psutil"),
-    ("numpy", "numpy"),
-    ("pandas", "pandas"),
-    ("sklearn", "scikit-learn"),
-    ("joblib", "joblib"),
-    ("xgboost", "xgboost"),
-    ("streamlit", "streamlit"),
-    ("streamlit_autorefresh", "streamlit-autorefresh"),
-    ("plotly", "plotly"),
-]
 
 
 def _get_venv_python():
@@ -28,17 +20,6 @@ def _get_venv_python():
     else:
         venv_py = os.path.join(BASE_DIR, ".venv", "bin", "python")
     return venv_py if os.path.isfile(venv_py) else None
-
-
-def _check_missing_modules():
-    """Checks if any required third-party modules are missing in current environment."""
-    missing = []
-    for mod_name, pkg_name in REQUIRED_MODULES:
-        try:
-            __import__(mod_name)
-        except ImportError:
-            missing.append(pkg_name)
-    return missing
 
 
 def _ensure_environment():
@@ -62,52 +43,8 @@ def _ensure_environment():
             except Exception as e:
                 print(f"[!] Failed to auto-switch to .venv python: {e}")
 
-    # 2. Check if current environment has all required modules
-    missing = _check_missing_modules()
-    if missing:
-        print("\n" + "=" * 60)
-        print("⚠️  CogniOS Environment Check: Missing Dependencies")
-        print("=" * 60)
-        print(f"Missing packages: {', '.join(missing)}")
-
-        req_path = os.path.join(BASE_DIR, "requirements.txt")
-        venv_dir = os.path.join(BASE_DIR, ".venv")
-
-        if not venv_py and not os.path.exists(venv_dir):
-            print("\n[i] Automatically creating virtual environment at .venv...")
-            try:
-                import venv
-                venv.create(venv_dir, with_pip=True)
-                venv_py = _get_venv_python()
-                print("[✔] Virtual environment created at .venv")
-            except Exception as e:
-                print(f"[!] Could not create .venv automatically: {e}")
-                print("\nPlease create one manually:")
-                print(f"  python3 -m venv .venv\n  source .venv/bin/activate\n  pip install -r requirements.txt\n")
-                sys.exit(1)
-
-        if venv_py and os.path.isfile(req_path):
-            print(f"[i] Installing dependencies from {req_path} into .venv...")
-            pip_cmd = [venv_py, "-m", "pip", "install", "-r", req_path]
-            try:
-                res = subprocess.run(pip_cmd)
-                if res.returncode == 0:
-                    print("[✔] Dependencies installed successfully!")
-                    abs_venv_py = os.path.abspath(venv_py)
-                    os.environ["COGNI_VENV_ACTIVE"] = "1"
-                    os.environ["VIRTUAL_ENV"] = venv_dir
-                    os.environ["PATH"] = os.path.dirname(abs_venv_py) + os.pathsep + os.environ.get("PATH", "")
-                    os.execv(abs_venv_py, [abs_venv_py] + sys.argv)
-                else:
-                    print(f"[!] Failed to install dependencies (exit code {res.returncode}).")
-                    sys.exit(1)
-            except Exception as e:
-                print(f"[!] Error running pip install: {e}")
-                sys.exit(1)
-        else:
-            print("\nPlease install the missing dependencies:")
-            print(f"  pip install {' '.join(missing)}\n")
-            sys.exit(1)
+    # 2. Check & auto-install missing requirements gracefully
+    ensure_requirements(auto_install=True, quiet=False)
 
 
 def _daemon_watchdog(daemon_script, telemetry_log_path, restart_delay=3):

@@ -5,9 +5,20 @@ import sys
 import signal
 import subprocess
 import psutil
+
+# Ensure workspace root is in sys.path to import check_requirements
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+# Auto-check & gracefully install missing requirements before importing dependent packages
+try:
+    from check_requirements import ensure_requirements
+    ensure_requirements(auto_install=True, quiet=True)
+except Exception:
+    pass
+
 import streamlit as st
-# pyrefly: ignore [missing-import]
-from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(
     page_title="CogniOS — System Observability & AI Diagnostics",
@@ -16,8 +27,13 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Ensure workspace root is in path
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+try:
+    from streamlit_autorefresh import st_autorefresh
+    HAS_AUTOREFRESH = True
+except ImportError:
+    HAS_AUTOREFRESH = False
+    def st_autorefresh(*args, **kwargs):
+        pass
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
@@ -504,8 +520,11 @@ def main():
         research_view.render()
 
     # --- Non-blocking Auto Refresh (browser-side timer) ---
-    refresh_interval_ms = int(getattr(config, 'AUTO_REFRESH', 2) * 1000)
-    st_autorefresh(interval=refresh_interval_ms, key="dashboard_autorefresh")
+    if HAS_AUTOREFRESH:
+        refresh_interval_ms = int(getattr(config, 'AUTO_REFRESH', 2) * 1000)
+        st_autorefresh(interval=refresh_interval_ms, key="dashboard_autorefresh")
+    else:
+        st.sidebar.warning("⚠️ `streamlit-autorefresh` missing. Run `pip install streamlit-autorefresh` for live updates.")
 
 
 if __name__ == "__main__":
