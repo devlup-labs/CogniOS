@@ -130,7 +130,8 @@ def run_layer1_loop(stop_event):
                     metrics['net_errs'],
                     metrics['net_drops'],
                     json.dumps(metrics['process_data']),
-                    sum(metrics['num_threads']) if isinstance(metrics.get('num_threads'), list) else int(metrics.get('num_threads') or 0)
+                    sum(metrics['num_threads']) if isinstance(metrics.get('num_threads'), list) else int(metrics.get('num_threads') or 0),
+                    metrics.get('udp_tcp_ratio', 0.10)
                 )
 
                 # --- Write to BlackBox rolling-window DB ---
