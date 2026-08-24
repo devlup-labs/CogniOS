@@ -13,12 +13,7 @@ from blackbox.heartbeat import (
     full_crash_check,
     mark_graceful_shutdown,
 )
-from blackbox.rule_engine import check_rules
-from blackbox.zscore_detector import ZScoreDetector
-from blackbox.feature_engineering import extract_feature_vector
-from blackbox.anomaly_model import load_model, predict, anomaly_severity
 from blackbox.replay import replay
-from config import ANOMALY_CHECK_INTERVAL_SEC 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -43,20 +38,6 @@ def run_daemon():
         logging.warning("BlackBox pre-crash timeline:\n" + result['timeline_text'])
     else:
         logging.info(f"Clean start. heartbeat gap={crash_info['heartbeat_gap']:.1f}s")
-
-    # ── Detection layers ──────────────────────────────────
-    detectors = {
-        'cpu':    ZScoreDetector(),
-        'memory': ZScoreDetector(),
-    }
-
-    try:
-        anomaly_model = load_model()
-        logging.info("Isolation Forest model loaded — multi-metric detection enabled.")
-    except FileNotFoundError:
-        anomaly_model = None
-        logging.info("No trained Isolation Forest model found — running with "
-                     "rule_engine + zscore only.")
 
     tick = 0
 
@@ -114,31 +95,6 @@ def run_daemon():
                 # --- Write to BlackBox rolling-window DB ---
                 write_telemetry(bb_conn, metrics)
                 update_heartbeat(bb_conn)
-
-                # --- Rule engine (always runs, no warmup needed) ---
-                rule_alerts = check_rules(metrics)
-                for alert in rule_alerts:
-                    logging.warning(f"[Rule] {alert['message']}")
-
-                # --- Z-score detection ---
-                for key, mkey in [('cpu', 'cpu_usage_percent'), ('memory', 'memory_percent')]:
-                    val = metrics.get(mkey) or 0
-                    detectors[key].update(val)
-                    for issue in detectors[key].check(val, metric_name=key):
-                        logging.warning(f"[ZScore] {issue['msg']}")
-
-                # --- Isolation Forest (every ANOMALY_CHECK_INTERVAL_SEC) ---
-                if anomaly_model is not None and tick % ANOMALY_CHECK_INTERVAL_SEC == 0:
-                    rows = get_recent_rows(bb_conn, n=120)
-                    vec = extract_feature_vector(rows)
-                    if vec is not None:
-                        label, score = predict(anomaly_model, vec)
-                        if label == -1:
-                            severity = anomaly_severity(score)
-                            logging.warning(
-                                f"[IsolationForest] ANOMALY detected — "
-                                f"score={score:.4f} severity={severity}/100"
-                            )
 
                 logging.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
 
