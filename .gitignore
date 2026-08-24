@@ -11,7 +11,18 @@ venv/
 data/cognios.db
 data/models/*.pt
 data/traces/*
+blackbox/blackbox.db-shm
+blackbox/blackbox.db-wal
 
 # Keep data directories present in git if marker files are added.
 !data/models/.gitkeep
 !data/traces/.gitkeep
+
+# Ignore SQLite database files
+*.db
+*.sqlite3
+*.sqlite
+
+# Environment variables
+.env
+

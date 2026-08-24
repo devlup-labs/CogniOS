@@ -1,0 +1,12 @@
+[project]
+name = "cognios"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.10"
+dependencies = [
+    "groq>=1.6.0",
+    "numpy>=2.2.6",
+    "psutil>=6.0",
+    "python-dotenv>=1.2.2",
+    "scikit-learn>=1.7.2",
+]

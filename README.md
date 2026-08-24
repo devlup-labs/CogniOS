@@ -14,48 +14,27 @@ CogniOS bridges this gap by collecting real-time system telemetry, analyzing wor
 
 The project is designed as both:
 
-* A practical system observability platform for Linux
-* A research framework for experimenting with AI-assisted operating system scheduling
+- A practical system observability platform for Linux
+- A research framework for experimenting with AI-assisted operating system scheduling
 
 ---
 
 ## Key Features
 
-* 📊 Real-time Linux system telemetry collection
-* 🩺 Intelligent anomaly detection for performance degradation
-* 🎯 AI-based workload classification and optimization
-* 📦 Rolling telemetry recording for crash replay
-* 🔬 Scheduling algorithm benchmarking and research
-* 📈 Interactive Streamlit dashboard
-* 🗄️ Centralized SQLite telemetry database
-* 🧩 Modular architecture for independent development and testing
+- 📊 Real-time Linux system telemetry collection
+- 🩺 Intelligent anomaly detection for performance degradation
+- 🎯 AI-based workload classification and optimization
+- 📦 Rolling telemetry recording for crash replay
+- 🔬 Scheduling algorithm benchmarking and research
+- 📈 Interactive Streamlit dashboard
+- 🗄️ Centralized SQLite telemetry database
+- 🧩 Modular architecture for independent development and testing
 
 ---
 
 # Architecture
 
-```
-                Linux System
-                     │
-                     ▼
-          Telemetry Collectors
-       (/proc, psutil, process APIs)
-                     │
-                     ▼
-             SQLite Database
-                     │
-     ┌───────────────┼────────────────┐
-     │               │                │
-     ▼               ▼                ▼
- OS Doctor       FocusOS         BlackBox
-     │               │                │
-     └───────────────┼────────────────┘
-                     ▼
-             Research Engine
-                     │
-                     ▼
-          Streamlit Dashboard
-```
+![alt text](./assets/image.png)
 
 ---
 
@@ -67,10 +46,10 @@ OS Doctor continuously monitors the system for abnormal behavior using machine l
 
 ### Objective
 
-* Detect abnormal CPU, memory and I/O behavior
-* Explain possible reasons for system slowdowns
-* Identify unusual workload patterns
-* Provide interpretable diagnostics from live telemetry
+- Detect abnormal CPU, memory and I/O behavior
+- Explain possible reasons for system slowdowns
+- Identify unusual workload patterns
+- Provide interpretable diagnostics from live telemetry
 
 ---
 
@@ -80,10 +59,10 @@ FocusOS is responsible for intelligent workload classification and adaptive syst
 
 ### Objective
 
-* Classify the current workload using machine learning
-* Optimize process priorities
-* Modify Linux scheduling parameters
-* Improve overall system responsiveness
+- Classify the current workload using machine learning
+- Optimize process priorities
+- Modify Linux scheduling parameters
+- Improve overall system responsiveness
 
 Future versions may also support dynamic CPU affinity optimization and workload-aware scheduling.
 
@@ -97,10 +76,10 @@ It continuously stores recent telemetry in a rolling buffer, allowing developers
 
 ### Objective
 
-* Record recent system telemetry
-* Preserve crash history
-* Replay workload traces
-* Assist in post-mortem debugging
+- Record recent system telemetry
+- Preserve crash history
+- Replay workload traces
+- Assist in post-mortem debugging
 
 ---
 
@@ -110,18 +89,18 @@ The Research Engine provides an experimentation platform for scheduling algorith
 
 ### Objective
 
-* Compare classical scheduling algorithms
-* Evaluate AI-based schedulers
-* Replay collected workloads
-* Benchmark scheduling performance
-* Support reinforcement learning experiments
+- Compare classical scheduling algorithms
+- Evaluate AI-based schedulers
+- Replay collected workloads
+- Benchmark scheduling performance
+- Support reinforcement learning experiments
 
 Supported scheduling algorithms include:
 
-* FCFS
-* Shortest Job First
-* Round Robin
-* Priority Scheduling
+- FCFS
+- Shortest Job First
+- Round Robin
+- Priority Scheduling
 
 Future versions may include reinforcement learning schedulers.
 
@@ -133,11 +112,11 @@ The Streamlit dashboard serves as the unified visualization layer of CogniOS.
 
 ### Objective
 
-* Visualize system telemetry
-* Display anomaly alerts
-* Monitor workload classifications
-* Compare scheduling results
-* Provide a centralized monitoring interface
+- Visualize system telemetry
+- Display anomaly alerts
+- Monitor workload classifications
+- Compare scheduling results
+- Provide a centralized monitoring interface
 
 ---
 
@@ -147,12 +126,12 @@ Collectors gather telemetry directly from Linux using lightweight system interfa
 
 ### Objective
 
-* CPU monitoring
-* Memory monitoring
-* Disk monitoring
-* Process monitoring
-* Network statistics
-* I/O statistics
+- CPU monitoring
+- Memory monitoring
+- Disk monitoring
+- Process monitoring
+- Network statistics
+- I/O statistics
 
 These collectors act as the data source for every other module.
 
@@ -164,11 +143,11 @@ The data layer stores all telemetry generated by the collectors.
 
 ### Responsibilities
 
-* Store real-time telemetry
-* Maintain workload traces
-* Persist crash recordings
-* Provide data for ML training
-* Support benchmarking experiments
+- Store real-time telemetry
+- Maintain workload traces
+- Persist crash recordings
+- Provide data for ML training
+- Support benchmarking experiments
 
 SQLite is used as the centralized storage backend.
 
@@ -252,26 +231,26 @@ Each major subsystem is designed as an independent module with its own documenta
 
 Every module contains its own dedicated `README.md` describing:
 
-* Module architecture
-* Directory structure
-* Components
-* APIs
-* Data flow
-* Usage
-* Future work
+- Module architecture
+- Directory structure
+- Components
+- APIs
+- Data flow
+- Usage
+- Future work
 
 ---
 
 # Roadmap
 
-* Real-time Linux telemetry collection
-* Intelligent anomaly detection
-* AI-assisted workload optimization
-* Crash replay and forensic analysis
-* Scheduling benchmark suite
-* Reinforcement learning scheduler
-* GPU telemetry support
-* Windows and macOS support
+- Real-time Linux telemetry collection
+- Intelligent anomaly detection
+- AI-assisted workload optimization
+- Crash replay and forensic analysis
+- Scheduling benchmark suite
+- Reinforcement learning scheduler
+- GPU telemetry support
+- Windows and macOS support
 
 ---
 
@@ -279,12 +258,12 @@ Every module contains its own dedicated `README.md` describing:
 
 We welcome contributions from developers interested in:
 
-* Operating Systems
-* Machine Learning
-* Systems Programming
-* Linux Internals
-* Performance Engineering
-* Data Engineering
+- Operating Systems
+- Machine Learning
+- Systems Programming
+- Linux Internals
+- Performance Engineering
+- Data Engineering
 
 Before contributing, please read the documentation for the module you wish to work on.
 
