@@ -2,7 +2,7 @@
 import time
 import numpy as np
 from datetime import datetime
-from blackbox.recorder import get_window_rows, get_recent_rows
+from blackbox.recorder import get_window_rows
 
 def _build_events(rows: list[dict]) -> list[dict]:
     
@@ -142,8 +142,6 @@ def _format_chain(chain: list[dict], max_events: int = 25) -> str:
     return "\n".join(lines)
 
 
-# ── Trend summary ─────────────────────────────────────────────────────────────
-
 def _trend_summary(rows: list[dict]) -> str:
     # Summarize metric trends over the window for LLM context
     if not rows:
@@ -164,9 +162,6 @@ def _trend_summary(rows: list[dict]) -> str:
         f"Load avg: {rows[-1].get('load_avg1', 'N/A')}"
     )
 
-
-# ── Main replay ───────────────────────────────────────────────────────────────
-
 def replay(conn, crash_time: float = None, window_minutes: int = 30) -> dict:
     if crash_time is None:
         crash_time = time.time()
@@ -185,9 +180,6 @@ def replay(conn, crash_time: float = None, window_minutes: int = 30) -> dict:
         'timeline_text': _format_chain(chain),
         'trend_summary': _trend_summary(rows),
     }
-
-
-# ── LLM context builder ───────────────────────────────────────────────────────
 
 def build_llm_context(conn, crash_time: float = None,
                       heartbeat_gap: float = None,

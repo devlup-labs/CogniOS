@@ -127,22 +127,6 @@ def _prune_old_records(conn: sqlite3.Connection, now: float | None = None) -> No
     conn.execute("DELETE FROM blackbox_telemetry WHERE timestamp < ?", (cutoff,))
 
 
-def get_recent_rows(conn: sqlite3.Connection, n: int = 120) -> list[dict]:
-    # Return up to n latest rows in chronological order
-    if n <= 0:
-        return []
-    lock = _get_lock(conn)
-    with lock if lock else _noop_ctx():
-        cursor = conn.execute("""
-            SELECT * FROM blackbox_telemetry
-            ORDER BY timestamp DESC
-            LIMIT ?
-        """, (n,))
-        cols = [d[0] for d in cursor.description]
-        rows = [dict(zip(cols, row)) for row in cursor.fetchall()]
-    return list(reversed(rows))
-
-
 def get_window_rows(conn: sqlite3.Connection,
                     start_time: float,
                     end_time: float) -> list[dict]:
@@ -158,9 +142,3 @@ def get_window_rows(conn: sqlite3.Connection,
         return [dict(zip(cols, row)) for row in cursor.fetchall()]
 
 
-def row_count(conn: sqlite3.Connection) -> int:
-    lock = _get_lock(conn)
-    with lock if lock else _noop_ctx():
-        return conn.execute(
-            "SELECT COUNT(*) FROM blackbox_telemetry"
-        ).fetchone()[0]

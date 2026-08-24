@@ -52,7 +52,8 @@ def query_telemetry(
         )
         _chat_history.append({"role": "user", "content": full_user_content})
         response = ask_groq(
-            user_content=None,
+            user_content=
+            '',
             system_prompt=SYSTEM_PROMPT,
             model=model,
             stream=stream,
@@ -101,7 +102,6 @@ def ask_groq(
             stream=True,
             stop=None,
             reasoning_format="hidden",
-            # reasoning_effort="low",
         )
 
         full_response = []

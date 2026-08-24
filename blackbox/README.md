@@ -1,45 +1,43 @@
 # BlackBox Module — CogniOS
 
-> **"Airplane ka black box"** — continuously record karta rehta hai, crash/freeze ke baad replay karke batata hai exactly kya hua tha aur kyun.
+> **CogniOS Observability Suite — Flight Recorder & Post-Crash Forensics Subsystem**
+> "Airplane ka black box" — continuously records telemetry, and after a crash/freeze, replays exactly what happened and why.
 
 ---
 
 ## 1. Module Overview
 
-BlackBox is CogniOS's **flight recorder and forensic analysis engine**. It answers one core question:
+BlackBox is CogniOS's **lightweight, crash-resilient telemetry recorder and post-crash forensic analyzer**. It answers one core question:
 
-> _"My system froze/crashed — what happened in the 30 minutes before it?"_
+> _"What happened to the system in the 30 minutes leading up to a crash, freeze, or hard power-off?"_
 
 ### What BlackBox is
 
-- A real-time telemetry recorder (rolling 30-minute window)
-- An anomaly detection engine (Z-score + Isolation Forest)
-- A root-cause explanation system (Correlation Engine + LLM)
+- A real-time telemetry recorder (rolling 30-minute SQLite window, WAL mode)
+- A dual-layer crash/freeze detector (in-process heartbeat + systemd journal inspection)
+- A dynamic-baseline anomaly detector (Z-score spikes + linear-regression drift, no ML training required)
+- An LLM-powered forensic analyst (Groq API, natural-language Q&A over the reconstructed timeline)
 
 ### Core pipeline
 
 ```
-Layer 1/2/3/4 Telemetry
+Linux System Metrics
         ↓
-Rolling Event Store (last 30 min only)
+cognios_as_daemon.py (1 Hz telemetry tick)
         ↓
-Heartbeat System (crash/freeze detection)
+blackbox/recorder.py → blackbox.db (rolling 30-min window, WAL mode)
         ↓
-Feature Engineering (120 rows → 1 feature vector)
-        ↓
-Z-score Detector (sudden spikes + slow drift)
-        ↓
-Isolation Forest (multi-metric anomaly confirmation)
-        ↓
-Rule Engine (deterministic backup checks)
-        ↓
-Correlation Engine (CAUSE → EFFECT chain)
-        ↓
-Replay Timeline
-        ↓
-LLM Explanation (human-readable root cause)
-        ↓
-Dashboard Alert
+heartbeat.py (every tick: update_heartbeat)
+        │
+        └─ On daemon startup: full_crash_check()
+                ├── Heartbeat gap check
+                └── systemd journalctl check
+                        ↓
+                (if crash detected)
+                        ↓
+                replay.py → baseline calc, Z-score events, event chain
+                        ↓
+                nl_query.py → Groq LLM forensic explanation
 ```
 
 ---
@@ -48,101 +46,59 @@ Dashboard Alert
 
 ```
 blackbox/
-├── recorder.py               # Rolling event store — writes + prunes telemetry
-├── heartbeat.py               # Crash/freeze detection via heartbeat timestamps
-├── feature_engineering.py    # Converts raw DB rows → statistical feature vector
-├── zscore_detector.py        # Z-score + slope (trend) based anomaly detector
-├── anomaly_model.py          # Isolation Forest wrapper (sklearn)
-├── rule_engine.py            # Deterministic threshold-based checks (backup)
-├── correlation.py            # Builds CAUSE → EFFECT event chains
-├── replay.py                  # Reconstructs timeline from rolling window
-├── nl_query.py                # Natural language query interface (placeholder)
-├── crash_predictor_cnn.py     # CNN-based sequence classifier (placeholder)
-├── test_integration.py       # 13-section end-to-end test suite
-├── collect_training_data.py  # Background collector for real-usage feature vectors
-├── train_from_real_data.py   # Trains Isolation Forest from collected real data
-└── blackbox.db                # SQLite DB (rolling 30-min window), WAL mode
+├── recorder.py     # SQLite WAL connection, schema, writes, pruning, thread locks
+├── heartbeat.py     # Daemon liveness tracking, crash/freeze detection (heartbeat + journalctl)
+├── replay.py         # Timeline reconstruction, Z-score/drift event detection, LLM context builder
+├── nl_query.py       # Groq API interface — interactive natural-language forensic Q&A
 ```
 
 ```
 CogniOS/                       # project root
 ├── config.py                  # All config constants, including BlackBox's
-├── db.py                      # SQLite connection + schema for Layer 1/2
+├── .env                       # GROQ_API_KEY, etc.
 └── cognios_as_daemon.py       # Daemon entry point, wires BlackBox into main loop
 ```
 
-> **Note:** `config.py` and `db.py` live at the project root, not under a
-> `utils/` package — every BlackBox module imports them as `from config import
-...` / `from db import ...`.
-
+> **Note:** `config.py` lives at the project root, not under a `utils/` package —
+> every BlackBox module imports it as `from config import ...`.
 ---
 
-## 3. Function & Class Definitions
+## 3. Function & Class Reference
 
 ### `recorder.py`
 
 ```python
-def get_blackbox_conn() -> sqlite3.Connection
+def get_blackbox_conn(db_path: str | Path | None = None) -> sqlite3.Connection
 ```
-
-**Purpose:** Opens and returns a connection to `blackbox/blackbox.db` in WAL mode with synchronous set to NORMAL for crash-safe, fast writes. Registers a `threading.Lock` per connection so concurrent reads/writes (daemon + any other thread) are safe.
-
-- **Input:** None
-- **Output:** `sqlite3.Connection`
+Opens a connection to `blackbox.db` in WAL mode (`synchronous=NORMAL`,
+`busy_timeout=5000`). Registers a dedicated `threading.Lock` per connection
+(keyed by `id(conn)`) so concurrent daemon threads can read/write safely.
 
 ```python
 def create_blackbox_table(conn: sqlite3.Connection) -> None
 ```
-
-**Purpose:** Creates the rolling `blackbox_telemetry` table schema (for CPU, Memory, Disk, Network, Processes, and Hardware temperatures) if it doesn't already exist.
-
-- **Input:** `conn` (sqlite3 connection)
-- **Output:** None
+Creates the `blackbox_telemetry` table and its timestamp index if they don't
+already exist. Also runs an initial prune on call.
 
 ```python
 def write_telemetry(conn: sqlite3.Connection, metrics: dict) -> None
 ```
-
-**Purpose:** Writes one Layer 1 metrics dictionary row into `blackbox_telemetry`. Inserts current time if timestamp is missing, then prunes expired rows in the same transaction. The store therefore never retains telemetry older than the configured 30-minute window after a write.
-
-- **Input:** `conn`, `metrics` (dict)
-- **Output:** None
+Inserts one Layer 1 metrics row (see `BLACKBOX_METRICS_KEYS`). Fills in
+`time.time()` if `timestamp` is missing or invalid. Prunes expired rows and
+commits in the same call — the store never holds telemetry older than
+`BLACKBOX_WINDOW_SEC` after a write returns.
 
 ```python
 def prune_old_records(conn: sqlite3.Connection) -> None
 ```
-
-**Purpose:** Deletes telemetry rows older than `BLACKBOX_WINDOW_SEC` (default: 30 minutes) to maintain the rolling window.
-
-- **Input:** `conn`
-- **Output:** None
-
-```python
-def get_recent_rows(conn: sqlite3.Connection, n: int = 120) -> list[dict]
-```
-
-**Purpose:** Fetches the last `n` telemetry rows (default 120 = last 2 minutes), returning them in chronological order. Useful for feature engineering or correlation analysis.
-
-- **Input:** `conn`, `n` (int)
-- **Output:** `list[dict]`
+Public, lock-safe wrapper around the internal `_prune_old_records()` — useful
+for calling pruning explicitly outside the write path (e.g. a maintenance
+script). Not required in the normal daemon loop since `write_telemetry`
+already prunes on every write.
 
 ```python
 def get_window_rows(conn: sqlite3.Connection, start_time: float, end_time: float) -> list[dict]
 ```
-
-**Purpose:** Fetches and returns all telemetry rows between two Unix epoch timestamps.
-
-- **Input:** `conn`, `start_time` (float), `end_time` (float)
-- **Output:** `list[dict]` ordered chronologically
-
-```python
-def row_count(conn: sqlite3.Connection) -> int
-```
-
-**Purpose:** Returns the total number of rows currently stored in `blackbox_telemetry`.
-
-- **Input:** `conn`
-- **Output:** `int`
 
 ---
 
@@ -150,173 +106,46 @@ def row_count(conn: sqlite3.Connection) -> int
 
 ```python
 def create_heartbeat_table(conn: sqlite3.Connection) -> None
-```
-
-**Purpose:** Creates a single-row table `blackbox_heartbeat` to store the last heartbeat timestamp and a graceful shutdown flag.
-
-- **Input:** `conn`
-- **Output:** None
-
-```python
 def update_heartbeat(conn: sqlite3.Connection) -> None
-```
-
-**Purpose:** Updates the `last_beat` column with the current timestamp. Called by the daemon loop every second.
-
-- **Input:** `conn`
-- **Output:** None
-
-```python
 def mark_graceful_shutdown(conn: sqlite3.Connection) -> None
 ```
-
-**Purpose:** Sets the `graceful_shutdown` flag to `1` in the heartbeat table. Called in the daemon's SIGTERM/SIGINT handler to indicate a clean exit. If not called (crash, SIGKILL, power cut), the flag stays `0` — this is how a crash is distinguished from a normal shutdown.
-
-- **Input:** `conn`
-- **Output:** None
+Single-row `blackbox_heartbeat` table (`id = 1`). `update_heartbeat` is
+called every daemon tick; `mark_graceful_shutdown` is called from the
+SIGINT/SIGTERM handler to set `graceful_shutdown = 1`. If the daemon dies
+without that call (crash, SIGKILL, power loss), the flag stays `0`.
 
 ```python
 def check_crash_on_startup(conn: sqlite3.Connection) -> tuple[bool, float]
 ```
-
-**Purpose:** Called once at daemon startup. Reads the last heartbeat timestamp and the graceful shutdown flag. Returns `(crash_detected: bool, gap_seconds: float)`.
-
-**Detection logic (priority order):**
-
-1. `graceful_shutdown == 1` → normal shutdown, no crash — regardless of gap size (so a slow boot or laptop sleep doesn't get misread as a crash)
-2. `graceful_shutdown == 0` AND `gap > BLACKBOX_CRASH_GAP_SEC` → crash detected (this gap check is a fallback for SIGKILL/power-cut cases where the flag never gets set)
-3. Always resets the flag to `0` for the next session
-
-- **Input:** `conn`
-- **Output:** `(crash_detected, gap_seconds)`
-
----
-
-### `feature_engineering.py`
+Reads and clears the previous session's heartbeat state under a single lock
+(avoids a race with a concurrent write leaving a stale marker for the next
+startup). Detection order:
+1. `graceful_shutdown == 1` → not a crash, regardless of gap size.
+2. `graceful_shutdown == 0` and `gap > BLACKBOX_CRASH_GAP_SEC` (30s) → crash.
+3. Gap is clamped to `≥ 0` to absorb clock corrections.
 
 ```python
-def extract_feature_vector(rows: list[dict]) -> list[float] | None
+def detect_crash_via_systemd() -> bool
 ```
-
-**Purpose:** Converts the last 120 raw telemetry rows into a single 8-dimensional statistical feature vector for anomaly detection. Disk spikes are expressed as a fraction of the observed rows, and context switches are converted from the OS's cumulative counter to switches per second.
-
-- **Input:** `rows` (list of dicts, minimum `BLACKBOX_WARMUP_SEC` = 60 rows required)
-- **Output:** `[mean_cpu, max_cpu, cpu_growth_rate, cpu_variance, mean_ram, memory_growth_rate, disk_spike_frequency, context_switch_rate]`. Returns `None` if data is insufficient.
-
-`cpu_growth_rate` and `memory_growth_rate` are `newest - oldest` deltas within
-the window — positive means the metric rose over the window, negative means
-it fell.
-
----
-
-### `zscore_detector.py`
+Runs `journalctl -b -1 -n 10 --no-pager` (5s timeout) and scans the last
+boot's final log lines for crash signals (`kernel panic`, `oom`,
+`oom-killer`, `out of memory`, `segfault`) vs. clean signals (`power-off`,
+`shutdown`, `reboot`, `stopped target`). Fails safe — any subprocess error,
+timeout, or ambiguous output is treated as a suspected crash rather than
+silently passing.
 
 ```python
-class ZScoreDetector:
+def full_crash_check(conn: sqlite3.Connection) -> dict
 ```
-
-**Purpose:** Sliding-window statistical detector that monitors metric streams for sudden spikes and slow drifts.
-
-- **Methods:**
-  - `__init__(self)`: Initializes the rolling baseline deques for Z-score calculation, slope calculation, and sustained spike filtering.
-  - `update(self, val)`: Appends a new metric reading to the internal deques.
-  - `warmup_pct(self)`: Returns calibration progress (0–100%).
-  - `check(self, val, metric_name="metric", unit="%") -> list[dict]`: Checks for:
-    - **Z-score spike:** Flags values exceeding `Z > 2.8`, only if also sustained (≥60% of the last 30s of readings above `mean + 2·std`) — sudden compile-burst-style spikes that don't sustain are filtered out.
-    - **Slow drift:** Calculates the trend slope via linear regression. Flags slow drifts (e.g. memory leaks) and predicts `ETA to critical` in minutes.
-
----
-
-### `anomaly_model.py`
-
+Combines both checks:
 ```python
-def train(normal_feature_vectors: list[list[float]], contamination: float = 0.05) -> IsolationForest
+{
+    "heartbeat_crash": bool,
+    "heartbeat_gap":   float,
+    "systemd_crash":   bool,
+    "any_crash":       bool,   # heartbeat_crash OR systemd_crash
+}
 ```
-
-**Purpose:** Trains an Isolation Forest on normal baseline feature vectors.
-
-- **Input:** `normal_feature_vectors` (list of feature lists), `contamination` (expected anomaly ratio)
-- **Output:** Trained `IsolationForest` object
-
-```python
-def predict(model: IsolationForest, feature_vector: list[float]) -> tuple[int, float]
-```
-
-**Purpose:** Predicts if a feature vector is normal (`1`) or anomalous (`-1`), returning the label and raw decision score.
-
-- **Input:** `model` (IsolationForest), `feature_vector` (list of 8 floats)
-- **Output:** `(label, score)`
-
-```python
-def anomaly_severity(score: float) -> int
-```
-
-**Purpose:** Converts the raw Isolation Forest decision score (negative = more anomalous) to a normalized `0–100` severity integer for the dashboard.
-
-- **Input:** `score` (float)
-- **Output:** `int`
-
-```python
-def save_model(model: IsolationForest, path: str = MODEL_PATH) -> None
-```
-
-**Purpose:** Serializes and saves the trained model to disk using pickle.
-
-- **Input:** `model` (IsolationForest), `path` (str, default `blackbox/if_model.pkl`)
-- **Output:** None
-
-```python
-def load_model(path: str = MODEL_PATH) -> IsolationForest
-```
-
-**Purpose:** Loads a saved model from disk. Raises `FileNotFoundError` if no model has been trained yet — the daemon catches this and falls back to rule engine + Z-score only.
-
-- **Input:** `path` (str)
-- **Output:** `IsolationForest`
-
----
-
-### `rule_engine.py`
-
-```python
-def check_rules(metrics: dict) -> list[dict]
-```
-
-**Purpose:** Runs deterministic threshold checks (CPU, Memory, Zombies, Temperature, Swap) alongside the ML models. Runs from tick 1 — fills the gap during the model warmup period, when Z-score and Isolation Forest don't yet have enough history.
-
-- **Input:** `metrics` (dict — the live Layer 1 metrics dict, not a stored DB row)
-- **Output:** `list[dict]` of fired alerts, each with `type`, `severity`, `value`, and `message` keys
-
----
-
-### `correlation.py`
-
-```python
-def telemetry_to_events(rows: list[dict]) -> list[dict]
-```
-
-**Purpose:** Analyzes consecutive telemetry rows and creates events (`cpu_spike`, `memory_growth`, `process_explosion`, `zombie_buildup`, `io_storm`, `swap_spike`) when thresholds are breached.
-
-- **Input:** `rows` (list of dicts)
-- **Output:** `list[dict]` of events, each carrying both a formatted `time` string and a numeric `timestamp`
-
-```python
-def build_event_chain(events: list[dict]) -> list[dict]
-```
-
-**Purpose:** Deduplicates and groups same-type events occurring within 5 seconds of each other to construct a clean cause-effect event chain.
-
-- **Input:** `events` (list of dicts)
-- **Output:** `list[dict]` (chronological event chain)
-
-```python
-def format_chain_text(chain: list[dict]) -> str
-```
-
-**Purpose:** Formats the event chain into a clean, human-readable timeline string.
-
-- **Input:** `chain` (list of dicts)
-- **Output:** `str`
 
 ---
 
@@ -325,371 +154,170 @@ def format_chain_text(chain: list[dict]) -> str
 ```python
 def replay(conn, crash_time: float = None, window_minutes: int = 30) -> dict
 ```
-
-**Purpose:** Reconstructs the pre-crash system state by fetching telemetry rows, converting them to events, building the event chain, and formatting the timeline.
-
-- **Input:** `conn` (sqlite3 connection), `crash_time` (Unix timestamp float, defaults to now), `window_minutes` (int)
-- **Output:** `dict` containing crash details and timeline text
-
+Fetches the window, detects events, deduplicates them into a chain, and
+returns:
 ```python
-def generate_llm_context(replay_result: dict, anomaly_type: str = "unknown") -> dict
+{
+    'crash_time': float, 'window_start': float, 'total_rows': int,
+    'events': list[dict], 'chain': list[dict],
+    'timeline_text': str, 'trend_summary': str,
+}
 ```
 
-**Purpose:** Creates a context dictionary containing a formatted prompt, timeline, and anomaly metadata to feed into an LLM for explanation generation.
+```python
+def build_llm_context(conn, crash_time=None, heartbeat_gap=None, systemd_crash=None) -> str
+```
+Wraps `replay()`'s output plus crash-signal info into a formatted context
+block for the LLM prompt.
 
-- **Input:** `replay_result` (dict), `anomaly_type` (str)
-- **Output:** `dict`
+**Detection logic** (baseline = mean/σ of the first 20% of window rows,
+minimum 10 rows):
+
+| Event | Condition |
+|---|---|
+| CPU spike | Z-score > 2.0 |
+| Memory spike | Z-score > 2.0 |
+| Memory leak | Linear-fit slope > 0.01%/s over the full window |
+| Process explosion | `Δ total_processes > 30` between consecutive rows |
+| Zombie buildup | `zombie_processes > 5` |
+| Disk I/O storm | Z-score > 2.5 |
+| Swap spike | Z-score > 2.0 |
+
+**Dedup & formatting:**
+- `_build_chain()` — same event `type` can't repeat within `min_gap_sec`
+  (default **30s**; widened from an earlier 5s window that produced
+  excessive near-duplicate entries on noisy metrics).
+- `_format_chain()` — hard-caps the timeline at `max_events` (default
+  **25**), prioritizing `severity: high` events first, chronological among
+  survivors. Prevents unbounded prompt growth from a very noisy crash
+  window.
 
 ---
 
-### `collect_training_data.py`
+### `nl_query.py`
 
 ```python
-def collect_and_append(conn) -> bool
+def query_telemetry(user_query: str, conn=None, stream=True, model=GROQ_MODEL,
+                    api_key=None, crash_time=None, crash_info=None) -> str
 ```
+Builds the telemetry context via `build_llm_context()`, appends it to the
+module-level `_chat_history`, and calls `ask_groq()`.
 
-**Purpose:** Extracts one feature vector from the most recent 120 rows and appends it (with a timestamp) to `blackbox/training_vectors.jsonl` — a file that is never pruned, so it accumulates across sessions and days unlike `blackbox_telemetry`. Returns `False` (writes nothing) during warmup.
+```python
+def ask_groq(user_content, system_prompt=SYSTEM_PROMPT, model=GROQ_MODEL,
+             stream=True, api_key=None, history=None) -> str
+```
+Thin wrapper around `groq.Groq().chat.completions.create()`. Streams to
+stdout when `stream=True`.
 
-- **Input:** `conn`
-- **Output:** `bool`
-
-Run alongside the daemon to build a real-usage training set for
-`anomaly_model.py`, as an alternative or supplement to synthetic `stress-ng`
-data:
-
+**CLI entry point (`main()`):**
 ```bash
-python3 -m blackbox.collect_training_data
+python3 -m blackbox.nl_query "Why did my system crash?"   # one-shot query
+python3 -m blackbox.nl_query                                # interactive REPL (multi-turn)
 ```
+In REPL mode, `_chat_history` persists for the life of the process, so
+follow-up questions retain conversation context. One-shot mode starts a
+fresh process each time and has no memory across separate invocations.
 
 ---
 
-### `train_from_real_data.py`
+## 4. Data Storage & Schema
 
-**Purpose:** Loads all vectors from `blackbox/training_vectors.jsonl`, trains
-the Isolation Forest via `anomaly_model.train()`, saves it to
-`blackbox/if_model.pkl`, and runs a sanity check (predicts on its own
-training data — the anomalous fraction should land near the requested
-`contamination`, e.g. ~5%).
+### `blackbox_telemetry`
 
-```bash
-python3 -m blackbox.train_from_real_data
-```
+| Column | Type | Description |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | Row ID |
+| `timestamp` | `REAL NOT NULL` | Epoch time (indexed) |
+| `cpu_usage_percent`, `cpu_ctx_switches`, `cpu_busy_time`, `cpu_iowait_time` | `REAL` | CPU metrics |
+| `memory_percent` | `REAL` | RAM usage % |
+| `memory_used` | `INTEGER` | RAM used (bytes) |
+| `swap_percent` | `REAL` | Swap usage % |
+| `disk_read`, `disk_write` | `REAL` | Disk throughput (MB/s) |
+| `net_rate_mb_s` | `REAL` | Network throughput (MB/s) |
+| `net_bytes_sent`, `net_bytes_received` | `INTEGER` | Cumulative network counters |
+| `total_processes`, `running_processes`, `zombie_processes` | `INTEGER` | Process counts |
+| `load_avg1`, `load_avg5` | `REAL` | System load averages |
+| `avg_temp` | `REAL` | Average thermal reading (°C) |
 
----
+### `blackbox_heartbeat`
 
-### `nl_query.py` & `crash_predictor_cnn.py`
+Single-row table (`id = 1`):
 
-- **Status:** Placeholder drafts (docstring only, no active runtime
-  functions). `nl_query.py` is planned to accept a free-text question and
-  return an LLM-generated answer built from `replay()`/`correlation.py`
-  output. `crash_predictor_cnn.py`'s scope is not yet defined — needs
-  clarification before implementation starts, since it overlaps
-  conceptually with `anomaly_model.py`.
+| Column | Type | Description |
+|---|---|---|
+| `last_beat` | `REAL NOT NULL` | Epoch time of last successful tick |
+| `graceful_shutdown` | `INTEGER NOT NULL DEFAULT 0` | `1` = clean exit, `0` = crash/abrupt |
 
----
+### Concurrency & crash safety
 
-## 4. Useful Telemetry Data
-
-BlackBox consumes data from all 4 collector layers:
-
-### From `layer1_system` (Layer 1 — every 1s)
-
-| Column              | Use in BlackBox                                                                          |
-| ------------------- | ---------------------------------------------------------------------------------------- |
-| `cpu_usage_percent` | Primary Z-score metric, spike detection                                                  |
-| `memory_percent`    | Memory leak slope detection                                                              |
-| `disk_read`         | I/O storm detection                                                                      |
-| `net_rate_mb_s`     | Network exfiltration detection                                                           |
-| `cpu_ctx_switches`  | Scheduler congestion (feature vector)                                                    |
-| `total_processes`   | Thread explosion detection                                                               |
-| `zombie_processes`  | Zombie accumulation rule check                                                           |
-| `load_avg1`         | Scheduler load feature                                                                   |
-| `swap_percent`      | Memory pressure feature                                                                  |
-| `avg_temp`          | Stored in `blackbox_telemetry`                                                           |
-| `max_temp`          | Read live by `rule_engine.py` for thermal alerts (not persisted to `blackbox_telemetry`) |
-
-### From `layer2_top_processes` (Layer 2 — every 5s)
-
-| Column        | Use in BlackBox                                |
-| ------------- | ---------------------------------------------- |
-| `pid`, `name` | Identify culprit process in correlation engine |
-| `cpu_percent` | Which process caused CPU spike                 |
-| `rss_memory`  | Which process is leaking memory                |
-| `timestamp`   | Timeline correlation                           |
-
-### From `process_metadata` (Layer 3 — on first seen)
-
-| Column        | Use in BlackBox                        |
-| ------------- | -------------------------------------- |
-| `cmdline`     | What exact command was running         |
-| `exe_path`    | Where executable came from             |
-| `username`    | Who launched the process               |
-| `create_time` | When process started relative to crash |
-
-### From `process_diagnostics` (Layer 4 — on anomaly)
-
-| Column             | Use in BlackBox                          |
-| ------------------ | ---------------------------------------- |
-| `open_files_count` | File handle leak detection               |
-| `thread_details`   | Which threads were consuming CPU         |
-| `net_connections`  | Active network connections at crash time |
-| `trigger_reason`   | Why Layer 4 was triggered                |
-
-### Rolling window SQL
-
-```sql
--- Fetch last 2 minutes for feature extraction
-SELECT cpu_usage_percent, memory_percent,
-       disk_read, net_rate_mb_s,
-       total_processes, cpu_ctx_switches
-FROM blackbox_telemetry
-ORDER BY timestamp DESC
-LIMIT 120;
-
--- Trim to 30-minute window
-DELETE FROM blackbox_telemetry
-WHERE timestamp < (strftime('%s', 'now') - 1800);
-```
+- **WAL mode**: reads don't block writes; uncommitted writes survive an abrupt daemon crash.
+- **`synchronous=NORMAL`**: balances 1 Hz write throughput with disk durability.
+- **`busy_timeout=5000`**: avoids `SQLITE_BUSY` errors under concurrent access.
+- **`_conn_locks`**: `id(conn) → threading.Lock()` mapping in `recorder.py`, ensuring thread-safe access across the daemon's threads. Assumes a single long-lived connection per process — if connections are ever created/destroyed dynamically, revisit this, since Python object IDs can be reused after garbage collection.
 
 ---
 
-## 5. Additional Info & Configuration
+## 5. Configuration Reference
 
-### Config values (from `config.py`, project root)
+From `config.py` (project root):
 
 ```python
-# Database configuration
-BLACKBOX_DB_PATH         = "blackbox/blackbox.db"
-
-# Window & warmup configuration
-BLACKBOX_WINDOW_SEC      = 1800   # Rolling window duration (30 mins)
-BLACKBOX_WARMUP_SEC      = 60     # Seconds of data required before detection starts
-BLACKBOX_CRASH_GAP_SEC   = 30     # Fallback gap threshold for crash detection (SIGKILL cases only)
-
-# Z-Score detector tunables
-BLACKBOX_Z_THRESHOLD     = 2.8    # Standard deviations for spike detection
-BLACKBOX_SLOPE_THRESHOLD = 0.003  # %/sec rise threshold for slow drift detection
-BLACKBOX_SUSTAINED_SEC   = 30     # Duration a spike must be sustained
-BLACKBOX_SUSTAINED_RATIO = 0.6    # Fraction of readings that must cross threshold
-BLACKBOX_TREND_WINDOW    = 600    # History length (10 min) for slope calculation
-
-# Rule engine critical thresholds
-BLACKBOX_CPU_CRITICAL    = 90.0   # %
-BLACKBOX_MEM_CRITICAL    = 90.0   # %
-BLACKBOX_ZOMBIE_LIMIT    = 10     # count
-BLACKBOX_TEMP_CRITICAL   = 85.0   # °C
-BLACKBOX_SWAP_CRITICAL   = 80.0   # %
-
-# Daemon
-ANOMALY_CHECK_INTERVAL_SEC = 120  # How often the daemon runs an Isolation Forest check
+BLACKBOX_DB_PATH          = "blackbox/blackbox.db"
+BLACKBOX_WINDOW_SEC       = 1800   # Rolling retention window (30 min)
+BLACKBOX_CRASH_GAP_SEC    = 30     # Heartbeat gap threshold for crash detection
+GROQ_MODEL                = "qwen/qwen3.6-27b"
 ```
 
-### Key design decisions
+### `.env`
 
-**Why SQLite over other storage?**
-Lightweight, local, crash-resistant (data survives daemon crash via WAL mode), queryable via SQL, replay-friendly.
-
-**Why rolling 30-minute window?**
-30 minutes of pre-crash context is sufficient for root-cause analysis. Longer window = more disk usage with diminishing returns.
-
-**Why Isolation Forest and not a supervised model?**
-No labeled anomaly dataset exists initially. IF is unsupervised — trained on normal data only, no labels needed.
-
-**Why Z-score threshold 2.8 and not 3.0?**
-At 3.0, a developer's laptop (higher baseline CPU) barely crosses the threshold for genuine spikes. 2.8 gives slightly better sensitivity while keeping false positives low, thanks to the sustained-spike filter.
-
-**Why a graceful-shutdown flag instead of a fixed gap threshold for crash detection?**
-A fixed gap (e.g. "crash if gap > 10s") is arbitrary and system-dependent — slow-boot systems (HDD, laptop sleep) can produce large gaps on a completely normal restart, causing false positives. The flag is binary and unambiguous: if it's set, the last shutdown was clean regardless of gap size. The gap threshold (`BLACKBOX_CRASH_GAP_SEC`) is kept only as a fallback for SIGKILL/power-loss cases, where the flag can never get set.
+```
+GROQ_API_KEY=your_key_here
+```
 
 ---
 
-## 6. Architecture Diagram
-
-```mermaid
-graph TB
-    %% Nodes & Relationships
-    subgraph Host [Host System]
-        Linux[Linux OS / ProcFS / psutil]
-    end
-
-    subgraph Collectors [Telemetry Collectors]
-        Col1[collectors/layer1_system.py]
-    end
-    Linux -->|System Metrics| Col1
-
-    subgraph Storage [Databases]
-        DB_Cog[(cognios_telemetry.db<br>Permanent Data)]
-        DB_BB[(blackbox/blackbox.db<br>Rolling 30-Min Window)]
-    end
-
-    Col1 -->|Write all layers| DB_Cog
-    Col1 -->|Write rolling telemetry| DB_BB
-
-    subgraph BB [BlackBox Forensic Engine]
-        subgraph Components [Components]
-            rec[recorder.py]
-            hb[heartbeat.py]
-            fe[feature_engineering.py]
-            zs[zscore_detector.py]
-            re[rule_engine.py]
-            am[anomaly_model.py]
-            co[correlation.py]
-            rep[replay.py]
-        end
-    end
-
-    DB_BB <-->|Read / Write| BB
-
-    subgraph Clients [Downstream Consuming Modules]
-        OSD[OS Doctor]
-        FOS[FocusOS]
-        RE[Research Engine]
-    end
-    DB_Cog -->|Read permanent metrics| OSD
-    DB_Cog -->|Read permanent metrics| FOS
-    DB_Cog -->|Read permanent metrics| RE
-
-    subgraph Dashboard [User Interface]
-        SD[Streamlit Dashboard<br>Timeline · Alerts · NL Query]
-    end
-    BB -->|Provide Timeline & Root-Cause| SD
-
-    %% Styling
-    classDef sys fill:#eceff1,stroke:#37474f,stroke-width:1px;
-    classDef collector fill:#f3e5f5,stroke:#4a148c,stroke-width:1px;
-    classDef storage fill:#e8eaf6,stroke:#1a237e,stroke-width:1px;
-    classDef engine fill:#e8f5e9,stroke:#1b5e20,stroke-width:1px;
-    classDef client fill:#efebe9,stroke:#3e2723,stroke-width:1px;
-    classDef ui fill:#ffe0b2,stroke:#e65100,stroke-width:1px;
-
-    class Host,Linux sys;
-    class Collectors,Col1 collector;
-    class Storage,DB_Cog,DB_BB storage;
-    class BB,rec,hb,fe,zs,re,am,co,rep engine;
-    class Clients,OSD,FOS,RE client;
-    class Dashboard,SD ui;
-```
-
-### Why two separate databases?
-
-| `cognios_telemetry.db`                      | `blackbox/blackbox.db`                |
-| ------------------------------------------- | ------------------------------------- |
-| Permanent — never pruned                    | Rolling window — last 30 min only     |
-| All Layer 1/2/3/4 data                      | Only BlackBox-relevant metrics        |
-| Read by OS Doctor, FocusOS, Research Engine | Read only by BlackBox                 |
-| Grows indefinitely                          | Max ~1800 rows (1 per second × 1800s) |
-
----
-
-## 7. How to Run
+## 6. How to Run
 
 ### Prerequisites
 
 ```bash
-pip install psutil numpy scikit-learn
+pip install psutil numpy groq python-dotenv
 ```
 
-### Run the complete BlackBox pipeline
+### Run the daemon (recording + crash detection)
 
 ```bash
-python3 main.py
-```
-
-This single command automatically creates the BlackBox telemetry and heartbeat
-tables when needed, then starts recording. It wires in `check_rules()`,
-`ZScoreDetector`, and — if `blackbox/if_model.pkl` exists — Isolation Forest
-predictions every `ANOMALY_CHECK_INTERVAL_SEC`. If no trained model is found,
-the daemon logs that and continues with rule-engine and Z-score detection.
-
-### Run BlackBox integration test only
-
-```bash
-python3 -m blackbox.test_integration
-```
-
-13 sections covering DB setup, heartbeat/crash detection, telemetry
-read/write/prune, a 70-cycle warmup + detection run, feature vector
-validation, rule engine, correlation, replay, and the full Isolation Forest
-train/predict/save/load cycle.
-
-### Training the Isolation Forest — two approaches
-
-**Option A — synthetic data via `stress-ng`:**
-
-```bash
-sudo apt install stress-ng
-python3 cognios_as_daemon.py &
-
-stress-ng --cpu 8 --timeout 60s              # cpu_overload
-sleep 30
-stress-ng --vm 4 --vm-bytes 80% --timeout 60s   # memory_pressure
-sleep 30
-stress-ng --hdd 4 --timeout 60s             # disk_io_stress
-sleep 30
-stress-ng --pthread 100 --timeout 60s       # thread_explosion
-```
-
-**Option B — real usage data (recommended for the final model):**
-
-```bash
-# Terminal 1
 python3 cognios_as_daemon.py
-
-# Terminal 2 — run during normal usage, stop/resume across sessions as needed
-python3 -m blackbox.collect_training_data
 ```
 
-Once enough data has accumulated (a few hours at minimum, ideally spread
-across multiple sessions to capture varied usage patterns):
+On startup: creates tables if missing, runs `full_crash_check()`, and if a
+crash is detected, logs the pre-crash timeline via `replay()`. Then enters
+the 1 Hz telemetry loop (`collect_layer1_metrics → write_telemetry →
+update_heartbeat`), trapping SIGINT/SIGTERM to mark a graceful shutdown.
+
+### Query the BlackBox forensically (Groq LLM)
 
 ```bash
-python3 -m blackbox.train_from_real_data
+# One-shot
+python3 -m blackbox.nl_query "Why did my system crash?"
+
+# Interactive (multi-turn, retains conversation context)
+python3 -m blackbox.nl_query
 ```
 
-Both approaches produce a `blackbox/if_model.pkl` that `anomaly_model.load_model()`
-and the daemon can pick up. A hybrid approach — bootstrapping with synthetic
-data, then retraining periodically on accumulated real data — is a
-reasonable middle ground.
+**Groq model notes:**
+- `qwen/qwen3.6-27b` is a hybrid thinking/non-thinking reasoning model.
+  `ask_groq()` passes `reasoning_format="hidden"` so the model's internal
+  `<think>` trace is suppressed server-side and never counted toward
+  visible output — but it **still consumes `max_completion_tokens`**
+  internally, so the completion budget needs enough headroom for both
+  reasoning and the visible answer (currently `3000` for streaming, `1500`
+  for non-streaming).
+- Groq enforces a **tokens-per-minute (TPM)** limit per account tier
+  (`on_demand` tier: 8,000 TPM at time of writing). The `max_events=25` cap
+  and `min_gap_sec=30` dedup window in `replay.py` exist specifically to
+  keep the injected telemetry context small enough to stay under this
+  limit — don't loosen either without checking prompt size against your
+  tier's TPM budget.
 
----
-
-## 8. Improvements & Future Work
-
-### High priority (low effort)
-
-**Continuous anomaly severity score:**
-Already implemented via `anomaly_severity()` — worth surfacing on the
-dashboard as a gradual escalation (40→60→80→100) rather than a sudden binary
-alert.
-
-### Medium priority
-
-**Per-metric Isolation Forest models:**
-One combined model learns a confused boundary across all metrics. Separate models per metric with different `contamination` rates may give better detection accuracy.
-
-**Exponential Moving Average (EMA) baseline:**
-Replace the simple rolling mean in `ZScoreDetector` with EMA for faster adaptation to regime changes, reducing false positives when the user starts a new heavy workload.
-
-**`nl_query.py` implementation:**
-The underlying pieces (`replay()`, `correlation.py`) are done and tested; this is a UX layer on top — natural-language question in, LLM-generated answer out.
-
-### Low priority (research phase)
-
-**LSTM Autoencoder hybrid:**
-LSTM captures temporal dependencies that Isolation Forest cannot — sequential patterns like memory growing over 2 hours. A hybrid approach (LSTM reconstruction error fed into Isolation Forest) could improve detection. Requires TensorFlow and more training data.
-
-**`crash_predictor_cnn.py` scope:**
-Not yet defined. Needs a decision on whether this is a planned CNN-based
-predictor layered on top of (or replacing) the Isolation Forest, before
-implementation starts.
-
-### Known limitations
-
-| Limitation                                     | Impact                                                                                   | Workaround / Status                                                                                                                                                               |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Z-score slow drift blind spot                  | Memory leaks over 2+ hours may not trigger                                               | Slope detector partially covers this                                                                                                                                              |
-| IF needs warmup data                           | No anomaly detection for first 60s of a session                                          | Rule engine covers the warmup period                                                                                                                                              |
-| `stress-ng` training data is synthetic         | Real anomalies may differ from synthetic ones                                            | Real-usage data collection pipeline now available (`collect_training_data.py` + `train_from_real_data.py`)                                                                        |
-| SIGKILL bypasses the graceful-shutdown flag    | Gap fallback may miss very fast restarts                                                 | `BLACKBOX_CRASH_GAP_SEC = 30` as buffer                                                                                                                                           |
-| Feature-engineering growth-rate sign inversion | Fixed — a double-reversal bug previously inverted `cpu_growth_rate`/`memory_growth_rate` | Fixed in `feature_engineering.py`. **Any `if_model.pkl` trained before this fix was trained on inverted-sign data for these two features and should be retrained on fresh data.** |
-| `write_layer1`'s exact signature in `db.py`    | Daemon's call to it must stay in sync with `db.py`'s positional-arg list                 | Currently synced; watch for drift on future `db.py` changes                                                                                                                       |

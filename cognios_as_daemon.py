@@ -6,7 +6,7 @@ from db import create_connection, write_layer1
 from collectors.layer1_system import collect_layer1_metrics
 from config import DB_PATH
 
-from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_telemetry, get_recent_rows
+from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_telemetry
 from blackbox.heartbeat import (
     create_heartbeat_table,
     update_heartbeat,
