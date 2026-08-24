@@ -28,7 +28,6 @@ from blackbox.replay import build_llm_context  # replace old replay import
 def query_telemetry(
     user_query: str,
     conn: sqlite3.Connection | None = None,
-    window_minutes: int = 30,
     stream: bool = True,
     model: str = GROQ_MODEL,
     api_key: str | None = None,
@@ -97,10 +96,12 @@ def ask_groq(
             model=model,
             messages=messages,
             temperature=0.3,
-            max_completion_tokens=150,
+            max_completion_tokens=3000,
             top_p=1,
             stream=True,
             stop=None,
+            reasoning_format="hidden",
+            # reasoning_effort="low",
         )
 
         full_response = []
@@ -115,10 +116,11 @@ def ask_groq(
             model=model,
             messages=messages,
             temperature=1,
-            max_completion_tokens=2048,
+            max_completion_tokens=1500,
             top_p=1,
             stream=False,
             stop=None,
+            reasoning_format="hidden",
         )
         response_text = completion.choices[0].message.content or ""
         return response_text
@@ -126,17 +128,32 @@ _chat_history = []
 
 
 def main():
-    """Command-line interface for CogniOS Natural Language Telemetry Query."""
+    """Interactive CLI for CogniOS Natural Language Telemetry Query."""
     if len(sys.argv) > 1:
+        # one-shot mode: single query, no follow-up loop
         query = " ".join(sys.argv[1:])
-    else:
-        query = "Can you summarize the system performance and report any recent anomalies or resource spikes?"
+        print(f"CogniOS Telemetry Query: '{query}'\n")
+        try:
+            query_telemetry(query, stream=True)
+        except Exception as e:
+            print(f"\nError executing query: {e}")
+        return
 
-    print(f"CogniOS Telemetry Query: '{query}'\n")
-    try:
-        query_telemetry(query, stream=True)
-    except Exception as e:
-        print(f"\nError executing query: {e}")
+    # interactive mode: no args given, drop into a REPL
+    print("CogniOS Telemetry Query — interactive mode (type 'exit' or Ctrl+C to quit)\n")
+    while True:
+        try:
+            query = input("\n> ").strip()
+            if not query:
+                continue
+            if query.lower() in ("exit", "quit"):
+                break
+            query_telemetry(query, stream=True)
+        except KeyboardInterrupt:
+            print("\nExiting.")
+            break
+        except Exception as e:
+            print(f"\nError executing query: {e}")
 
 
 if __name__ == "__main__":

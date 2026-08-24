@@ -111,8 +111,8 @@ def _build_events(rows: list[dict]) -> list[dict]:
     return events
 
 
-def _build_chain(events: list[dict]) -> list[dict]:
-    """Deduplicate events — same type can't repeat within 5 seconds."""
+def _build_chain(events: list[dict], min_gap_sec: float = 30.0) -> list[dict]:
+    """Deduplicate events — same type can't repeat within min_gap_sec."""
     if not events:
         return []
     chain = []
@@ -120,19 +120,27 @@ def _build_chain(events: list[dict]) -> list[dict]:
     for e in sorted(events, key=lambda x: x.get('timestamp', 0)):
         key = e['type']
         ts  = e.get('timestamp', 0)
-        if key not in last_seen or ts - last_seen[key] >= 5:
+        if key not in last_seen or ts - last_seen[key] >= min_gap_sec:
             chain.append(e)
             last_seen[key] = ts
     return chain
 
 
-def _format_chain(chain: list[dict]) -> str:
+def _format_chain(chain: list[dict], max_events: int = 25) -> str:
     if not chain:
         return "No significant events detected in this window."
+    # prioritize by severity, then keep chronological order among kept ones
+    if len(chain) > max_events:
+        high = [e for e in chain if e.get('severity') == 'high']
+        rest = [e for e in chain if e.get('severity') != 'high']
+        kept = (high + rest)[:max_events]
+        chain = sorted(kept, key=lambda x: x.get('timestamp', 0))
     lines = []
     for i, e in enumerate(chain):
         arrow = "\n      ↓\n" if i < len(chain) - 1 else ""
         lines.append(f"[{e['time']}] {e['detail']}{arrow}")
+    if len(chain) == max_events:
+        lines.append(f"\n...(chain truncated to {max_events} most significant events)")
     return "\n".join(lines)
 
 
