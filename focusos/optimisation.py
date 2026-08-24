@@ -3,10 +3,14 @@ import os
 import sqlite3
 import time
 import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import json
 import subprocess
+import threading
+import numpy as np
 from focusos.collector import get_top_processes
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from focusos.sliding_window import get_window_from_db
 from config import DB_PATH
 from config import COMPILERS
 from config import IDES
@@ -15,11 +19,85 @@ from config import GAMES
 from config import CALLS
 '''These lists are not yet written in cofig file, will be updated soon'''
 
+def capture_process_states():
+	"""Captures exact state (nice, cpu_affinity, ionice) of all running processes."""
+	state = {}
+	for proc in psutil.process_iter(attrs=['pid', 'name']):
+		try:
+			pid = proc.info['pid']
+			p = psutil.Process(pid)
+			proc_state = {}
+			try:
+				proc_state['nice'] = p.nice()
+			except psutil.AccessDenied:
+				pass
+			try:
+				proc_state['affinity'] = p.cpu_affinity()
+			except (psutil.AccessDenied, AttributeError):
+				pass
+			try:
+				io = p.ionice()
+				proc_state['ioclass'] = io.ioclass
+				proc_state['iovalue'] = io.value
+			except (psutil.AccessDenied, AttributeError):
+				pass
+			if proc_state:
+				state[pid] = proc_state
+		except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+			continue
+	return state
+
+def restore_process_states(saved_state: dict):
+	"""Restores the exact state of processes from a saved snapshot."""
+	restored_count = 0
+	for pid, state in saved_state.items():
+		try:
+			p = psutil.Process(pid)
+			if 'nice' in state:
+				p.nice(state['nice'])
+			if 'affinity' in state and state['affinity']:
+				p.cpu_affinity(state['affinity'])
+			if 'ioclass' in state:
+				p.ionice(state['ioclass'], state.get('iovalue', 0))
+			restored_count += 1
+		except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, ValueError):
+			continue
+	return restored_count
+
+def verify_and_rollback(pre_state: dict, workload: str, baseline_mean: float, baseline_std: float):
+	"""Monitors telemetry post-optimization and rolls back on regression."""
+	time.sleep(60)
+	df_window = get_window_from_db(limit=60)
+	if df_window is None or df_window.empty:
+		return
+	
+	post_cpu = df_window['cpu_usage_percent'].values
+	post_mean = np.mean(post_cpu)
+	
+	std = baseline_std + 0.001
+	z_score = (post_mean - baseline_mean) / std
+	
+	if z_score < -2.5:
+		restored = restore_process_states(pre_state)
+		log_optimization_result(workload, 100.0, [f"Rollback triggered (Z={z_score:.2f})"], f"Performance regression detected. Restored {restored} processes.")
+		print(f"Rollback executed: Z-score {z_score:.2f} < -2.5. Restored {restored} processes.")
+	else:
+		log_optimization_result(workload, 100.0, [f"Optimization verified (Z={z_score:.2f})"], "Telemetry within acceptable bounds.")
+
 def apply_optimization(workload: str, confidence: float, explanation: str = "") -> bool:
 	if confidence < 80:
 		print(f"Optimisation aborted: Confidence for {workload} is less than 80%")
 		log_optimization_result(workload, confidence, ["Optimization skipped (Confidence < 80%)"], explanation)
 		return False
+
+	pre_state = capture_process_states()
+	df_baseline = get_window_from_db(limit=60)
+	baseline_mean = 0.0
+	baseline_std = 1.0
+	if df_baseline is not None and not df_baseline.empty:
+		baseline_mean = np.mean(df_baseline['cpu_usage_percent'].values)
+		baseline_std = np.std(df_baseline['cpu_usage_percent'].values)
+
 	actions = []
 
 	# Gathering hardware architecture details
@@ -155,6 +233,8 @@ def apply_optimization(workload: str, confidence: float, explanation: str = "") 
 		try:
 			log_optimization_result(workload, confidence, actions, explanation)
 			print(f"Optimization Successful: {actions[-1]}")
+			verifier_thread = threading.Thread(target=verify_and_rollback, args=(pre_state, workload, baseline_mean, baseline_std), daemon=True)
+			verifier_thread.start()
 			return True
 		except Exception as e:
 			print(f"Database logging error :{e}")
