@@ -28,7 +28,7 @@ def get_blackbox_conn(db_path: str | Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=5000")
 
-    # Register a dedicated Lock for this connection (Bug 3 fix)
+    # Register a dedicated Lock for this connection
     _conn_locks[id(conn)] = threading.Lock()
     return conn
 
