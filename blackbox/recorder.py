@@ -9,16 +9,12 @@ _conn_locks: dict = {}
 
 
 def _get_lock(conn: sqlite3.Connection):
-    """Return the Lock registered for this connection, or None."""
+    # Return the Lock registered for this connection, or None
     return _conn_locks.get(id(conn))
 
 
 def get_blackbox_conn(db_path: str | Path | None = None) -> sqlite3.Connection:
-    """Open a BlackBox database connection configured for concurrent access.
-
-    ``db_path`` is primarily useful for isolated tests; production callers use
-    the configured BlackBox database by default.
-    """
+    # Open a Blackbox database connection
     path = Path(db_path or BLACKBOX_DB_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, check_same_thread=False)
@@ -126,13 +122,13 @@ def prune_old_records(conn: sqlite3.Connection) -> None:
 
 
 def _prune_old_records(conn: sqlite3.Connection, now: float | None = None) -> None:
-    """Delete expired telemetry while the caller holds the connection lock."""
+    # Delete expired telemetry while the caller holds the connection lock
     cutoff = (time.time() if now is None else now) - BLACKBOX_WINDOW_SEC
     conn.execute("DELETE FROM blackbox_telemetry WHERE timestamp < ?", (cutoff,))
 
 
 def get_recent_rows(conn: sqlite3.Connection, n: int = 120) -> list[dict]:
-    """Return up to ``n`` latest rows in chronological order."""
+    # Return up to n latest rows in chronological order
     if n <= 0:
         return []
     lock = _get_lock(conn)
@@ -144,13 +140,13 @@ def get_recent_rows(conn: sqlite3.Connection, n: int = 120) -> list[dict]:
         """, (n,))
         cols = [d[0] for d in cursor.description]
         rows = [dict(zip(cols, row)) for row in cursor.fetchall()]
-    return list(reversed(rows))  # Return in chronological order
+    return list(reversed(rows))
 
 
 def get_window_rows(conn: sqlite3.Connection,
                     start_time: float,
                     end_time: float) -> list[dict]:
-    """Fetch telemetry in the requested inclusive time range."""
+    # Fetch telemetry in the requested inclusive time range
     lock = _get_lock(conn)
     with lock if lock else _noop_ctx():
         cursor = conn.execute("""

@@ -4,14 +4,9 @@ import numpy as np
 from datetime import datetime
 from blackbox.recorder import get_window_rows, get_recent_rows
 
-
-# ── Event detection ───────────────────────────────────────────────────────────
-
 def _build_events(rows: list[dict]) -> list[dict]:
-    """
-    Scan rows and detect significant events using per-window baseline
-    instead of hardcoded thresholds.
-    """
+    
+    # Scan rows and detect significant events using per-window baseline instead of hardcoded thresholds
     if len(rows) < 10:
         return []
 
@@ -21,7 +16,10 @@ def _build_events(rows: list[dict]) -> list[dict]:
     baseline_window = rows[:max(10, len(rows) // 5)]
     
     def baseline(key):
-        vals = [r[key] for r in baseline_window if r.get(key) is not None]
+        vals = []
+        for r in baseline_window:
+            if r.get(key) is not None:
+                vals.append(r[key])
         if not vals:
             return 0, 1
         return float(np.mean(vals)), float(np.std(vals)) + 0.001
@@ -112,7 +110,7 @@ def _build_events(rows: list[dict]) -> list[dict]:
 
 
 def _build_chain(events: list[dict], min_gap_sec: float = 30.0) -> list[dict]:
-    """Deduplicate events — same type can't repeat within min_gap_sec."""
+    # Deduplicate events — same type can't repeat within min_gap_sec
     if not events:
         return []
     chain = []
@@ -147,7 +145,7 @@ def _format_chain(chain: list[dict], max_events: int = 25) -> str:
 # ── Trend summary ─────────────────────────────────────────────────────────────
 
 def _trend_summary(rows: list[dict]) -> str:
-    """Summarize metric trends over the window for LLM context."""
+    # Summarize metric trends over the window for LLM context
     if not rows:
         return "No data."
 
@@ -194,10 +192,8 @@ def replay(conn, crash_time: float = None, window_minutes: int = 30) -> dict:
 def build_llm_context(conn, crash_time: float = None,
                       heartbeat_gap: float = None,
                       systemd_crash: bool = None) -> str:
-    """
-    Builds rich context string to feed to LLaMA.
-    Includes trend, event chain, crash signal info.
-    """
+    
+    # Builds rich context string to feed to LLaMA. Includes trend, event chain, crash signal info
     result = replay(conn, crash_time=crash_time)
 
     # crash signal section

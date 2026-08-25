@@ -130,7 +130,7 @@ _chat_history = []
 def main():
     """Interactive CLI for CogniOS Natural Language Telemetry Query."""
     if len(sys.argv) > 1:
-        # one-shot mode: single query, no follow-up loop
+        # if argument given, Cannot access chat history (non-interactive)
         query = " ".join(sys.argv[1:])
         print(f"CogniOS Telemetry Query: '{query}'\n")
         try:
@@ -139,7 +139,7 @@ def main():
             print(f"\nError executing query: {e}")
         return
 
-    # interactive mode: no args given, drop into a REPL
+    # interactive prompts can be given
     print("CogniOS Telemetry Query — interactive mode (type 'exit' or Ctrl+C to quit)\n")
     while True:
         try:
