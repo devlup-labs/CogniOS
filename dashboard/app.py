@@ -381,6 +381,35 @@ st.markdown("""
         border-color: #00f5c4 !important;
         box-shadow: 0 0 12px rgba(0, 245, 196, 0.3) !important;
     }
+
+    /* Streamlit Bordered Container Styling to match CogniOS Cards */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background: #0d121c !important;
+        border: 1px solid #162336 !important;
+        border-radius: 14px !important;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35) !important;
+        padding: 20px 22px !important;
+        margin-bottom: 18px !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        border-color: #1f334d !important;
+    }
+
+    /* Slider track & thumb styling */
+    div[data-baseweb="slider"] {
+        margin: 6px 0 !important;
+    }
+    div[data-baseweb="slider"] div[role="slider"] {
+        background-color: #00f5c4 !important;
+        border: 2px solid #070a11 !important;
+        box-shadow: 0 0 12px rgba(0, 245, 196, 0.6) !important;
+    }
+    div[data-baseweb="slider"] > div > div {
+        background: #151e2d !important;
+    }
+    div[data-baseweb="slider"] > div > div > div {
+        background: #00f5c4 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 

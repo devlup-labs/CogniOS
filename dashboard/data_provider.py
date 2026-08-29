@@ -17,9 +17,15 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from config import DB_PATH, BLACKBOX_DB_PATH, ALERTS_DB_PATH
-from blackbox.recorder import get_blackbox_conn, get_recent_rows
-from blackbox.replay import replay
-from blackbox.nl_query import ask_groq, build_telemetry_context
+from blackbox.recorder import get_blackbox_conn, get_window_rows
+from blackbox.replay import replay, build_llm_context
+from blackbox.nl_query import ask_groq, query_telemetry
+
+# Ensure database paths are always absolute regardless of current working directory
+if not os.path.isabs(BLACKBOX_DB_PATH):
+    BLACKBOX_DB_PATH = os.path.join(BASE_DIR, BLACKBOX_DB_PATH)
+if not os.path.isabs(DB_PATH):
+    DB_PATH = os.path.join(BASE_DIR, DB_PATH)
 
 # FocusOS imports
 try:
@@ -47,10 +53,27 @@ def get_predictor():
 
 
 def _parse_timestamp(raw_ts):
-    """Converts ISO or raw timestamp string into local HH:MM:SS format."""
+    """Converts ISO, epoch float/int, or raw timestamp string into local HH:MM:SS format."""
     if not raw_ts:
         return time.strftime("%H:%M:%S")
-    ts_str = str(raw_ts)
+    
+    # Handle direct numeric float / int epoch timestamp
+    if isinstance(raw_ts, (int, float)):
+        try:
+            return time.strftime("%H:%M:%S", time.localtime(float(raw_ts)))
+        except Exception:
+            pass
+
+    ts_str = str(raw_ts).strip()
+    
+    # Check if ts_str is numeric epoch string
+    try:
+        f_ts = float(ts_str)
+        if f_ts > 100000000:
+            return time.strftime("%H:%M:%S", time.localtime(f_ts))
+    except (ValueError, TypeError):
+        pass
+
     if "T" in ts_str:
         try:
             dt = datetime.fromisoformat(ts_str)
@@ -450,37 +473,59 @@ def get_focusos_events():
 # --- BlackBox Data Methods ---
 
 def get_blackbox_zscore_series(scrub_minutes=0):
-    """Calculates Z-score statistical deviations from real SQLite telemetry table."""
+    """Calculates Z-score statistical deviations for CPU & Memory from real SQLite telemetry."""
     try:
-        if os.path.exists(BLACKBOX_DB_PATH) or os.path.exists(DB_PATH):
-            target_db = BLACKBOX_DB_PATH if os.path.exists(BLACKBOX_DB_PATH) else DB_PATH
+        target_db = BLACKBOX_DB_PATH if os.path.exists(BLACKBOX_DB_PATH) else DB_PATH
+        if os.path.exists(target_db):
             table_name = "blackbox_telemetry" if os.path.exists(BLACKBOX_DB_PATH) else "layer1_sys"
-            
             conn = sqlite3.connect(target_db, timeout=2.0)
-            df = pd.read_sql(f"SELECT * FROM {table_name} ORDER BY id DESC LIMIT 120", conn)
+            
+            now = time.time()
+            end_time = now + (scrub_minutes * 60)
+            start_time = end_time - (30 * 60)
+            
+            df = pd.read_sql(
+                f"SELECT * FROM {table_name} WHERE timestamp BETWEEN ? AND ? ORDER BY timestamp ASC",
+                conn,
+                params=(start_time, end_time)
+            )
+            if df.empty:
+                # If window query was empty, grab latest 120 rows
+                df = pd.read_sql(f"SELECT * FROM {table_name} ORDER BY id DESC LIMIT 120", conn)
+                if not df.empty:
+                    df = df[::-1].reset_index(drop=True)
             conn.close()
             
-            if not df.empty:
-                df = df[::-1].reset_index(drop=True)
+            if not df.empty and len(df) >= 3:
+                col_cpu = "cpu_usage_percent" if "cpu_usage_percent" in df.columns else "cpu"
+                col_mem = "memory_percent" if "memory_percent" in df.columns else "memory"
                 
-                # Apply scrub offset window
-                if scrub_minutes < 0:
-                    max_idx = max(5, len(df) + int(scrub_minutes * 2))
-                    df = df.iloc[:max_idx]
+                cpus = df[col_cpu].astype(float).fillna(0.0)
+                mems = df[col_mem].astype(float).fillna(0.0)
                 
-                col_name = "cpu_usage_percent" if "cpu_usage_percent" in df.columns else "cpu"
-                cpus = df[col_name].astype(float).fillna(0.0)
-                mean = cpus.mean()
-                std = cpus.std() if cpus.std() > 0 else 1.0
-                z_scores = ((cpus - mean) / std).round(2).tolist()
+                base_len = max(3, len(df) // 5)
+                cpu_base_mean = cpus.iloc[:base_len].mean()
+                cpu_base_std = cpus.iloc[:base_len].std() if cpus.iloc[:base_len].std() > 0.01 else 1.0
+                
+                mem_base_mean = mems.iloc[:base_len].mean()
+                mem_base_std = mems.iloc[:base_len].std() if mems.iloc[:base_len].std() > 0.01 else 1.0
+                
+                cpu_z = ((cpus - cpu_base_mean) / cpu_base_std).round(2).tolist()
+                mem_z = ((mems - mem_base_mean) / mem_base_std).round(2).tolist()
                 
                 timestamps = [_parse_timestamp(r.get('timestamp')) for _, r in df.iterrows()]
-                max_z = max(z_scores) if z_scores else 0.0
+                max_cpu_z = max(abs(x) for x in cpu_z) if cpu_z else 0.0
+                max_mem_z = max(abs(x) for x in mem_z) if mem_z else 0.0
 
                 return {
-                    "timestamps": timestamps[-30:],
-                    "z_scores": z_scores[-30:],
-                    "max_z": round(max_z, 1)
+                    "timestamps": timestamps[-40:],
+                    "z_scores": cpu_z[-40:],
+                    "mem_z_scores": mem_z[-40:],
+                    "raw_cpu": cpus.round(1).tolist()[-40:],
+                    "raw_mem": mems.round(1).tolist()[-40:],
+                    "max_z": round(max(max_cpu_z, max_mem_z), 1),
+                    "cpu_baseline": round(cpu_base_mean, 1),
+                    "mem_baseline": round(mem_base_mean, 1)
                 }
     except Exception:
         pass
@@ -489,51 +534,121 @@ def get_blackbox_zscore_series(scrub_minutes=0):
     times = [time.strftime("%H:%M:%S", time.localtime(now - i * 2)) for i in range(30, 0, -1)]
     return {
         "timestamps": times,
-        "z_scores": [round((i % 7 - 3) * 0.4, 2) for i in range(30)],
-        "max_z": 2.4
+        "z_scores": [0.0] * 30,
+        "mem_z_scores": [0.0] * 30,
+        "raw_cpu": [0.0] * 30,
+        "raw_mem": [0.0] * 30,
+        "max_z": 0.0,
+        "cpu_baseline": 0.0,
+        "mem_baseline": 0.0
     }
 
 
 def get_forensic_event_chain(scrub_minutes=0):
-    """Generates real forensic event chain from telemetry database anomalies."""
+    """Generates real forensic event chain using BlackBox replay causal detection."""
     events = []
     try:
-        if os.path.exists(DB_PATH):
-            conn = sqlite3.connect(DB_PATH, timeout=2.0)
-            df = pd.read_sql("SELECT timestamp, cpu_usage_percent, memory_percent, disk_write_mb_s, running_processes FROM layer1_sys ORDER BY id DESC LIMIT 50", conn)
+        if os.path.exists(BLACKBOX_DB_PATH):
+            conn = get_blackbox_conn()
+            now = time.time()
+            end_time = now + (scrub_minutes * 60)
+            rep = replay(conn, crash_time=end_time, window_minutes=30)
             conn.close()
             
-            if not df.empty:
-                df = df[::-1].reset_index(drop=True)
-                if scrub_minutes < 0:
-                    max_idx = max(3, len(df) + int(scrub_minutes * 1.5))
-                    df = df.iloc[:max_idx]
-                
-                for _, r in df.iterrows():
-                    ts = _parse_timestamp(r['timestamp'])
-                    cpu = float(r['cpu_usage_percent'] or 0)
-                    mem = float(r['memory_percent'] or 0)
-                    io = float(r['disk_write_mb_s'] or 0)
-                    
-                    if cpu > 60:
-                        events.append({"time": ts, "level": "WARN", "color": "#f59e0b", "msg": f"CPU Spike detected at {cpu:.1f}% load"})
-                    elif io > 10:
-                        events.append({"time": ts, "level": "CRIT", "color": "#ef4444", "msg": f"I/O Throughput surge: {io:.1f} MB/s write rate"})
-                    elif mem > 75:
-                        events.append({"time": ts, "level": "WARN", "color": "#f59e0b", "msg": f"Memory footprint elevated at {mem:.1f}%"})
-                
-                if events:
-                    return events[-4:]
+            raw_events = rep.get('chain') or rep.get('events') or []
+            for ev in raw_events:
+                sev = ev.get('severity', 'medium')
+                ev_type = ev.get('type', 'incident')
+                color = "#ef4444" if sev == "high" else "#f59e0b"
+                level = "CRIT" if sev == "high" else "WARN"
+                events.append({
+                    "time": ev.get('time', '??:??'),
+                    "level": level,
+                    "color": color,
+                    "type": ev_type,
+                    "msg": ev.get('detail', 'Anomaly event detected'),
+                    "severity": sev
+                })
+            if events:
+                return events
     except Exception:
         pass
 
-    metrics = get_live_system_metrics()
-    ts = metrics['timestamp']
-    return [
-        {"time": ts, "level": "INFO", "color": "#00f5c4", "msg": f"Telemetry Stream Active: CPU at {metrics['cpu_pct']}%"},
-        {"time": ts, "level": "WARN", "color": "#f59e0b", "msg": f"Memory Allocation at {metrics['memory_pct']}% ({metrics['memory_used_gb']}GB Used)"},
-        {"time": ts, "level": "INFO", "color": "#38bdf8", "msg": f"Disk I/O Write throughput at {metrics['disk_write_mb']} MB/s"}
-    ]
+    return []
+
+
+def get_blackbox_buffer_status():
+    """Fetches rolling buffer storage & retention metrics from blackbox.db."""
+    try:
+        if os.path.exists(BLACKBOX_DB_PATH):
+            conn = sqlite3.connect(BLACKBOX_DB_PATH, timeout=1.0)
+            row_count = conn.execute("SELECT count(*) FROM blackbox_telemetry").fetchone()[0]
+            oldest_row = conn.execute("SELECT min(timestamp), max(timestamp) FROM blackbox_telemetry").fetchone()
+            conn.close()
+            
+            size_kb = round(os.path.getsize(BLACKBOX_DB_PATH) / 1024, 1)
+            oldest_ts, newest_ts = oldest_row if oldest_row else (None, None)
+            
+            if oldest_ts and newest_ts:
+                span_min = round((newest_ts - oldest_ts) / 60, 1)
+                span_str = f"{span_min} min span"
+            else:
+                span_str = "Collecting..."
+                
+            return {
+                "exists": True,
+                "row_count": row_count,
+                "size_kb": size_kb,
+                "retention_min": 30,
+                "span_str": span_str,
+                "journal_mode": "WAL (Crash-safe)",
+                "status": "BUFFER ACTIVE" if row_count > 0 else "BUFFER INITIALIZING"
+            }
+    except Exception:
+        pass
+        
+    return {
+        "exists": False,
+        "row_count": 0,
+        "size_kb": 0.0,
+        "retention_min": 30,
+        "span_str": "Standby",
+        "journal_mode": "WAL",
+        "status": "STANDBY"
+    }
+
+
+def get_blackbox_incident_status(scrub_minutes=0):
+    """Calculates dynamic baseline metrics and active incident counts for BlackBox."""
+    try:
+        conn = get_blackbox_conn()
+        now = time.time()
+        end_time = now + (scrub_minutes * 60)
+        rep = replay(conn, crash_time=end_time, window_minutes=30)
+        conn.close()
+        
+        events = rep.get('events', [])
+        rows_count = rep.get('total_rows', 0)
+        trend_summary = rep.get('trend_summary', 'N/A')
+        has_incidents = len(events) > 0
+        
+        return {
+            "has_incidents": has_incidents,
+            "incident_count": len(events),
+            "trend_summary": trend_summary,
+            "total_rows": rows_count,
+            "status_label": f"{len(events)} INCIDENTS DETECTED" if has_incidents else "ALL BASELINES NOMINAL",
+            "status_color": "#ef4444" if has_incidents else "#00f5c4"
+        }
+    except Exception:
+        return {
+            "has_incidents": False,
+            "incident_count": 0,
+            "trend_summary": "System operating normally within baselines",
+            "total_rows": 0,
+            "status_label": "ALL BASELINES NOMINAL",
+            "status_color": "#00f5c4"
+        }
 
 
 import re
@@ -567,8 +682,8 @@ def format_ai_response_to_html(md_text: str) -> str:
             header_title = stripped.lstrip("#").strip()
             is_header = True
         else:
-            for kw in ["Executive Summary", "Key Observations", "Root Cause & Mitigation", "Recommendations", "Issue Overview", "Key Findings", "System Analysis"]:
-                if kw in stripped and (stripped.startswith(kw) or ":" in stripped or len(stripped) < 40):
+            for kw in ["Executive Summary", "Key Observations", "Root Cause & Mitigation", "Recommendations", "Issue Overview", "Key Findings", "System Analysis", "Event Chain Reconstructed", "Diagnostic Recommendation"]:
+                if kw in stripped and (stripped.startswith(kw) or ":" in stripped or len(stripped) < 45):
                     header_title = kw
                     is_header = True
                     break
@@ -577,7 +692,6 @@ def format_ai_response_to_html(md_text: str) -> str:
             if in_list:
                 formatted_chunks.append(f"</{list_type}>")
                 in_list = False
-            # Strip emojis from header title
             clean_title = re.sub(r"^(⚡|🔍|🎯|💡|⚠️|📌|\*|:)*\s*", "", header_title).strip()
             formatted_chunks.append(f"<h4 style='color:#00f5c4; font-size:13px; font-weight:800; font-family:\"JetBrains Mono\", monospace; text-transform:uppercase; letter-spacing:1px; margin-top:14px; margin-bottom:6px; border-bottom:1px solid rgba(0, 245, 196, 0.15); padding-bottom:4px;'>{clean_title}</h4>")
             continue
@@ -610,23 +724,63 @@ def format_ai_response_to_html(md_text: str) -> str:
     return "".join(formatted_chunks)
 
 
-def get_ai_post_mortem(user_query=None):
-    """Generates real-time AI post-mortem report using Groq / LLM query engine."""
+def get_ai_post_mortem(user_query=None, scrub_minutes=0):
+    """Generates real-time AI post-mortem report using Groq / LLM query engine,
+    falling back to local deterministic analysis if API key is not configured."""
+    conn = None
     try:
         conn = get_blackbox_conn()
-        context = build_telemetry_context(conn, window_minutes=30)
-        conn.close()
+        now = time.time()
+        target_time = now + (scrub_minutes * 60)
+        context = build_llm_context(conn, crash_time=target_time)
+        rep = replay(conn, crash_time=target_time, window_minutes=30)
+        
+        # Check if Groq API key is configured
+        groq_key = os.environ.get("GROQ_API_KEY")
+        try:
+            from config import GROQ_API_KEY as CFG_GROQ_KEY
+            if not groq_key:
+                groq_key = CFG_GROQ_KEY
+        except Exception:
+            pass
+            
+        if groq_key and groq_key != "your_groq_api_key_here" and len(groq_key) > 10:
+            prompt = f"Telemetry Context:\n{context}\n\nUser Query: {user_query or 'Provide a short executive post-mortem analysis of recent telemetry anomalies.'}"
+            sys_p = (
+                "You are CogniOS AI, an ultra-fast Linux kernel forensic & telemetry analyst.\n"
+                "Format your response with clean markdown headers:\n"
+                "### Executive Summary\n1-2 sentences\n\n"
+                "### Key Observations\n- Bullet points with bold metrics (**CPU 58%**, **RAM 76.5%**)\n\n"
+                "### Root Cause & Mitigation\n- Precise causal sequence and concrete action step\n"
+            )
+            ai_resp = ask_groq(user_content=prompt, system_prompt=sys_p, stream=False, api_key=groq_key)
+            return ai_resp
+        else:
+            # Deterministic local report from replay engine
+            timeline_str = rep.get('timeline_text', 'No significant events recorded in this window.')
+            trend_str = rep.get('trend_summary', 'N/A')
+            event_count = len(rep.get('events', []))
+            
+            summary = (
+                f"Incident scan detected {event_count} significant event(s) in the 30-minute window."
+                if event_count > 0
+                else "System parameters remained within steady-state dynamic baselines during this window."
+            )
+            
+            return f"""### Executive Summary
+{summary}
 
-        prompt = f"Telemetry Context:\n{context}\n\nUser Query: {user_query or 'Provide a short executive post-mortem analysis of recent telemetry anomalies.'}"
-        sys_p = (
-            "You are CogniOS AI, an ultra-fast Linux kernel forensic & telemetry analyst.\n"
-            "Format your response with clean markdown headers:\n"
-            "### Executive Summary\n1-2 sentences\n\n"
-            "### Key Observations\n- Bullet points with bold metrics (**CPU 58%**, **RAM 76.5%**)\n\n"
-            "### Recommendations\n- Concise actionable points\n"
-        )
-        ai_resp = ask_groq(user_content=prompt, system_prompt=sys_p, stream=False)
-        return ai_resp
+### Key Observations
+- **Trend Summary**: {trend_str}
+- **Window Telemetry**: {rep.get('total_rows', 0)} data samples evaluated
+- **Anomaly Detection**: Dynamic Z-score thresholding active (σ > 2.0)
+
+### Event Chain Reconstructed
+{timeline_str}
+
+### Diagnostic Recommendation
+- Maintain continuous Layer 1 & BlackBox recording.
+- To enable natural language AI synthesis powered by LLaMA-3.3-70B, configure your `GROQ_API_KEY` in `.env`."""
     except Exception as e:
         metrics = get_live_system_metrics()
         return f"""### Executive Summary
@@ -638,8 +792,14 @@ System operating normally with active real-time telemetry streaming.
 - **Active Threads**: {metrics['running_procs']} running processes
 
 ### Recommendations
-- **FocusOS Active**: Real-time process affinity pinning enabled.
+- **BlackBox Active**: 30-minute rolling buffer and crash sentinel operational.
 - **Alert Thresholds**: Monitoring memory spikes above 85%."""
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 # --- OS Doctor Data Methods ---
@@ -810,108 +970,6 @@ def get_blackbox_heartbeat_status():
         "status_label": "ACTIVE HEARTBEAT"
     }
 
-
-def get_blackbox_rule_engine_alerts():
-    """Runs threshold rule checks (CPU, RAM, Zombie, Swap, Temp) against live metrics."""
-    metrics = get_live_system_metrics()
-    
-    try:
-        zombies = len([p for p in psutil.process_iter(['status']) if p.info['status'] == psutil.STATUS_ZOMBIE])
-    except Exception:
-        zombies = 0
-
-    try:
-        hw_temps = psutil.sensors_temperatures()
-        if hw_temps:
-            temps_list = [sensor.current for sensors in hw_temps.values() for sensor in sensors if sensor.current > 0]
-            max_temp = max(temps_list) if temps_list else 45.0
-        else:
-            max_temp = 45.0
-    except Exception:
-        max_temp = 45.0
-
-    try:
-        swap_percent = psutil.swap_memory().percent
-    except Exception:
-        swap_percent = 0.0
-
-    rule_dict = {
-        "cpu_usage_percent": metrics['cpu_pct'],
-        "memory_percent": metrics['memory_pct'],
-        "zombie_processes": zombies,
-        "max_temp": max_temp,
-        "swap_percent": swap_percent
-    }
-    
-    fired_alerts = []
-    try:
-        from blackbox.rule_engine import check_rules
-        fired_alerts = check_rules(rule_dict)
-    except Exception:
-        pass
-
-    try:
-        from config import (
-            BLACKBOX_CPU_CRITICAL,
-            BLACKBOX_MEM_CRITICAL,
-            BLACKBOX_ZOMBIE_LIMIT,
-            BLACKBOX_TEMP_CRITICAL,
-            BLACKBOX_SWAP_CRITICAL
-        )
-    except Exception:
-        BLACKBOX_CPU_CRITICAL, BLACKBOX_MEM_CRITICAL, BLACKBOX_ZOMBIE_LIMIT, BLACKBOX_TEMP_CRITICAL, BLACKBOX_SWAP_CRITICAL = 85, 90, 5, 80, 80
-
-    thresholds = [
-        {"name": "CPU Critical", "limit": f"{BLACKBOX_CPU_CRITICAL}%", "current": f"{metrics['cpu_pct']:.1f}%", "fired": metrics['cpu_pct'] > BLACKBOX_CPU_CRITICAL},
-        {"name": "Memory Critical", "limit": f"{BLACKBOX_MEM_CRITICAL}%", "current": f"{metrics['memory_pct']:.1f}%", "fired": metrics['memory_pct'] > BLACKBOX_MEM_CRITICAL},
-        {"name": "Zombie Limit", "limit": f"{BLACKBOX_ZOMBIE_LIMIT}", "current": str(zombies), "fired": zombies >= BLACKBOX_ZOMBIE_LIMIT},
-        {"name": "Thermal Limit", "limit": f"{BLACKBOX_TEMP_CRITICAL}°C", "current": f"{max_temp:.1f}°C", "fired": max_temp >= BLACKBOX_TEMP_CRITICAL},
-        {"name": "Swap Pressure", "limit": f"{BLACKBOX_SWAP_CRITICAL}%", "current": f"{swap_percent:.1f}%", "fired": swap_percent >= BLACKBOX_SWAP_CRITICAL}
-    ]
-
-    return {
-        "thresholds": thresholds,
-        "fired_alerts": fired_alerts,
-        "total_rules": len(thresholds),
-        "status": "RULE ALERT FIRED" if fired_alerts else "ALL CLEAR"
-    }
-
-
-def get_blackbox_model_status():
-    """Checks Isolation Forest ML model artifact status and dataset sample size."""
-    model_exists = os.path.exists("blackbox/if_model.pkl")
-    data_path = os.path.join(BASE_DIR, "blackbox", "training_vectors.jsonl")
-    
-    vector_count = 0
-    if os.path.exists(data_path):
-        try:
-            with open(data_path) as f:
-                vector_count = sum(1 for line in f if line.strip())
-        except Exception:
-            pass
-
-    return {
-        "model_loaded": model_exists,
-        "model_name": "IsolationForest (sklearn)",
-        "vectors_count": vector_count or 120,
-        "contamination": 0.05,
-        "feature_dim": 10,
-        "last_trained": time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime("blackbox/if_model.pkl"))) if model_exists else "N/A"
-    }
-
-
-def retrain_blackbox_model():
-    """Triggers ML retrain of Isolation Forest model from training vectors."""
-    try:
-        from blackbox.train_from_real_data import load_vectors
-        from blackbox.anomaly_model import train, save_model, MODEL_PATH
-        vectors, _ = load_vectors()
-        if vectors:
-            model = train(vectors)
-            save_model(model, MODEL_PATH)
-            return {"success": True, "message": f"Successfully retrained Isolation Forest model on {len(vectors)} vectors."}
-    except Exception as e:
-        return {"success": False, "message": f"Retrain failed: {str(e)}"}
 
 
 # --- OS Doctor Human-Readable LLM Diagnoses Data Methods ---
