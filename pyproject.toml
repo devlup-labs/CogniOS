@@ -16,5 +16,10 @@ dependencies = [
     "sqlalchemy>=2.0.51",
     "groq>=1.6.0",
     "python-dotenv>=1.2.2",
+    "requests>=2.31.0",
     "xgboost>=3.4.0",
+    "streamlit>=1.61.1",
+    "plotly>=6.9.0",
+    "streamlit-autorefresh>=1.0.1",
+    "umap-learn>=0.5.5",
 ]

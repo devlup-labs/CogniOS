@@ -1,52 +1,45 @@
-# Python
+# Python & Environments
 __pycache__/
 *.py[cod]
+*$py.class
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .venv/
 venv/
+env/
+.conda/
 
-# Environment & Config (IMPORTANT)
+# Environment & Secret Files (IMPORTANT)
 .env
+.env.local
+*.env
 config.ini
 
-# Local data and generated artifacts
-cognios_telemetry.db
+# SQLite Databases & WAL/SHM artifacts
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+cognios_telemetry.db*
+focusos_telemetry.db*
+alerts.db*
+blackbox.db*
+
+# Local data and generated artifacts
 data/models/*.pt
 data/traces/*
-blackbox/blackbox.db-shm
-blackbox/blackbox.db-wal
-
-# Keep data directories present in git if marker files are added.
 !data/traces/.gitkeep
+
+# Logs
+logs/
+*.log
+telemetry_daemon.log
+dashboard.log
 
 # OS / IDE
 .DS_Store
 .vscode/
 .idea/
 
-# Ignore SQLite database files
-*.db
-*.sqlite3
-*.sqlite
-
-# Logs
-logs/
-
-# Environment and secret files
-.env
-.env.local 
-*.env 
-
-.DS_Store
-*.db-shm
-*.db-wal
-# -shm, -wal files
-cognios_telemetry.db-shm
-cognios_telemetry.db-wal
-blackbox.db-shm
-blackbox.db-wal

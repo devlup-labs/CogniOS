@@ -1,123 +1,152 @@
 import os
 import sys
 import subprocess
+import time
 import threading
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
-print("Starting CogniOS System...")
+from check_requirements import ensure_requirements
 
-# Start the Telemetry Daemon in the background
-# Output is routed to telemetry_daemon.log
-telemetry_log_path = os.path.join(BASE_DIR, 'telemetry_daemon.log')
-telemetry_log = open(telemetry_log_path, 'w')
-telemetry_script = os.path.join(BASE_DIR, "cognios_as_daemon.py")
-telemetry_process = subprocess.Popen(
-    [sys.executable, telemetry_script], 
-    stdout=telemetry_log,
-    stderr=telemetry_log
-)
-print(f"Telemetry Daemon started! (PID: {telemetry_process.pid})")
-print(f"To view the live logs anytime, run: tail -f '{telemetry_log_path}'")
-print("To stop the daemon, run: pkill -f cognios_as_daemon.py")
-# Start the FocusOS Daemon in the background
-# Output is routed to focusos.log
-# focusos_log_path = os.path.join(BASE_DIR, 'focusos.log')
-# focusos_log = open(focusos_log_path, 'w')
-# focusos_script = os.path.join(BASE_DIR, "focusos_daemon.py")
-# focusos_process = subprocess.Popen(
-#     [sys.executable, focusos_script], 
-#     stdout=focusos_log, 
-#     stderr=focusos_log
-# )
-# print(f"FocusOS Daemon started! (PID: {focusos_process.pid})")
+_stop_watchdog = threading.Event()
 
-#print("\nAll CogniOS modules are now running silently in the background!")
-print("Your terminal is free to use.")
 
-from focusos.models.classifier import WorkloadPredictor, FEATURE_COLUMNS
-from focusos.feature_engineer import extract_features
-from focusos.sliding_window import get_window_from_db
-from focusos.llm_explainer import generate_explanation
-import time 
+def _get_venv_python():
+    """Returns the path to the project's .venv python executable if it exists."""
+    if sys.platform == "win32":
+        venv_py = os.path.join(BASE_DIR, ".venv", "Scripts", "python.exe")
+    else:
+        venv_py = os.path.join(BASE_DIR, ".venv", "bin", "python")
+    return venv_py if os.path.isfile(venv_py) else None
 
-def run_focusos():
-    predictor = WorkloadPredictor()
-    print("FocusOS model inference testing...")
-    
-    last_workload = None
-    last_explanation = ""
-    last_explanation_time = 0
-    COOLDOWN_SECONDS = 30
-    
-    while True:
-        df_window = get_window_from_db()
-        if df_window is not None:
-            features = extract_features(df_window)
-            if features is not None:
-                print("\n========== LIVE FEATURE VECTOR ==========")
-                print(features.to_string(index=False))
-                print("=========================================\n")
 
-                result = predictor.predict(features)
-                if result:
-                    workload = result['workload']
-                    confidence = result['confidence']
-                    print(f"[{time.strftime('%H:%M:%S')}] Detected: {workload} ({confidence}%)")
-                    
-                    # Extract the top 3 features based on model's feature importance
-                    try:
-                        importances = predictor.xgb.feature_importances_
-                        top_indices = importances.argsort()[::-1][:3]
-                        top_features = {}
-                        for idx in top_indices:
-                            feat_name = FEATURE_COLUMNS[idx]
-                            feat_val = float(features[feat_name].iloc[0])
-                            top_features[feat_name] = round(feat_val, 4)
-                    except Exception as e:
-                        print(f"Error extracting top features: {e}")
-                        top_features = {}
+def _ensure_environment():
+    """
+    Ensures CogniOS runs in the dedicated virtual environment (.venv)
+    with all required dependencies installed.
+    """
+    venv_py = _get_venv_python()
+    current_py = os.path.abspath(sys.executable)
 
-                    # Generate explanation with rate limiting/caching
-                    current_time = time.time()
-                    if (workload != last_workload) or (current_time - last_explanation_time >= COOLDOWN_SECONDS):
-                        last_explanation = generate_explanation(workload, confidence, top_features)
-                        last_workload = workload
-                        last_explanation_time = current_time
-                        print(f"Explanation (Updated): {last_explanation}\n")
-                    else:
-                        print(f"Explanation (Cached): {last_explanation}\n")
-        time.sleep(2)
+    # 1. If .venv exists and we are not currently running in it, re-exec into .venv
+    if venv_py:
+        abs_venv_py = os.path.abspath(venv_py)
+        if current_py != abs_venv_py and os.environ.get("COGNI_VENV_ACTIVE") != "1":
+            os.environ["COGNI_VENV_ACTIVE"] = "1"
+            os.environ["VIRTUAL_ENV"] = os.path.join(BASE_DIR, ".venv")
+            venv_bin = os.path.dirname(abs_venv_py)
+            os.environ["PATH"] = venv_bin + os.pathsep + os.environ.get("PATH", "")
+            try:
+                os.execv(abs_venv_py, [abs_venv_py] + sys.argv)
+            except Exception as e:
+                print(f"[!] Failed to auto-switch to .venv python: {e}")
+
+    # 2. Check & auto-install missing requirements gracefully
+    ensure_requirements(auto_install=True, quiet=False)
+
+
+def _daemon_watchdog(daemon_script, telemetry_log_path, restart_delay=3):
+    """Watches the daemon process and restarts it if it crashes."""
+    restart_count = 0
+    process = None
+
+    while not _stop_watchdog.is_set():
+        with open(telemetry_log_path, 'a') as log:
+            process = subprocess.Popen(
+                [sys.executable, daemon_script],
+                stdout=log,
+                stderr=log,
+            )
+        if restart_count == 0:
+            print(f"[✔] CogniOS Engine started (PID: {process.pid})")
+        else:
+            print(f"[⟳] CogniOS Engine restarted (PID: {process.pid}, attempt #{restart_count})")
+
+        process.wait()
+
+        if _stop_watchdog.is_set():
+            break
+
+        exit_code = process.returncode
+        print(f"[!] CogniOS Engine exited (code={exit_code}). Restarting in {restart_delay}s...")
+        restart_count += 1
+        _stop_watchdog.wait(timeout=restart_delay)
+
+    return process
+
+
+def main():
+    _ensure_environment()
+
+    print("\n=======================================================")
+    print("🚀 Starting CogniOS System...")
+    print(f"🐍 Python Environment: {sys.executable}")
+    print("=======================================================")
+
+    telemetry_log_path = os.path.join(BASE_DIR, 'telemetry_daemon.log')
+    dashboard_log_path = os.path.join(BASE_DIR, 'dashboard.log')
+    daemon_script = os.path.join(BASE_DIR, "cognios_as_daemon.py")
+    dashboard_script = os.path.join(BASE_DIR, "dashboard", "app.py")
+
+    # 1. Start daemon under watchdog thread so it auto-restarts on crash
+    watchdog_thread = threading.Thread(
+        target=_daemon_watchdog,
+        args=(daemon_script, telemetry_log_path),
+        daemon=True,
+        name="daemon-watchdog",
+    )
+    watchdog_thread.start()
+
+    # Give the daemon a moment to initialise DB before dashboard connects
+    time.sleep(2)
+
+    # 2. Start the Streamlit Dashboard
+    dashboard_log = open(dashboard_log_path, 'w')
+    dashboard_process = subprocess.Popen(
+        [sys.executable, "-m", "streamlit", "run", dashboard_script, "--server.headless=true"],
+        stdout=dashboard_log,
+        stderr=dashboard_log,
+    )
+    print(f"[✔] CogniOS Dashboard started (PID: {dashboard_process.pid})")
+
+    print("\n=======================================================")
+    print("✨ All systems are running!")
+    print("📊 Dashboard is available at: http://localhost:8501")
+    print(f"📝 Telemetry logs : tail -f '{telemetry_log_path}'")
+    print(f"📊 Dashboard logs : tail -f '{dashboard_log_path}'")
+    print("=======================================================\n")
+    print("Press Ctrl+C to stop all services.")
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nStopping CogniOS System...")
+    finally:
+        _stop_watchdog.set()
+
+        if dashboard_process.poll() is None:
+            dashboard_process.terminate()
+            try:
+                dashboard_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                dashboard_process.kill()
+
+        try:
+            dashboard_log.close()
+        except Exception:
+            pass
+
+        print("Shutdown complete. Goodbye!")
+
 
 from os_doctor.i_forest_predict import flag_anomaly
 def run_os_doctor():
     flag_anomaly()
     
 if __name__ == "__main__":
-    try:
-        print("Starting FocusOS and OS Doctor concurrently...")
-        
-        # 1. Define the threads
-        focusos_thread = threading.Thread(target=run_focusos, daemon=True)
-        os_doctor_thread = threading.Thread(target=run_os_doctor, daemon=True)
-        
-        # 2. Start the threads
-        focusos_thread.start()
-        os_doctor_thread.start()
-        
-        # 3. Keep the main thread alive to listen for KeyboardInterrupt (Ctrl+C)
-        while True:
-            time.sleep(1)
-            
-    except KeyboardInterrupt:
-        print("\nStopping CogniOS System...")
-    finally:
-        # Cleanup telemetry process
-        if telemetry_process.poll() is None:
-            telemetry_process.terminate()
-            try:
-                telemetry_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                telemetry_process.kill()
-                telemetry_process.wait()
-        telemetry_log.close()
+    os_doctor_thread = threading.Thread(target=run_os_doctor, daemon=True)
+    os_doctor_thread.start()
+    main()

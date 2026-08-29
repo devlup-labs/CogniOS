@@ -243,19 +243,42 @@ git clone https://github.com/<your-org>/CogniOS.git
 cd CogniOS
 ```
 
-## Install Dependencies
+## Quick Start (Recommended)
 
+Run the automated launcher (creates `.venv`, installs dependencies if missing, and launches both the telemetry daemon and Streamlit dashboard):
+
+**Linux / macOS:**
 ```bash
-pip install -r requirements.txt
+./start.sh
 ```
 
-## Launch CogniOS
+**Windows:**
+```cmd
+start.bat
+```
 
+Or run directly with Python (auto-detects and uses `.venv`):
 ```bash
 python main.py
 ```
 
-To run CogniOS as a background service:
+## Manual Setup (Optional)
+
+If you prefer to configure your environment manually:
+
+```bash
+# 1. Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate    # On Windows: .venv\Scripts\activate
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Launch CogniOS
+python main.py
+```
+
+To run only the telemetry collector daemon as a background service:
 
 ```bash
 python cognios_as_daemon.py

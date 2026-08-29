@@ -1,87 +1,97 @@
+"""FocusOS LLM Explainer — 3-tier fallback: Gemma 4 → Gemini → Template.
+DuckDuckGo inference removed: web-scraped snippets are unreliable for kernel
+diagnostics and were leaking raw search text into the UI.
+"""
+
 import json
 import os
 from google import genai
 from google.genai import types
 
-try:
-    from ddgs import DDGS
-    DDG_avail = True
-except ImportError:
-    try:
-        from duckduckgo_search import DDGS
-        DDG_avail = True
-    except ImportError:
-        DDG_avail = False
 
-# Load API keys from .env file
+# ---------------------------------------------------------------------------
+# Environment loading
+# ---------------------------------------------------------------------------
 def _load_env():
-    # Try importing dotenv
+    """Load API keys from .env, trying dotenv first then manual parsing."""
     try:
         from dotenv import load_dotenv
         load_dotenv()
     except ImportError:
         pass
-    
-    # Fallback manual parser for .env
+
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    for path in [os.path.join(base_dir, '.env'), os.path.join(os.path.dirname(base_dir), '.env'), '.env']:
+    for path in [
+        os.path.join(base_dir, ".env"),
+        os.path.join(os.path.dirname(base_dir), ".env"),
+        ".env",
+    ]:
         if os.path.exists(path):
-            with open(path, 'r') as f:
+            with open(path, "r") as f:
                 for line in f:
                     line = line.strip()
-                    if line and not line.startswith('#') and '=' in line:
-                        k, v = line.split('=', 1)
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
                         os.environ[k.strip()] = v.strip().strip('"').strip("'")
             break
 
+
 _load_env()
 gemini_api_key = os.getenv("gem_api_key")
-gemma_api_key = os.getenv("gemma_api_key")
+gemma_api_key  = os.getenv("gemma_api_key")
+
+
+# ---------------------------------------------------------------------------
+# Feature helper
+# ---------------------------------------------------------------------------
 def get_top_features(feature_importances: dict, current_values: dict, top_n: int = 3) -> dict:
+    """Return the top-N features by importance with their current values."""
     sorted_features = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)
     top_features = {}
-    for feature_name, importance_score in sorted_features[:top_n]:
+    for feature_name, _ in sorted_features[:top_n]:
         raw_val = current_values.get(feature_name, 0.0)
         top_features[feature_name] = round(raw_val, 2) if isinstance(raw_val, float) else raw_val
     return top_features
 
-def try_gemma_explanation(system_prompt: str, user_prompt: str, model_name: str = "gemma-4-26b-a4b-it") -> str:
+
+# ---------------------------------------------------------------------------
+# Tier 1 — Gemma 4 (via OpenRouter or Google GenAI SDK)
+# ---------------------------------------------------------------------------
+def try_gemma_explanation(system_prompt: str, user_prompt: str,
+                          model_name: str = "gemma-4-26b-a4b-it") -> str:
     if not gemma_api_key:
         raise ValueError("Gemma API key is not set.")
-    
-    # Detect OpenRouter key and call via HTTP requests
+
+    # OpenRouter path
     if gemma_api_key.startswith("sk-or-"):
         import requests
-        # OpenRouter models usually need the org prefix, e.g., "google/gemma-2-27b-it"
-        # We'll use the model_name as provided
         headers = {
             "Authorization": f"Bearer {gemma_api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
         payload = {
             "model": model_name,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                {"role": "user",   "content": user_prompt},
             ],
             "temperature": 0.2,
-            "max_tokens": 4000
+            "max_tokens": 4000,
         }
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
             json=payload,
-            timeout=15
+            timeout=15,
         )
         if response.status_code == 200:
             res_data = response.json()
             if "choices" in res_data and len(res_data["choices"]) > 0:
                 return res_data["choices"][0]["message"]["content"].strip()
             raise ValueError(f"Unexpected OpenRouter response format: {res_data}")
-        else:
-            raise ValueError(f"OpenRouter HTTP Error {response.status_code}: {response.text}")
+        raise ValueError(f"OpenRouter HTTP Error {response.status_code}: {response.text}")
 
-    # Fallback to Google GenAI SDK (expects Google Gemini API key)
+    # Google GenAI SDK path
     client = genai.Client(api_key=gemma_api_key)
     response = client.models.generate_content(
         model=model_name,
@@ -94,20 +104,23 @@ def try_gemma_explanation(system_prompt: str, user_prompt: str, model_name: str 
     )
     if response and response.text:
         return response.text.strip()
-    
-    # provides diagnostic information on why the response might be empty
+
     candidates_info = "No candidates returned."
     if response and response.candidates:
-        candidates_info = []
-        for idx, c in enumerate(response.candidates):
-            candidates_info.append(f"Candidate {idx} finish_reason: {c.finish_reason}")
-        candidates_info = "; ".join(candidates_info)
-    raise ValueError(f"Empty response string from Gemma 4 ({model_name}). Diagnostics: {candidates_info}")
+        candidates_info = "; ".join(
+            f"Candidate {i} finish_reason: {c.finish_reason}"
+            for i, c in enumerate(response.candidates)
+        )
+    raise ValueError(f"Empty response from Gemma 4 ({model_name}). Diagnostics: {candidates_info}")
 
+
+# ---------------------------------------------------------------------------
+# Tier 2 — Gemini 2.5 Flash
+# ---------------------------------------------------------------------------
 def try_gemini_explanation(system_prompt: str, user_prompt: str) -> str:
     if not gemini_api_key:
-        raise ValueError("API key is not set.")
-    
+        raise ValueError("Gemini API key is not set.")
+
     client = genai.Client(api_key=gemini_api_key)
     response = client.models.generate_content(
         model="gemini-2.5-flash",
@@ -120,53 +133,51 @@ def try_gemini_explanation(system_prompt: str, user_prompt: str) -> str:
     )
     if response and response.text:
         return response.text.strip()
-    
+
     candidates_info = "No candidates returned."
     if response and response.candidates:
-        candidates_info = []
-        for idx, c in enumerate(response.candidates):
-            candidates_info.append(f"Candidate {idx} finish_reason: {c.finish_reason}")
-        candidates_info = "; ".join(candidates_info)
-    raise ValueError(f"Empty response string from Gemini. Diagnostics: {candidates_info}")
+        candidates_info = "; ".join(
+            f"Candidate {i} finish_reason: {c.finish_reason}"
+            for i, c in enumerate(response.candidates)
+        )
+    raise ValueError(f"Empty response from Gemini. Diagnostics: {candidates_info}")
 
-def try_duck_duck_go_explanation(prediction: str) -> str:
-    if not DDG_avail:
-        raise ImportError("Duck Duck Go search package is not installed")
-    search_query = f"{prediction} workload high CPU GPU usage optimization"
-    results = DDGS().text(search_query, max_results=1)
-    if results and len(results) > 0:
-        return results[0].get("body", "")
-    raise ValueError("DuckDuckGo returned no search results.")
 
-def clean_ddg_snippet(snippet: str) -> str:
-    import re
-    # Remove common date prefixes like "March 20, 2026 - ", "May 28, 2026 · ", etc.
-    cleaned = re.sub(r'^[A-Za-z]+ \d+, \d{4}\s*[^A-Za-z0-9\s]?\s*', '', snippet)
-    cleaned = re.sub(r'^\d{4}-\d{2}-\d{2}\s*[^A-Za-z0-9\s]?\s*', '', cleaned)
-    # Remove HTML tags if any
-    cleaned = re.sub(r'<[^>]*>', '', cleaned)
-    # Replace multiple whitespaces/newlines with single space
-    cleaned = re.sub(r'\s+', ' ', cleaned)
-    cleaned = cleaned.strip()
-    
-    # Try to get the first sentence
-    sentences = re.split(r'(?<=[.!?])\s+', cleaned)
-    if sentences:
-        for s in sentences:
-            s_clean = s.strip()
-            if len(s_clean) > 20:
-                return s_clean
-    return cleaned[:150].strip()
+# ---------------------------------------------------------------------------
+# Tier 3 — Template Fallback (always succeeds, no external dependency)
+# ---------------------------------------------------------------------------
+def _template_explanation(prediction: str, conf_pct_str: str, top_features: dict) -> str:
+    readable_features = ", ".join(f.replace("_", " ") for f in top_features.keys())
+    return (
+        f"FocusOS detected a {prediction} workload with {conf_pct_str} confidence "
+        f"due to elevated {readable_features}. "
+        f"Process priorities and core CPU affinities have been automatically optimized "
+        f"to maintain smooth system responsiveness."
+    )
 
-def generate_explanation(prediction: str, confidence: float, top_features: dict) -> str:
-    # Handle confidence format gracefully (handles both 0.61 and 61.0)
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+def generate_explanation(prediction: str, confidence: float, top_features: dict) -> dict:
+    """Run the 3-tier fallback chain and return a dict with 'text' and 'source'.
+
+    Returns:
+        {
+            "text":   str  — clean explanation, NO source prefix embedded,
+            "source": str  — "Gemma 4" | "Gemini" | "Template"
+        }
+
+    The source prefix is intentionally kept OUT of 'text' so callers can render
+    it as a small UI badge instead of polluting the explanation body.
+    """
     conf_val = confidence * 100 if confidence <= 1.0 else confidence
     conf_pct_str = f"{conf_val:.0f}%"
 
     payload = {
         "predicted_workload": prediction,
         "confidence_score": conf_pct_str,
-        "primary_driving_features": top_features
+        "primary_driving_features": top_features,
     }
     system_prompt = (
         "You are the FocusOS System Diagnostics Explainer. "
@@ -177,56 +188,33 @@ def generate_explanation(prediction: str, confidence: float, top_features: dict)
     )
     user_prompt = f"System Payload: {json.dumps(payload)}"
 
-    #Gemma 4 API
+    # --- Tier 1: Gemma 4 ---
     try:
-        explanation = try_gemma_explanation(system_prompt, user_prompt)
+        text = try_gemma_explanation(system_prompt, user_prompt)
         print("LLM Explainer: Tier 1 (Gemma 4) Success")
-        return f"[Gemma 4 API] {explanation}"
-    except Exception as e_gemma:
-        print(f"LLM Explainer: Gemma 4 unavailable ({e_gemma})")
+        return {"text": text, "source": "Gemma 4"}
+    except Exception as e:
+        print(f"LLM Explainer: Gemma 4 unavailable ({e})")
 
-    #Gemini API
+    # --- Tier 2: Gemini 2.5 Flash ---
     try:
-        explanation = try_gemini_explanation(system_prompt, user_prompt)
-        print("LLM Explainer: Tier 2 (Gemini AI) Success")
-        return f"[Gemini API] {explanation}"
-    except Exception as e_gemini:
-        print(f"LLM Explainer: Gemini unavailable ({e_gemini})")
+        text = try_gemini_explanation(system_prompt, user_prompt)
+        print("LLM Explainer: Tier 2 (Gemini) Success")
+        return {"text": text, "source": "Gemini"}
+    except Exception as e:
+        print(f"LLM Explainer: Gemini unavailable ({e})")
 
-    #Try DuckDuckGo search fallback
-    try:
-        raw_explanation = try_duck_duck_go_explanation(prediction)
-        ddg_advice = clean_ddg_snippet(raw_explanation)
-        if ddg_advice and not ddg_advice.endswith('.'):
-            ddg_advice += '.'
-            
-        feature_names = list(top_features.keys())
-        readable_features = ", ".join([f.replace("_", " ") for f in feature_names])
-        
-        explanation = (
-            f"FocusOS detected a {prediction} workload with {conf_pct_str} confidence due to elevated {readable_features}. "
-            f"To optimize this, resources have been adjusted according to recommendation: {ddg_advice}"
-        )
-        print("LLM Explainer: Tier 3 (DuckDuckGo Search) Success")
-        return f"[DuckDuckGo Search] {explanation}"
-    except Exception as e_ddg:
-        print(f"LLM Explainer: DuckDuckGo unavailable ({e_ddg})")
+    # --- Tier 3: Template (always succeeds) ---
+    print("LLM Explainer: Tier 3 (Template Fallback) Activated.")
+    text = _template_explanation(prediction, conf_pct_str, top_features)
+    return {"text": text, "source": "Template"}
 
-    #FocusOS Diagnostic Template Fallback (Matching Gemma/Gemini style)
-    print("LLM Explainer: Tier 4 (FocusOS Diagnostic Template) Activated.")
-    feature_names = list(top_features.keys())
-    readable_features = ", ".join([f.replace("_", " ") for f in feature_names])
-    
-    explanation = (
-        f"FocusOS detected a {prediction} workload with {conf_pct_str} confidence due to elevated {readable_features}. "
-        f"Process priorities and core CPU affinities have been automatically optimized to maintain smooth system responsiveness."
-    )
-    return f"[Template Fallback] {explanation}"
 
+# ---------------------------------------------------------------------------
+# Quick self-test
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     sample_features = {"cpu_max": 9.0, "disk_io_mean": 5.685, "ram_mean": 27.9358}
-    explanation = generate_explanation("Idle", 0.6471, sample_features)
-    print("Generated Explanation:")
-    print(explanation)
-
-
+    result = generate_explanation("Idle", 0.6471, sample_features)
+    print(f"Source : {result['source']}")
+    print(f"Text   : {result['text']}")
