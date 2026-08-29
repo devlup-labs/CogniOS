@@ -16,19 +16,14 @@ from collectors.layer2_process import collect_layer2_metrics
 from config import DB_PATH
 from logging_utils import get_layer_logger
 
-from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_telemetry, get_recent_rows
+from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_telemetry
 from blackbox.heartbeat import (
     create_heartbeat_table,
     update_heartbeat,
     full_crash_check,
     mark_graceful_shutdown,
 )
-from blackbox.rule_engine import check_rules
-from blackbox.zscore_detector import ZScoreDetector
-from blackbox.feature_engineering import extract_feature_vector
-from blackbox.anomaly_model import load_model, predict, anomaly_severity
 from blackbox.replay import replay
-from config import ANOMALY_CHECK_INTERVAL_SEC 
 
 from focusos.models.classifier import WorkloadPredictor, FEATURE_COLUMNS
 from focusos.feature_engineer import extract_features
@@ -65,19 +60,6 @@ def run_layer1_loop(stop_event):
             "Previous session ended cleanly "
             f"(heartbeat gap = {crash_info['heartbeat_gap']:.1f}s)"
         )
-
-    detectors = {
-        'cpu':    ZScoreDetector(),
-        'memory': ZScoreDetector(),
-    }
-
-    try:
-        anomaly_model = load_model()
-        logger.info("Isolation Forest model loaded — multi-metric detection enabled.")
-    except FileNotFoundError:
-        anomaly_model = None
-        logger.info("No trained Isolation Forest model found — running with "
-                     "rule_engine + zscore only.")
 
     tick = 0
 
@@ -136,31 +118,6 @@ def run_layer1_loop(stop_event):
                 # --- Write to BlackBox rolling-window DB ---
                 write_telemetry(bb_conn, metrics)
                 update_heartbeat(bb_conn)
-
-                # --- Rule engine (always runs, no warmup needed) ---
-                rule_alerts = check_rules(metrics)
-                for alert in rule_alerts:
-                    logger.warning(f"[Rule] {alert['message']}")
-
-                # --- Z-score detection ---
-                for key, mkey in [('cpu', 'cpu_usage_percent'), ('memory', 'memory_percent')]:
-                    val = metrics.get(mkey) or 0
-                    detectors[key].update(val)
-                    for issue in detectors[key].check(val, metric_name=key):
-                        logger.warning(f"[ZScore] {issue['msg']}")
-
-                # --- Isolation Forest (every ANOMALY_CHECK_INTERVAL_SEC) ---
-                if anomaly_model is not None and tick % ANOMALY_CHECK_INTERVAL_SEC == 0:
-                    rows = get_recent_rows(bb_conn, n=120)
-                    vec = extract_feature_vector(rows)
-                    if vec is not None:
-                        label, score = predict(anomaly_model, vec)
-                        if label == -1:
-                            severity = anomaly_severity(score)
-                            logger.warning(
-                                f"[IsolationForest] ANOMALY detected — "
-                                f"score={score:.4f} severity={severity}/100"
-                            )
 
                 logger.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
 
@@ -314,6 +271,7 @@ def run_daemon():
         t1.join(timeout=2)
         t2.join(timeout=2)
         t3.join(timeout=2)
+
 
 if __name__ == "__main__":
     run_daemon()

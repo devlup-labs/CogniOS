@@ -26,11 +26,15 @@ cognios_telemetry.db*
 focusos_telemetry.db*
 alerts.db*
 blackbox.db*
+blackbox/blackbox.db-shm
+blackbox/blackbox.db-wal
 
 # Local data and generated artifacts
+data/cognios.db
 data/models/*.pt
 data/traces/*
 !data/traces/.gitkeep
+!data/models/.gitkeep
 
 # Logs
 logs/

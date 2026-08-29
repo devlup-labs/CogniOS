@@ -9,8 +9,6 @@ from blackbox.recorder import _get_lock, _noop_ctx
 JOURNALCTL_TIMEOUT_SEC = 5
 
 
-# ── Heartbeat table ──────────────────────────────────────────────────────────
-
 def create_heartbeat_table(conn: sqlite3.Connection) -> None:
     lock = _get_lock(conn)
     with lock if lock else _noop_ctx():
@@ -39,7 +37,7 @@ def update_heartbeat(conn: sqlite3.Connection) -> None:
 
 
 def mark_graceful_shutdown(conn: sqlite3.Connection) -> None:
-    """Record a clean exit and the time at which it was requested."""
+    # Record a clean exit and the time at which it was requested
     lock = _get_lock(conn)
     with lock if lock else _noop_ctx():
         conn.execute(
@@ -52,12 +50,7 @@ def mark_graceful_shutdown(conn: sqlite3.Connection) -> None:
 
 
 def check_crash_on_startup(conn: sqlite3.Connection) -> tuple[bool, float]:
-    """Return whether the prior run appears to have stopped unexpectedly.
-
-    Reading the previous state and clearing its shutdown marker happen under one
-    lock.  That prevents a concurrent heartbeat write from leaving a stale
-    marker behind for the next startup check.
-    """
+    # Return whether the prior run appears to have stopped unexpectedly
     lock = _get_lock(conn)
     with lock if lock else _noop_ctx():
         row = conn.execute(
@@ -76,6 +69,7 @@ def check_crash_on_startup(conn: sqlite3.Connection) -> tuple[bool, float]:
     last_beat, graceful = row
     # A clock correction can put last_beat slightly in the future.  A negative
     # duration is not meaningful to callers and must not look like a crash.
+
     gap = max(0.0, round(time.time() - last_beat, 1))
 
     if graceful:
@@ -83,8 +77,6 @@ def check_crash_on_startup(conn: sqlite3.Connection) -> tuple[bool, float]:
 
     return gap > BLACKBOX_CRASH_GAP_SEC, gap
 
-
-# ── Systemd journal crash detection ─────────────────────────────────────────
 
 def detect_crash_via_systemd() -> bool:
     """Conservatively classify the end of the previous boot from journald.
@@ -120,7 +112,7 @@ def detect_crash_via_systemd() -> bool:
     return True
 
 
-# ── Combined startup check ───────────────────────────────────────────────────
+# Combined startup check
 
 def full_crash_check(conn: sqlite3.Connection) -> dict:
     """

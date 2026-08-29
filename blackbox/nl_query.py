@@ -3,13 +3,15 @@
 import os
 import sys
 import sqlite3
-from pathlib import Path
 from dotenv import load_dotenv
+from pathlib import Path
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
 from groq import Groq
-from blackbox.recorder import get_blackbox_conn, get_recent_rows
-from blackbox.replay import replay
-from config import BLACKBOX_DB_PATH, GROQ_API_KEY, GROQ_MODEL
+from blackbox.recorder import get_blackbox_conn
+from blackbox.replay import build_llm_context
+from config import GROQ_API_KEY, GROQ_MODEL
 
 load_dotenv()
 
@@ -21,41 +23,48 @@ When diagnosing performance issues or anomalies:
 1. Identify root cause metrics (CPU, RAM, Disk I/O, Zombies, Swap, Thermal pressure).
 2. Assess severity and impact on system stability.
 """
+from blackbox.replay import build_llm_context  # replace old replay import
 
-
-def build_telemetry_context(conn: sqlite3.Connection, window_minutes: int = 30) -> str:
-    context_sections = []
-
-    # 1. Recent metrics snapshot
+def query_telemetry(
+    user_query: str,
+    conn: sqlite3.Connection | None = None,
+    stream: bool = True,
+    model: str = GROQ_MODEL,
+    api_key: str | None = None,
+    crash_time: float | None = None,
+    crash_info: dict | None = None
+) -> str:
+    close_conn = False
+    if conn is None:
+        conn = get_blackbox_conn()
+        close_conn = True
     try:
-        rows = get_recent_rows(conn, n=5)
-        if rows:
-            latest = rows[-1]
-            metrics_summary = (
-                f"=== Current System State ===\n"
-                f"Timestamp: {latest.get('timestamp')}\n"
-                f"CPU Usage: {latest.get('cpu_usage_percent', 0):.1f}%\n"
-                f"Memory Usage: {latest.get('memory_percent', 0):.1f}%\n"
-                f"Swap Usage: {latest.get('swap_percent', 0):.1f}%\n"
-                f"Disk Read: {latest.get('disk_read', 0):.2f} MB/s | Disk Write: {latest.get('disk_write', 0):.2f} MB/s\n"
-                f"Net Rate: {latest.get('net_rate_mb_s', 0):.2f} MB/s\n"
-                f"Processes: {latest.get('running_processes', 0)} running / {latest.get('total_processes', 0)} total / {latest.get('zombie_processes', 0)} zombies\n"
-                f"Load Average (1m/5m): {latest.get('load_avg1', 0):.2f}, {latest.get('load_avg5', 0):.2f}\n"
-                f"Avg Temperature: {latest.get('avg_temp') or 'N/A'} °C\n"
-            )
-            context_sections.append(metrics_summary)
-    except Exception as e:
-        context_sections.append(f"Recent metrics error: {e}")
-
-    # 2. Replay timeline and event chain
-    try:
-        rep_result = replay(conn, window_minutes=window_minutes)
-        timeline = rep_result.get("timeline_text", "No events logged.")
-        context_sections.append(f"=== Event Chain & Pre-Crash Timeline (Last {window_minutes} min) ===\n{timeline}")
-    except Exception as e:
-        context_sections.append(f"Replay timeline error: {e}")
-
-    return "\n\n".join(context_sections)
+        context_str = build_llm_context(
+            conn,
+            crash_time=crash_time,
+            heartbeat_gap=crash_info.get('heartbeat_gap') if crash_info else None,
+            systemd_crash=crash_info.get('systemd_crash') if crash_info else None
+        )
+        full_user_content = (
+            f"Here is the telemetry context from CogniOS BlackBox:\n\n"
+            f"{context_str}\n\n"
+            f"User Question: {user_query}"
+        )
+        _chat_history.append({"role": "user", "content": full_user_content})
+        response = ask_groq(
+            user_content=
+            '',
+            system_prompt=SYSTEM_PROMPT,
+            model=model,
+            stream=stream,
+            api_key=api_key,
+            history=_chat_history
+        )
+        _chat_history.append({"role": "assistant", "content": response})
+        return response
+    finally:
+        if close_conn:
+            conn.close()
 
 
 def ask_groq(
@@ -88,10 +97,11 @@ def ask_groq(
             model=model,
             messages=messages,
             temperature=0.3,
-            max_completion_tokens=150,
+            max_completion_tokens=3000,
             top_p=1,
             stream=True,
             stop=None,
+            reasoning_format="hidden",
         )
 
         full_response = []
@@ -106,62 +116,44 @@ def ask_groq(
             model=model,
             messages=messages,
             temperature=1,
-            max_completion_tokens=2048,
+            max_completion_tokens=1500,
             top_p=1,
             stream=False,
             stop=None,
+            reasoning_format="hidden",
         )
         response_text = completion.choices[0].message.content or ""
         return response_text
 _chat_history = []
 
-def query_telemetry(
-    user_query: str,
-    conn: sqlite3.Connection | None = None,
-    window_minutes: int = 30,
-    stream: bool = True,
-    model: str = GROQ_MODEL,
-    api_key: str | None = None,
-    history: list | None = None
-) -> str:
-    close_conn = False
-    if conn is None:
-        conn = get_blackbox_conn()
-        close_conn = True
-    try:
-        context_str = build_telemetry_context(conn, window_minutes=window_minutes)
-        full_user_content = (
-            f"Telemetry context:\n{context_str}\n\n"
-            f"User Question: {user_query}"
-        )
-        _chat_history.append({"role": "user", "content": full_user_content})
-
-        response = ask_groq(
-            user_content=None,          # we pass history directly instead
-            system_prompt=SYSTEM_PROMPT,
-            model=model,
-            stream=stream,
-            api_key=api_key,
-            history=_chat_history       # pass history in
-        )
-        _chat_history.append({"role": "assistant", "content": response})
-        return response
-    finally:
-        if close_conn:
-            conn.close()
 
 def main():
-    """Command-line interface for CogniOS Natural Language Telemetry Query."""
+    """Interactive CLI for CogniOS Natural Language Telemetry Query."""
     if len(sys.argv) > 1:
+        # if argument given, Cannot access chat history (non-interactive)
         query = " ".join(sys.argv[1:])
-    else:
-        query = "Can you summarize the system performance and report any recent anomalies or resource spikes?"
+        print(f"CogniOS Telemetry Query: '{query}'\n")
+        try:
+            query_telemetry(query, stream=True)
+        except Exception as e:
+            print(f"\nError executing query: {e}")
+        return
 
-    print(f"CogniOS Telemetry Query: '{query}'\n")
-    try:
-        query_telemetry(query, stream=True)
-    except Exception as e:
-        print(f"\nError executing query: {e}")
+    # interactive prompts can be given
+    print("CogniOS Telemetry Query — interactive mode (type 'exit' or Ctrl+C to quit)\n")
+    while True:
+        try:
+            query = input("\n> ").strip()
+            if not query:
+                continue
+            if query.lower() in ("exit", "quit"):
+                break
+            query_telemetry(query, stream=True)
+        except KeyboardInterrupt:
+            print("\nExiting.")
+            break
+        except Exception as e:
+            print(f"\nError executing query: {e}")
 
 
 if __name__ == "__main__":
