@@ -324,7 +324,13 @@ def render():
             """)
 
             # Initialize AI postmortem on first load only
+            # if "ai_postmortem" not in st.session_state:
+            #     st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(scrub_minutes=scrub_val)
+
             if "ai_postmortem" not in st.session_state:
+                st.session_state["ai_postmortem"] = ""  # empty on first load
+
+            if not st.session_state["ai_postmortem"]:
                 st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(scrub_minutes=scrub_val)
 
             # Always display the current AI response from session state
@@ -337,6 +343,7 @@ def render():
 
             # Helper to run a query and update session state
             def _run_ai_query(query_text):
+                st.session_state["ai_postmortem"] = ""
                 st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(query_text, scrub_minutes=scrub_val)
 
             # Query input with synthesize button
