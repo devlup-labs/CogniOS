@@ -254,6 +254,15 @@ st.markdown("""
         overflow-y: auto !important;
         box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5) !important;
         margin-bottom: 18px !important;
+        scrollbar-width: thin !important;
+        scrollbar-color: #1f2d42 rgba(14, 21, 34, 0.5) !important;
+        resize: none !important;
+    }
+
+    .forensic-chain-container {
+        scrollbar-width: thin !important;
+        scrollbar-color: #1f2d42 rgba(14, 21, 34, 0.5) !important;
+        resize: none !important;
     }
 
     .ai-response-container h1, 
@@ -409,6 +418,24 @@ st.markdown("""
     }
     div[data-baseweb="slider"] > div > div > div {
         background: #00f5c4 !important;
+    }
+
+    /* Clean button styling with sleek hover effect */
+    .stButton > button {
+        background-color: #0f1624 !important;
+        color: #e2e8f0 !important;
+        border: 1px solid #1c2a3d !important;
+        border-radius: 8px !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        transition: all 0.2s ease-in-out !important;
+    }
+    .stButton > button:hover {
+        border-color: #00f5c4 !important;
+        color: #00f5c4 !important;
+        background-color: rgba(0, 245, 196, 0.08) !important;
+        box-shadow: 0 0 12px rgba(0, 245, 196, 0.2) !important;
     }
 </style>
 """, unsafe_allow_html=True)

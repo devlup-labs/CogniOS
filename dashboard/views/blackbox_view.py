@@ -1,5 +1,6 @@
 """BlackBox System Flight Recorder View matching CogniOS Stitch design."""
 
+import os
 import time
 import pandas as pd
 import streamlit as st
@@ -11,6 +12,10 @@ try:
     HAS_PLOTLY = True
 except ImportError:
     HAS_PLOTLY = False
+
+
+def _on_scrub_preset(offset_minutes: int):
+    st.session_state["bb_scrub_val"] = offset_minutes
 
 
 @st.fragment(run_every=2)
@@ -171,14 +176,10 @@ def render():
                 "Timeline Navigation Slider",
                 min_value=-30,
                 max_value=0,
-                value=st.session_state["bb_scrub_val"],
                 step=1,
                 label_visibility="collapsed",
-                key="bb_slider_val"
+                key="bb_scrub_val"
             )
-            if new_scrub != st.session_state["bb_scrub_val"]:
-                st.session_state["bb_scrub_val"] = new_scrub
-                st.rerun()
 
             offset_text = "Live Stream (T-00:00)" if new_scrub == 0 else f"Historical Replay (T{new_scrub}:00 min)"
             st.markdown(f"""
@@ -194,19 +195,11 @@ def render():
         with c_presets:
             p1, p2 = st.columns(2)
             with p1:
-                if st.button("🔴 Live", use_container_width=True, help="Jump to live stream"):
-                    st.session_state["bb_scrub_val"] = 0
-                    st.rerun()
-                if st.button("T -15m", use_container_width=True, help="Jump to T-15 minutes"):
-                    st.session_state["bb_scrub_val"] = -15
-                    st.rerun()
+                st.button("🔴 Live", on_click=_on_scrub_preset, args=(0,), use_container_width=True, help="Jump to live stream")
+                st.button("T -15m", on_click=_on_scrub_preset, args=(-15,), use_container_width=True, help="Jump to T-15 minutes")
             with p2:
-                if st.button("T -5m", use_container_width=True, help="Jump to T-5 minutes"):
-                    st.session_state["bb_scrub_val"] = -5
-                    st.rerun()
-                if st.button("T -30m", use_container_width=True, help="Jump to T-30 minutes"):
-                    st.session_state["bb_scrub_val"] = -30
-                    st.rerun()
+                st.button("T -5m", on_click=_on_scrub_preset, args=(-5,), use_container_width=True, help="Jump to T-5 minutes")
+                st.button("T -30m", on_click=_on_scrub_preset, args=(-30,), use_container_width=True, help="Jump to T-30 minutes")
 
     # ---------------------------------------------------------
     # 5. Middle Row: Statistical Z-Score Chart & Groq AI Synthesis
@@ -315,59 +308,61 @@ def render():
 
     with col_ai:
         with st.container(border=True):
-            st.markdown("""
+            groq_model_name = os.getenv("GROQ_MODEL") or getattr(config, "GROQ_MODEL", "llama-3.3-70b-versatile")
+            model_badge = groq_model_name.split("/")[-1].upper()
+
+            st.html(f"""
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span style="color:#00f5c4; font-size:16px;"><i class="fa-solid fa-brain"></i></span>
                         <h3 style="margin:0; font-size:17px; font-weight:700; color:#ffffff;">Groq AI Synthesis</h3>
                     </div>
                     <span class="cognios-badge" style="font-size:10px; padding:2px 8px;">
-                        LLAMA-3.3-70B
+                        {model_badge}
                     </span>
                 </div>
-            """, unsafe_allow_html=True)
+            """)
 
             if "ai_postmortem" not in st.session_state:
                 st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(scrub_minutes=scrub_val)
 
             formatted_html = dp.format_ai_response_to_html(st.session_state["ai_postmortem"])
-            st.markdown(f"""
-                <div class="ai-response-container" style="height:175px; overflow-y:auto; margin-bottom:12px; font-size:12.5px;">
+            st.html(f"""
+                <div class="ai-response-container" style="min-height:190px; max-height:220px; overflow-y:auto; margin-bottom:14px; font-size:12.5px;">
                     {formatted_html}
                 </div>
-            """, unsafe_allow_html=True)
+            """)
 
-            # Query input with synthesize button
-            p_col1, p_col2 = st.columns([2.6, 1.4])
-            with p_col1:
-                user_query = st.text_input(
-                    "Ask AI Forensic Assistant",
-                    placeholder="Ask why system spiked...",
-                    label_visibility="collapsed",
-                    key="bb_ai_query_input"
-                )
-            with p_col2:
-                st.markdown('<div class="synth-btn-box">', unsafe_allow_html=True)
-                if st.button("Synthesize", icon=":material/psychology:", use_container_width=True, key="btn_synth"):
-                    with st.spinner("Analyzing timeline..."):
-                        st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(user_query, scrub_minutes=scrub_val)
-                        st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
+            # Query input with synthesize button inside a form for Enter-key submission & horizontal alignment
+            with st.form(key="bb_ai_query_form", clear_on_submit=False, border=False):
+                p_col1, p_col2 = st.columns([2.7, 1.3], vertical_alignment="center")
+                with p_col1:
+                    user_query = st.text_input(
+                        "Ask AI Forensic Assistant",
+                        placeholder="Ask why system spiked...",
+                        label_visibility="collapsed",
+                        key="bb_ai_query_input"
+                    )
+                with p_col2:
+                    if st.form_submit_button("Synthesize", icon=":material/psychology:", use_container_width=True):
+                        with st.spinner("Analyzing timeline..."):
+                            st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(user_query, scrub_minutes=scrub_val)
+                            st.rerun()
 
-            # Quick Prompt Presets
+            # Quick Prompt Presets (No emojis, sleek Material icons)
             pill1, pill2, pill3 = st.columns(3)
             with pill1:
-                if st.button("⚡ Spikes", use_container_width=True, help="Analyze CPU & RAM load spikes"):
+                if st.button("Spikes", icon=":material/bolt:", use_container_width=True, help="Analyze CPU & RAM load spikes"):
                     with st.spinner("Analyzing spikes..."):
                         st.session_state["ai_postmortem"] = dp.get_ai_post_mortem("Analyze any CPU or Memory spikes in this timeline.", scrub_minutes=scrub_val)
                         st.rerun()
             with pill2:
-                if st.button("💧 Leaks", use_container_width=True, help="Check memory leak indicators"):
+                if st.button("Leaks", icon=":material/water_drop:", use_container_width=True, help="Check memory leak indicators"):
                     with st.spinner("Checking memory leaks..."):
                         st.session_state["ai_postmortem"] = dp.get_ai_post_mortem("Check if there are signs of memory leaks or monotonic memory drift.", scrub_minutes=scrub_val)
                         st.rerun()
             with pill3:
-                if st.button("📋 Summary", use_container_width=True, help="Executive post-mortem summary"):
+                if st.button("Summary", icon=":material/description:", use_container_width=True, help="Executive post-mortem summary"):
                     with st.spinner("Generating post-mortem..."):
                         st.session_state["ai_postmortem"] = dp.get_ai_post_mortem("Provide an executive post-mortem of this 30-minute window.", scrub_minutes=scrub_val)
                         st.rerun()
@@ -376,48 +371,43 @@ def render():
     # 6. Forensic Event Chain (Chronological Incident Replay)
     # ---------------------------------------------------------
     with st.container(border=True):
-        st.markdown("""
+        st.html("""
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <span style="color:#00f5c4; font-size:16px;"><i class="fa-solid fa-timeline"></i></span>
-                    <h3 style="margin:0; font-size:17px; font-weight:700; color:#ffffff;">Forensic Event Chain</h3>
-                </div>
+                <h3 style="margin:0; font-size:17px; font-weight:700; color:#ffffff;">Forensic Event Chain</h3>
                 <span style="color:#64748b; font-size:11.5px; font-family:'JetBrains Mono', monospace;">
                     Causal Incident Timeline Reconstructed From Rolling Buffer
                 </span>
             </div>
-        """, unsafe_allow_html=True)
+        """)
 
         if event_chain and len(event_chain) > 0:
-            icon_map = {
-                "cpu_spike": "fa-bolt",
-                "memory_growth": "fa-memory",
-                "memory_leak": "fa-faucet-drip",
-                "process_explosion": "fa-users-rays",
-                "zombie_buildup": "fa-skull",
-                "io_storm": "fa-hard-drive",
-                "swap_spike": "fa-arrows-rotate",
-            }
+            events_html = []
             for ev in event_chain:
-                ev_icon = icon_map.get(ev.get('type', ''), "fa-triangle-exclamation")
                 badge_color = ev.get('color', '#f59e0b')
                 badge_level = ev.get('level', 'WARN')
-                st.markdown(f"""
-                    <div style="display:flex; align-items:center; gap:16px; padding:12px 18px; background:#101725; border-radius:8px; margin-bottom:8px; border-left:3px solid {badge_color}; font-family:'JetBrains Mono', monospace; font-size:13px; box-shadow:0 2px 8px rgba(0,0,0,0.2);">
-                        <span style="color:#64748b; font-weight:600; min-width:65px;">{ev.get('time', '??:??')}</span>
-                        <span style="color:{badge_color}; font-weight:700; min-width:55px;">
-                            <i class="fa-solid {ev_icon}"></i> {badge_level}:
-                        </span>
-                        <span style="color:#e2e8f0; flex-grow:1;">{ev.get('msg', '')}</span>
-                    </div>
-                """, unsafe_allow_html=True)
+                ev_time = ev.get('time', '??:??')
+                ev_msg = ev.get('msg', '')
+                events_html.append(
+                    f'<div style="display:flex; align-items:center; gap:14px; padding:10px 16px; '
+                    f'background:#101725; border-radius:8px; margin-bottom:8px; border-left:3px solid {badge_color}; '
+                    f'font-family:\'JetBrains Mono\', monospace; font-size:13px; box-shadow:0 2px 8px rgba(0,0,0,0.2);">'
+                    f'<span style="color:#64748b; font-weight:600; min-width:65px;">{ev_time}</span>'
+                    f'<span style="color:{badge_color}; font-weight:700; min-width:48px;">{badge_level}:</span>'
+                    f'<span style="color:#e2e8f0; flex-grow:1;">{ev_msg}</span>'
+                    f'</div>'
+                )
+
+            full_chain_markup = "".join(events_html)
+            st.html(
+                f'<div class="forensic-chain-container" style="max-height:260px; overflow-y:auto; padding-right:4px;">'
+                f'{full_chain_markup}'
+                f'</div>'
+            )
         else:
-            st.markdown("""
-                <div style="display:flex; align-items:center; gap:14px; padding:16px 20px; background:rgba(0, 245, 196, 0.04); border:1px solid rgba(0, 245, 196, 0.2); border-radius:8px; font-family:'JetBrains Mono', monospace; font-size:13px;">
-                    <span style="color:#00f5c4; font-size:20px;"><i class="fa-solid fa-circle-check"></i></span>
-                    <div>
-                        <span style="color:#00f5c4; font-weight:700;">ALL BASELINES NOMINAL:</span>
-                        <span style="color:#94a3b8; margin-left:6px;">No statistical anomalies, memory leaks, or I/O storms detected in this 30-minute window. System parameters operated within standard dynamic baseline bounds.</span>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
+            st.html(
+                '<div style="padding:16px 20px; background:rgba(0, 245, 196, 0.04); border:1px solid rgba(0, 245, 196, 0.2); '
+                'border-radius:8px; font-family:\'JetBrains Mono\', monospace; font-size:13px;">'
+                '<span style="color:#00f5c4; font-weight:700;">ALL BASELINES NOMINAL:</span>'
+                '<span style="color:#94a3b8; margin-left:6px;">No statistical anomalies, memory leaks, or I/O storms detected in this 30-minute window. System parameters operated within standard dynamic baseline bounds.</span>'
+                '</div>'
+            )

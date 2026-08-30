@@ -482,18 +482,18 @@ def get_blackbox_zscore_series(scrub_minutes=0):
             
             now = time.time()
             end_time = now + (scrub_minutes * 60)
-            start_time = end_time - (30 * 60)
             
+            # Query the telemetry window leading up to end_time
             df = pd.read_sql(
-                f"SELECT * FROM {table_name} WHERE timestamp BETWEEN ? AND ? ORDER BY timestamp ASC",
+                f"SELECT * FROM {table_name} WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 60",
                 conn,
-                params=(start_time, end_time)
+                params=(end_time,)
             )
-            if df.empty:
-                # If window query was empty, grab latest 120 rows
-                df = pd.read_sql(f"SELECT * FROM {table_name} ORDER BY id DESC LIMIT 120", conn)
-                if not df.empty:
-                    df = df[::-1].reset_index(drop=True)
+            if not df.empty:
+                df = df[::-1].reset_index(drop=True)
+            else:
+                # Fallback to earliest available records if scrub is past the retention window
+                df = pd.read_sql(f"SELECT * FROM {table_name} ORDER BY timestamp ASC LIMIT 60", conn)
             conn.close()
             
             if not df.empty and len(df) >= 3:
@@ -744,6 +744,8 @@ def get_ai_post_mortem(user_query=None, scrub_minutes=0):
         except Exception:
             pass
             
+        groq_model = os.environ.get("GROQ_MODEL") or getattr(config, "GROQ_MODEL", "llama-3.3-70b-versatile")
+
         if groq_key and groq_key != "your_groq_api_key_here" and len(groq_key) > 10:
             prompt = f"Telemetry Context:\n{context}\n\nUser Query: {user_query or 'Provide a short executive post-mortem analysis of recent telemetry anomalies.'}"
             sys_p = (
@@ -753,34 +755,42 @@ def get_ai_post_mortem(user_query=None, scrub_minutes=0):
                 "### Key Observations\n- Bullet points with bold metrics (**CPU 58%**, **RAM 76.5%**)\n\n"
                 "### Root Cause & Mitigation\n- Precise causal sequence and concrete action step\n"
             )
-            ai_resp = ask_groq(user_content=prompt, system_prompt=sys_p, stream=False, api_key=groq_key)
-            return ai_resp
-        else:
-            # Deterministic local report from replay engine
-            timeline_str = rep.get('timeline_text', 'No significant events recorded in this window.')
-            trend_str = rep.get('trend_summary', 'N/A')
-            event_count = len(rep.get('events', []))
-            
-            summary = (
-                f"Incident scan detected {event_count} significant event(s) in the 30-minute window."
-                if event_count > 0
-                else "System parameters remained within steady-state dynamic baselines during this window."
-            )
-            
-            return f"""### Executive Summary
+            ai_resp = ask_groq(user_content=prompt, system_prompt=sys_p, model=groq_model, stream=False, api_key=groq_key)
+            if ai_resp:
+                return ai_resp
+
+        # Deterministic local report from replay engine
+        timeline_str = rep.get('timeline_text', 'No significant events recorded in this window.')
+        trend_str = rep.get('trend_summary', 'N/A')
+        event_count = len(rep.get('events', []))
+        
+        # Clean and round unrounded floats (e.g. Load avg: 1.7236328125 -> 1.72)
+        trend_clean = re.sub(r'(\d+\.\d{2})\d+', r'\1', str(trend_str))
+        
+        # Parse trend segments into clean bullet points
+        trend_parts = [p.strip() for p in trend_clean.split('|') if p.strip()]
+        trend_bullets = "\n".join(
+            f"- **{p.split(':')[0].strip()}**: {p.split(':', 1)[1].strip()}" if ":" in p else f"- {p}"
+            for p in trend_parts
+        )
+        
+        summary = (
+            f"Incident scan detected {event_count} significant event(s) in the 30-minute window."
+            if event_count > 0
+            else "System parameters remained within steady-state dynamic baselines during this window."
+        )
+        
+        obs_block = f"{trend_bullets}\n- **Telemetry Window**: {rep.get('total_rows', 0)} data samples evaluated\n- **Anomaly Threshold**: Dynamic Z-score active (σ > 2.0)"
+        
+        return f"""### Executive Summary
 {summary}
 
 ### Key Observations
-- **Trend Summary**: {trend_str}
-- **Window Telemetry**: {rep.get('total_rows', 0)} data samples evaluated
-- **Anomaly Detection**: Dynamic Z-score thresholding active (σ > 2.0)
-
-### Event Chain Reconstructed
-{timeline_str}
+{obs_block}
 
 ### Diagnostic Recommendation
-- Maintain continuous Layer 1 & BlackBox recording.
-- To enable natural language AI synthesis powered by LLaMA-3.3-70B, configure your `GROQ_API_KEY` in `.env`."""
+- Real-time telemetry operating against dynamic statistical baselines.
+- Configure `GROQ_API_KEY` in `.env` to enable live LLM reasoning (Model: `{groq_model}`)."""
     except Exception as e:
         metrics = get_live_system_metrics()
         return f"""### Executive Summary

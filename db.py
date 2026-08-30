@@ -178,10 +178,13 @@ def create_connection(db_path):
     ''')
 
     # Ensure num_threads and udp_tcp_ratio columns exist for older database instances
+    cursor.execute("PRAGMA table_info(layer1_sys)")
     columns = [row[1] for row in cursor.fetchall()]
     if 'num_threads' not in columns:
         cursor.execute("ALTER TABLE layer1_sys ADD COLUMN num_threads INTEGER")
     if 'udp_tcp_ratio' not in columns:
+        cursor.execute("ALTER TABLE layer1_sys ADD COLUMN udp_tcp_ratio REAL DEFAULT 0.10")
+
     conn.commit()
     return conn
 
