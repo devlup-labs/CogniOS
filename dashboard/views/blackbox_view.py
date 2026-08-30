@@ -323,9 +323,11 @@ def render():
                 </div>
             """)
 
+            # Initialize AI postmortem on first load only
             if "ai_postmortem" not in st.session_state:
                 st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(scrub_minutes=scrub_val)
 
+            # Always display the current AI response from session state
             formatted_html = dp.format_ai_response_to_html(st.session_state["ai_postmortem"])
             st.html(f"""
                 <div class="ai-response-container" style="min-height:190px; max-height:220px; overflow-y:auto; margin-bottom:14px; font-size:12.5px;">
@@ -333,39 +335,43 @@ def render():
                 </div>
             """)
 
-            # Query input with synthesize button inside a form for Enter-key submission & horizontal alignment
-            with st.form(key="bb_ai_query_form", clear_on_submit=False, border=False):
-                p_col1, p_col2 = st.columns([2.7, 1.3], vertical_alignment="center")
-                with p_col1:
-                    user_query = st.text_input(
-                        "Ask AI Forensic Assistant",
-                        placeholder="Ask why system spiked...",
-                        label_visibility="collapsed",
-                        key="bb_ai_query_input"
-                    )
-                with p_col2:
-                    if st.form_submit_button("Synthesize", icon=":material/psychology:", use_container_width=True):
+            # Helper to run a query and update session state
+            def _run_ai_query(query_text):
+                st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(query_text, scrub_minutes=scrub_val)
+
+            # Query input with synthesize button
+            p_col1, p_col2 = st.columns([2.7, 1.3], vertical_alignment="center")
+            with p_col1:
+                user_query = st.text_input(
+                    "Ask AI Forensic Assistant",
+                    placeholder="Ask why system spiked...",
+                    label_visibility="collapsed",
+                    key="bb_ai_query_input"
+                )
+            with p_col2:
+                if st.button("Synthesize", icon=":material/psychology:", use_container_width=True):
+                    if user_query and user_query.strip():
                         with st.spinner("Analyzing timeline..."):
-                            st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(user_query, scrub_minutes=scrub_val)
-                            st.rerun()
+                            _run_ai_query(user_query.strip())
+                            st.rerun(scope="fragment")
 
             # Quick Prompt Presets (No emojis, sleek Material icons)
             pill1, pill2, pill3 = st.columns(3)
             with pill1:
                 if st.button("Spikes", icon=":material/bolt:", use_container_width=True, help="Analyze CPU & RAM load spikes"):
                     with st.spinner("Analyzing spikes..."):
-                        st.session_state["ai_postmortem"] = dp.get_ai_post_mortem("Analyze any CPU or Memory spikes in this timeline.", scrub_minutes=scrub_val)
-                        st.rerun()
+                        _run_ai_query("Analyze any CPU or Memory spikes in this timeline.")
+                        st.rerun(scope="fragment")
             with pill2:
                 if st.button("Leaks", icon=":material/water_drop:", use_container_width=True, help="Check memory leak indicators"):
                     with st.spinner("Checking memory leaks..."):
-                        st.session_state["ai_postmortem"] = dp.get_ai_post_mortem("Check if there are signs of memory leaks or monotonic memory drift.", scrub_minutes=scrub_val)
-                        st.rerun()
+                        _run_ai_query("Check if there are signs of memory leaks or monotonic memory drift.")
+                        st.rerun(scope="fragment")
             with pill3:
                 if st.button("Summary", icon=":material/description:", use_container_width=True, help="Executive post-mortem summary"):
                     with st.spinner("Generating post-mortem..."):
-                        st.session_state["ai_postmortem"] = dp.get_ai_post_mortem("Provide an executive post-mortem of this 30-minute window.", scrub_minutes=scrub_val)
-                        st.rerun()
+                        _run_ai_query("Provide an executive post-mortem of this 30-minute window.")
+                        st.rerun(scope="fragment")
 
     # ---------------------------------------------------------
     # 6. Forensic Event Chain (Chronological Incident Replay)
