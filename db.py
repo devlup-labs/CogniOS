@@ -177,18 +177,20 @@ def create_connection(db_path):
         )
     ''')
 
-    # Ensure num_threads column exists for older database instances
+    # Ensure num_threads and udp_tcp_ratio columns exist for older database instances
     cursor.execute("PRAGMA table_info(layer1_sys)")
     columns = [row[1] for row in cursor.fetchall()]
     if 'num_threads' not in columns:
         cursor.execute("ALTER TABLE layer1_sys ADD COLUMN num_threads INTEGER")
+    if 'udp_tcp_ratio' not in columns:
+        cursor.execute("ALTER TABLE layer1_sys ADD COLUMN udp_tcp_ratio REAL DEFAULT 0.10")
 
     conn.commit()
     return conn
 
 # Function to write the collected metrics into the database
 
-def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, process_data,num_threads):
+def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, process_data,num_threads,udp_tcp_ratio=0.10):
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO layer1_sys (
@@ -200,9 +202,9 @@ def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cp
             total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp,
             max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv,
             net_packets_sent, net_packets_recv, net_errs, net_drops, process_data,
-            num_threads
+            num_threads, udp_tcp_ratio
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (timestamp, 
           cpu_usage_percent, 
           cpu_freq, cpu_user_time, 
@@ -242,5 +244,6 @@ def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cp
           net_errs,
           net_drops,
           process_data,
-          num_threads))
+          num_threads,
+          udp_tcp_ratio))
     conn.commit()

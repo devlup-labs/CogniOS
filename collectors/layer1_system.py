@@ -9,6 +9,33 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import utils
 from utils.helpers import rate_mb_s
 
+# ---------------------------------------------------------------------------
+# HARDCODED EXCLUSION — CogniOS self-telemetry & browser noise suppression
+# Chrome/Chromium entries reflect the Streamlit dashboard, not real user
+# browser activity.  CogniOS daemon Python processes would corrupt the
+# compiler_active signal and inflate CPU readings in FocusOS inference.
+# ---------------------------------------------------------------------------
+_EXCLUDE_EXACT_NAMES: frozenset = frozenset({
+    "chrome", "chromium", "chromium-browser",
+    "google-chrome", "google-chrome-stable",
+    "chrome_crashpad_handler", "nacl_helper",
+    "chrome_sandbox",
+})
+_EXCLUDE_SUBSTRINGS: tuple = (
+    "chrome",
+    "chromium",
+    "cognios",          # any cognios_as_daemon / cognios_* variant
+    "streamlit",        # dashboard runner itself
+)
+
+
+def _is_excluded_process(name: str) -> bool:
+    """Return True if this process should be silently dropped from telemetry."""
+    n = (name or "").lower()
+    if n in _EXCLUDE_EXACT_NAMES:
+        return True
+    return any(sub in n for sub in _EXCLUDE_SUBSTRINGS)
+
 # a dictionary to store previous values
 _last = {
     "time": None,
@@ -37,8 +64,13 @@ def collect_layer1_metrics():
             try:
                 cpu = round(p.cpu_percent(), 2)
                 mem = round(p.info.get("memory_percent") or 0.0, 2)
+                proc_name = p.info.get("name") or ""
+                # Hardcoded exclusion: skip Chrome/browser and CogniOS daemon
+                # processes so they never corrupt telemetry or FocusOS inference.
+                if _is_excluded_process(proc_name):
+                    continue
                 if cpu > 0.5 or mem > 0.5:
-                    process_data.append((p.info.get("name"), cpu, mem))
+                    process_data.append((proc_name, cpu, mem))
                 num_threads.append(p.num_threads())
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
@@ -173,6 +205,17 @@ def collect_layer1_metrics():
     except Exception:
         pass
 
+
+    # Calculate UDP/TCP Ratio for FocusOS
+    import socket
+    udp_tcp_ratio = 0.10
+    try:
+        conns = psutil.net_connections(kind='inet')
+        tcp_count = sum(1 for c in conns if c.type == socket.SOCK_STREAM)
+        udp_count = sum(1 for c in conns if c.type == socket.SOCK_DGRAM)
+        udp_tcp_ratio = float(round(udp_count / max(1, tcp_count), 4))
+    except (psutil.AccessDenied, PermissionError):
+        pass
     return {
         "timestamp": timestamp,
         "cpu_usage_percent": cpu_usage_percent,
@@ -218,7 +261,8 @@ def collect_layer1_metrics():
         "max_temp":temp_max,
         "battery_percent":battery_percent,
         "process_data":process_data,
-        "num_threads":num_threads
+        "num_threads":num_threads,
+        "udp_tcp_ratio": udp_tcp_ratio
     }
 
 if __name__ == "__main__":

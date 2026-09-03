@@ -5,7 +5,7 @@ load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "cognios_telemetry.db")
-SLIDING_WIND_N = 15
+SLIDING_WIND_N = 30
 AUTO_REFRESH = 2  # seconds between dashboard refreshes
 
 
@@ -26,7 +26,7 @@ GAMES = ["steam", "csgo", "dota2", "hl2_linux", "minecraft"]
 # Blackbox config
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
 BLACKBOX_DB_PATH = "blackbox/blackbox.db"
 BLACKBOX_WINDOW_SEC = 1800  # 30 minutes
 BLACKBOX_CRASH_GAP_SEC = 30   # SIGKILL-only fallback, not the primary check
