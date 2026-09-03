@@ -559,8 +559,8 @@ def get_forensic_event_chain(scrub_minutes=0):
             for ev in raw_events:
                 sev = ev.get('severity', 'medium')
                 ev_type = ev.get('type', 'incident')
-                color = "#ef4444" if sev == "high" else "#f59e0b"
-                level = "CRIT" if sev == "high" else "WARN"
+                color = "#ef4444" if sev == "high" else "#03ef55"
+                level = "CRIT" if sev == "high" else "EVENT"
                 events.append({
                     "time": ev.get('time', '??:??'),
                     "level": level,
