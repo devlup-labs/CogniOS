@@ -29,27 +29,10 @@ if not os.path.isabs(DB_PATH):
 
 # FocusOS imports
 try:
-    from focusos.models.classifier import WorkloadPredictor
-    from focusos.feature_engineer import extract_features
-    from focusos.sliding_window import get_window_from_db
-    from focusos.optimisation import get_cores, apply_optimization, get_active_network_interface
+    from focusos.optimisation import get_cores, get_active_network_interface
     HAS_FOCUSOS = True
 except Exception as e:
     HAS_FOCUSOS = False
-
-_predictor = None
-
-
-def get_predictor():
-    global _predictor
-    if _predictor is None and HAS_FOCUSOS:
-        models_dir = os.path.join(BASE_DIR, "focusos", "models_saved")
-        if os.path.exists(models_dir):
-            try:
-                _predictor = WorkloadPredictor(models_dir)
-            except Exception:
-                pass
-    return _predictor
 
 
 def _parse_timestamp(raw_ts):
@@ -320,61 +303,56 @@ def get_top_processes_list(limit=10):
 # --- FocusOS Data Methods ---
 
 def get_focusos_detected_workload():
-    """Infers current workload using FocusOS Machine Learning model or latest DB state."""
-    # First, try to get the latest state from the database daemon
+    """Returns current deterministic workload state from rule engine telemetry."""
     state = get_latest_focusos_state()
     if state and state.get("workload"):
-        return {"workload": state["workload"].upper(), "confidence": int(state["confidence"])}
+        return {
+            "workload": state["workload"].upper(),
+            "state": state.get("state", "OBSERVING"),
+            "cpu_attribution": state.get("cpu_attribution", 0.0),
+            "ram_attribution": state.get("ram_attribution", 0.0),
+            "score": state.get("score", 0.0),
+        }
 
-    # Fallback to local prediction
-    try:
-        predictor = get_predictor()
-        if predictor and os.path.exists(DB_PATH):
-            df_win = get_window_from_db(DB_PATH, limit=30)
-            if df_win is not None and not df_win.empty and len(df_win) >= 5:
-                feats = extract_features(df_win)
-                if feats is not None and not feats.empty:
-                    pred = predictor.predict(feats)
-                    if pred:
-                        return {"workload": pred["workload"].upper(), "confidence": int(pred["confidence"])}
-    except Exception as e:
-        print(f"Fallback predictor error: {e}")
-        pass
-
-    metrics = get_live_system_metrics()
-    if metrics['cpu_pct'] > 50:
-        return {"workload": "COMPUTE_HEAVY", "confidence": 92}
-    elif metrics['disk_write_mb'] > 15:
-        return {"workload": "IO_INTENSIVE", "confidence": 88}
-    else:
-        return {"workload": "BALANCED", "confidence": 95}
+    return {
+        "workload": "IDLE",
+        "state": "IDLE",
+        "cpu_attribution": 0.0,
+        "ram_attribution": 0.0,
+        "score": 0.0,
+    }
 
 
 def get_latest_focusos_state():
-    """Fetches the most recent workload state and explanation from DB."""
-    if not get_daemon_status().get("is_running"):
-        return None
+    """Fetches the most recent deterministic workload state snapshot from SQLite workload_events."""
     try:
         if os.path.exists(DB_PATH):
             conn = sqlite3.connect(DB_PATH, timeout=2.0)
-            # Handle schema where explanation column might not exist yet
-            try:
-                row = conn.execute("SELECT workload, confidence, actions, explanation FROM focusos_events ORDER BY rowid DESC LIMIT 1").fetchone()
-            except sqlite3.OperationalError:
-                row = conn.execute("SELECT workload, confidence, actions, '' as explanation FROM focusos_events ORDER BY rowid DESC LIMIT 1").fetchone()
+            cur = conn.cursor()
+            row = cur.execute(
+                "SELECT workload, state, cpu_attribution, ram_attribution, score, "
+                "system_cpu, system_memory, top_process, evidence, consecutive_cycles "
+                "FROM workload_events ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
             conn.close()
             
             if row:
-                workload, confidence, actions_raw, explanation = row
+                workload, st, cpu_attr, ram_attr, score, sys_cpu, sys_mem, top_proc, ev_raw, cycles = row
                 try:
-                    actions = json.loads(actions_raw)
+                    evidence = json.loads(ev_raw)
                 except Exception:
-                    actions = []
+                    evidence = []
                 return {
                     "workload": workload,
-                    "confidence": confidence,
-                    "explanation": explanation,
-                    "actions": actions
+                    "state": st,
+                    "cpu_attribution": float(cpu_attr or 0.0),
+                    "ram_attribution": float(ram_attr or 0.0),
+                    "score": float(score or 0.0),
+                    "system_cpu": float(sys_cpu or 0.0),
+                    "system_memory": float(sys_mem or 0.0),
+                    "top_process": top_proc,
+                    "evidence": evidence,
+                    "consecutive_cycles": cycles,
                 }
     except Exception:
         pass
@@ -407,45 +385,37 @@ def get_processor_affinity_matrix():
 
 
 def get_focusos_events():
-    """Returns optimization events log dynamically from database."""
-    if not get_daemon_status().get("is_running"):
-        return None
+    """Returns optimization actions log dynamically from optimization_events table."""
     try:
         if os.path.exists(DB_PATH):
             conn = sqlite3.connect(DB_PATH, timeout=2.0)
-            df = pd.read_sql("SELECT timestamp, workload, actions FROM focusos_events ORDER BY rowid DESC LIMIT 20", conn)
+            df = pd.read_sql(
+                "SELECT timestamp, pid, process_name, workload, action, old_value, new_value, reason, success "
+                "FROM optimization_events ORDER BY rowid DESC LIMIT 20",
+                conn
+            )
             conn.close()
             
             if not df.empty:
                 events = []
                 for _, r in df.iterrows():
-                    ts = _parse_timestamp(r['timestamp'])
-                    actions = []
-                    try:
-                        actions = json.loads(r['actions'])
-                    except Exception:
-                        pass
+                    ts = _parse_timestamp(r["timestamp"])
+                    p_name = r["process_name"] or "System"
+                    pid = r["pid"]
+                    act = r["action"]
+                    old_v = r["old_value"]
+                    new_v = r["new_value"]
+                    reason = r["reason"]
                     
-                    if actions:
-                        # Append each action as a separate event
-                        for act in actions:
-                            evt_type = "OPT"
-                            act_lower = act.lower()
-                            if "nice" in act_lower or "priorit" in act_lower:
-                                evt_type = "PRIO"
-                            elif "core" in act_lower or "pinned" in act_lower or "affinity" in act_lower:
-                                evt_type = "SCHED"
-                            elif "io" in act_lower or "network" in act_lower:
-                                evt_type = "IO"
-                                
-                            events.append({
-                                "time": ts,
-                                "type": evt_type,
-                                "message": act
-                            })
-                
-                if events:
-                    return events
+                    msg = f"{p_name} (PID {pid}): {act} [{old_v} -> {new_v}] — {reason}"
+                    evt_type = "PRIO" if "nice" in act.lower() else "SCHED"
+                    
+                    events.append({
+                        "time": ts,
+                        "type": evt_type,
+                        "message": msg
+                    })
+                return events
     except Exception:
         pass
 
