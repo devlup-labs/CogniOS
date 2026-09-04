@@ -23,6 +23,21 @@ CALLS = ["zoom", "teams", "slack", "discord", "skype", "webex"]
 IDES = ["code", "code-insiders", "sublime", "vim", "nvim"]
 GAMES = ["steam", "csgo", "dota2", "hl2_linux", "minecraft"]
 
+# FocusOS Rule Engine Config
+RULE_CPU_ACTIVE_THRESHOLD = 2.0   # process CPU% to be "relevant"
+RULE_RAM_ACTIVE_THRESHOLD = 0.5   # process RAM% to be "relevant"
+RULE_SYSTEM_CPU_CONTENTION = 35.0  # system CPU% before optimization triggers
+RULE_ATTRIBUTION_THRESHOLD = 0.40  # workload must own >=40% of active CPU
+RULE_PERSISTENCE_COUNT = 3     # consecutive cycles before CONFIRMED
+RULE_COOLDOWN_SEC = 45    # seconds between policy changes
+RULE_HISTORY_LEN = 8     # rolling history window size
+RULE_MIN_EVIDENCE_SCORE = 1.5   # minimum combined evidence before considering
+RULE_IDLE_CPU_THRESHOLD = 10.0  # system CPU% below which = IDLE
+RULE_SCORE_WEIGHT_CPU = 0.55  # weight for CPU attribution in final score
+RULE_SCORE_WEIGHT_RAM = 0.20  # weight for RAM attribution
+RULE_SCORE_WEIGHT_EVIDENCE = 0.15  # weight for process evidence count
+RULE_SCORE_WEIGHT_PERSISTENCE = 0.10  # weight for temporal persistence
+
 # Blackbox config
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
