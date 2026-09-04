@@ -1,3 +1,6 @@
+# ARCHIVED: ML pipeline — replaced by deterministic rule-based engine in focusos/rules/
+# Do NOT import this module from the main daemon.
+
 import pandas as pd
 import sys
 import os

@@ -1,4 +1,6 @@
 """
+# ARCHIVED: ML pipeline — replaced by deterministic rule-based engine in focusos/rules/
+# Do NOT import this module from the main daemon.
 classifier.py — FocusOS XGBoost Workload Classifier (IdeaPad 22-Core Edition)
 ==============================================================================
 Trains a direct supervised XGBoost classifier on the 22-feature IdeaPad
