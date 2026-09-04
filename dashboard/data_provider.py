@@ -330,8 +330,8 @@ def get_latest_focusos_state():
             conn = sqlite3.connect(DB_PATH, timeout=2.0)
             cur = conn.cursor()
             row = cur.execute(
-                "SELECT workload, state, cpu_attribution, ram_attribution, score, "
-                "system_cpu, system_memory, top_process, evidence, consecutive_cycles "
+                "SELECT workload, state, cpu_attribution, ram_attribution, workload_score, "
+                "system_cpu, system_memory, top_process, evidence_json, persistence "
                 "FROM workload_events ORDER BY rowid DESC LIMIT 1"
             ).fetchone()
             conn.close()
@@ -339,7 +339,7 @@ def get_latest_focusos_state():
             if row:
                 workload, st, cpu_attr, ram_attr, score, sys_cpu, sys_mem, top_proc, ev_raw, cycles = row
                 try:
-                    evidence = json.loads(ev_raw)
+                    evidence = json.loads(ev_raw) if ev_raw else []
                 except Exception:
                     evidence = []
                 return {
@@ -354,7 +354,8 @@ def get_latest_focusos_state():
                     "evidence": evidence,
                     "consecutive_cycles": cycles,
                 }
-    except Exception:
+    except Exception as e:
+        print(f"[get_latest_focusos_state] error: {e}")
         pass
     
     return None

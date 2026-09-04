@@ -14,6 +14,7 @@ from db import (
 from collectors.layer1_system import collect_layer1_metrics
 from collectors.layer2_process import collect_layer2_metrics
 from config import DB_PATH
+import config
 from logging_utils import get_layer_logger
 
 from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_telemetry
@@ -179,15 +180,31 @@ def run_rule_engine_loop(stop_event):
             try:
                 # Sample active processes via layer 2 collector
                 top_cpu, top_mem, baselines = collect_layer2_metrics(baselines)
-                active_processes = top_cpu + top_mem
+                # Normalize field names: layer2 uses cpu_peak/ram_peak,
+                # rule engine expects cpu_percent/memory_rss_mb
+                raw_procs = top_cpu + top_mem
+                active_processes = [
+                    {
+                        "pid": p.get("pid"),
+                        "name": p.get("name", ""),
+                        "cpu_percent": float(p.get("cpu_peak") or p.get("cpu_percent") or 0.0),
+                        "memory_rss_mb": float(p.get("ram_peak") or p.get("memory_rss_mb") or 0.0),
+                    }
+                    for p in raw_procs
+                ]
 
                 # Get latest system metrics snapshot
                 sys_metrics = collect_layer1_metrics()
                 now = time.time()
 
+                # memory_used comes in bytes from layer1 — convert to MB for attribution math
+                sys_metrics_norm = dict(sys_metrics)
+                mem_bytes = sys_metrics_norm.get("memory_used", 0)
+                sys_metrics_norm["memory_used"] = float(mem_bytes) / (1024 * 1024) if mem_bytes > 1024 else float(mem_bytes)
+
                 # Evaluate against deterministic workload rules
-                scores = evaluate(active_processes, sys_metrics)
-                state = state_manager.update(scores, sys_metrics)
+                scores = evaluate(active_processes, sys_metrics_norm)
+                state = state_manager.update(scores, sys_metrics_norm)
 
                 # Persist telemetry event snapshot
                 db.write_workload_event(
@@ -199,7 +216,7 @@ def run_rule_engine_loop(stop_event):
                     state["ram_attribution"],
                     state["score"],
                     sys_metrics.get("cpu_usage_percent", 0.0),
-                    sys_metrics.get("memory_used", 0.0),
+                    sys_metrics_norm.get("memory_used", 0.0),
                     state["top_process"],
                     json.dumps(state["evidence"]),
                     state["consecutive_cycles"],
@@ -208,7 +225,8 @@ def run_rule_engine_loop(stop_event):
                 logger.info(
                     f"FocusOS State: {state['state']} | Workload: {state['workload']} | "
                     f"CPU Attr: {state['cpu_attribution']:.0%} | RAM Attr: {state['ram_attribution']:.0%} | "
-                    f"Score: {state['score']:.2f}"
+                    f"Score: {state['score']:.2f} | "
+                    f"Procs: {sum(len(s['matched_processes']) for s in scores.values())}"
                 )
 
                 # Trigger safety-gated policy optimization on confirmed workload under CPU contention
@@ -220,6 +238,8 @@ def run_rule_engine_loop(stop_event):
                         state_manager.mark_optimized()
                         if actions:
                             logger.info(f"Applied optimization policy for {state['workload']}: {len(actions)} actions executed.")
+                    else:
+                        logger.info(f"Workload CONFIRMED ({state['workload']}) but CPU contention below threshold ({sys_cpu:.1f}% < {contention_threshold}%), skipping optimization.")
 
                 elif state["state"] == WorkloadState.RESTORING:
                     restored = restore_workload_state(conn)

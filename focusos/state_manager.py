@@ -47,8 +47,13 @@ class WorkloadStateManager:
         system_cpu = float(system_metrics.get("cpu_usage_percent", 0.0))
         idle_threshold = getattr(config, "RULE_IDLE_CPU_THRESHOLD", 10.0)
 
-        # Check system IDLE state first
-        if system_cpu < idle_threshold and not any(res["cpu_attribution"] > 0.3 for res in evaluation_scores.values()):
+        # Check system IDLE: only go IDLE if CPU is very low AND no workload process matches anything
+        has_active_workload = any(
+            res["process_count"] > 0 and res["score"] > 0.12
+            for res in evaluation_scores.values()
+        )
+
+        if system_cpu < idle_threshold and not has_active_workload:
             if self.current_workload != "IDLE":
                 self.current_state = WorkloadState.RESTORING
                 self.current_workload = "IDLE"
@@ -75,10 +80,23 @@ class WorkloadStateManager:
 
         if top_res:
             top_proc_name = top_res["matched_processes"][0]["name"] if top_res["matched_processes"] else "N/A"
-            evidence_items = [
-                f"{p['name']} (PID {p['pid']}, CPU {p['cpu_percent']}%)"
-                for p in top_res["matched_processes"][:5]
-            ]
+            evidence_items = []
+            for p in top_res["matched_processes"][:5]:
+                cpu_pct = p.get('cpu_percent', 0.0)
+                ram_mb = p.get('memory_rss_mb', 0.0)
+                evidence_items.append(
+                    f"{p['name']} (PID {p['pid']}) — CPU: {cpu_pct:.1f}%, RAM: {ram_mb:.0f} MB"
+                )
+            # Add aggregate evidence lines
+            evidence_items.append(
+                f"{top_res['process_count']} {candidate_workload} process(es) attributed — "
+                f"CPU: {top_res['cpu_attribution']:.0%}, RAM: {top_res['ram_attribution']:.0%}"
+            )
+            if self.consecutive_count >= 1:
+                evidence_items.append(f"Sustained for {self.consecutive_count} consecutive cycles")
+            if system_cpu >= getattr(config, "RULE_SYSTEM_CPU_CONTENTION", 35.0):
+                evidence_items.append(f"System CPU contention active: {system_cpu:.1f}%")
+
             self.latest_metrics = {
                 "cpu_attribution": top_res["cpu_attribution"],
                 "ram_attribution": top_res["ram_attribution"],
