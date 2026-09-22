@@ -61,6 +61,10 @@ def compute_workload_score(
     
     Score = w_c * CPU_attr + w_m * RAM_attr + w_e * Evidence + w_t * Persistence
     """
+    # If no workload evidence or resource attribution is present, score is strictly 0.0
+    if cpu_attr <= 0.0 and ram_attr <= 0.0 and evidence_score <= 0.0:
+        return 0.0
+
     if weights is None:
         weights = {
             "cpu": getattr(config, "RULE_SCORE_WEIGHT_CPU", 0.55),
@@ -88,6 +92,7 @@ if __name__ == "__main__":
     assert compute_cpu_attribution(100.0, 80.0) == 1.0
     assert compute_ram_attribution(2000.0, 8000.0) == 0.25
     assert compute_evidence_score(3, "COMPILATION") == 3.0
+    assert compute_workload_score(0.0, 0.0, 0.0, 1.0) == 0.0
     score = compute_workload_score(0.75, 0.25, 3.0, 1.0)
     assert 0.0 <= score <= 1.0
     print(f"[✔] attribution math tests passed successfully (sample score: {score}).")

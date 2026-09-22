@@ -50,7 +50,7 @@ class WorkloadStateManager:
 
         # Check system IDLE: only go IDLE if CPU is very low AND no workload process matches anything
         has_active_workload = any(
-            res["process_count"] > 0 and res["score"] > 0.12
+            res["process_count"] > 0 and res["score"] > 0.05
             for res in evaluation_scores.values()
         )
 
