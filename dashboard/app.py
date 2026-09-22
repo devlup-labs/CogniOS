@@ -534,6 +534,14 @@ def main():
     with t2:
         st.markdown('<div class="emergency-btn-box">', unsafe_allow_html=True)
         if st.button("Emergency Stop", key="emergency_stop", use_container_width=True):
+            # Rollback any modified process priorities before killing daemons
+            restored_count = 0
+            try:
+                from focusos.process_state import restore_all
+                restored_count = restore_all()
+            except Exception:
+                pass
+
             killed_count = 0
             current_pid = os.getpid()
             for proc in psutil.process_iter():
@@ -558,7 +566,8 @@ def main():
             except Exception:
                 pass
 
-            st.success(f"🚨 EMERGENCY STOP ACTIVATED: Successfully terminated all active background telemetry & OS Doctor daemons.")
+            restore_msg = f" and restored {restored_count} process priorities" if restored_count > 0 else ""
+            st.success(f"🚨 EMERGENCY STOP ACTIVATED: Successfully terminated all active background telemetry & OS Doctor daemons{restore_msg}.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Main Page Routing ---
