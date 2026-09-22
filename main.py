@@ -14,12 +14,15 @@ _stop_watchdog = threading.Event()
 
 
 def _get_venv_python():
-    """Returns the path to the project's .venv python executable if it exists."""
-    if sys.platform == "win32":
-        venv_py = os.path.join(BASE_DIR, ".venv", "Scripts", "python.exe")
-    else:
-        venv_py = os.path.join(BASE_DIR, ".venv", "bin", "python")
-    return venv_py if os.path.isfile(venv_py) else None
+    """Returns the path to the virtual environment python executable if it exists."""
+    candidates = [
+        os.path.join(BASE_DIR, ".venv", "Scripts", "python.exe") if sys.platform == "win32" else os.path.join(BASE_DIR, ".venv", "bin", "python"),
+        os.path.expanduser("~/venv/bin/python"),
+    ]
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 def _ensure_environment():
