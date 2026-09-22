@@ -1,5 +1,8 @@
 """Semantic workload bucket definitions and process matching rules."""
 
+import os
+import re
+
 WORKLOAD_BUCKETS = {
     "COMPILATION": {
         "gcc", "g++", "cc1", "cc1plus", "clang", "clang++",
@@ -39,15 +42,16 @@ PROTECTED_NAMES = {
 
 
 def match_process_to_bucket(proc_name: str) -> str | None:
-    """Matches a process name to a workload bucket using substring / token matching."""
+    """Matches a process name to a workload bucket using delimited token / word-boundary matching."""
     if not proc_name or not isinstance(proc_name, str):
         return None
 
-    name_lower = proc_name.strip().lower()
+    name_lower = os.path.basename(proc_name.strip().lower())
 
     for bucket, tokens in WORKLOAD_BUCKETS.items():
         for token in tokens:
-            if token in name_lower:
+            pattern = rf"(^|[^a-z0-9]){re.escape(token)}([^a-z0-9]|$)"
+            if re.search(pattern, name_lower):
                 return bucket
 
     return None
@@ -58,16 +62,24 @@ def is_protected_process(proc_name: str) -> bool:
     if not proc_name or not isinstance(proc_name, str):
         return True
 
-    name_lower = proc_name.strip().lower()
-    return any(prot in name_lower for prot in PROTECTED_NAMES)
+    name_lower = os.path.basename(proc_name.strip().lower())
+    for prot in PROTECTED_NAMES:
+        pattern = rf"(^|[^a-z0-9]){re.escape(prot)}([^a-z0-9]|$)"
+        if re.search(pattern, name_lower):
+            return True
+
+    return False
 
 
 if __name__ == "__main__":
     assert match_process_to_bucket("gcc") == "COMPILATION"
     assert match_process_to_bucket("cc1plus") == "COMPILATION"
     assert match_process_to_bucket("chrome") == "BROWSING"
+    assert match_process_to_bucket("google-chrome") == "BROWSING"
     assert match_process_to_bucket("code") == "CODING"
+    assert match_process_to_bucket("bash") is None
     assert match_process_to_bucket("random_proc") is None
     assert is_protected_process("systemd") is True
     assert is_protected_process("gcc") is False
+    assert is_protected_process("uninitialized") is False
     print("[✔] process_vocab tests passed successfully.")
