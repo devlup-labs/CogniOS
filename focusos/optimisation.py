@@ -154,9 +154,6 @@ def apply_policy(policy_dict: dict, state: dict, conn=None) -> list[dict]:
             if is_protected(proc):
                 continue
 
-            # Save initial scheduling state before modification
-            save_original(proc, workload)
-
             old_nice = proc.nice()
             new_nice = old_nice
 
@@ -169,6 +166,8 @@ def apply_policy(policy_dict: dict, state: dict, conn=None) -> list[dict]:
 
             if is_target and target_nice != 0:
                 new_nice = target_nice
+                # Save initial scheduling state before modification
+                save_original(proc, workload)
                 try:
                     proc.nice(target_nice)
                     if policy_dict.get("affinity_pin") and fg_cores:
@@ -200,6 +199,8 @@ def apply_policy(policy_dict: dict, state: dict, conn=None) -> list[dict]:
 
             elif not is_target and bg_nice != 0 and old_nice < bg_nice:
                 new_nice = bg_nice
+                # Save initial scheduling state before modification
+                save_original(proc, workload)
                 try:
                     proc.nice(bg_nice)
                     if bg_cores:
