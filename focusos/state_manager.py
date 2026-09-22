@@ -39,6 +39,7 @@ class WorkloadStateManager:
             "score": 0.0,
             "top_process": "N/A",
             "evidence": [],
+            "target_pids": [],
         }
 
     def update(self, evaluation_scores: dict, system_metrics: dict) -> dict:
@@ -97,12 +98,17 @@ class WorkloadStateManager:
             if system_cpu >= getattr(config, "RULE_SYSTEM_CPU_CONTENTION", 35.0):
                 evidence_items.append(f"System CPU contention active: {system_cpu:.1f}%")
 
+            target_pids = [
+                p["pid"] for p in top_res.get("matched_processes", [])
+                if isinstance(p, dict) and p.get("pid") is not None
+            ]
             self.latest_metrics = {
                 "cpu_attribution": top_res["cpu_attribution"],
                 "ram_attribution": top_res["ram_attribution"],
                 "score": top_res["score"],
                 "top_process": top_proc_name,
                 "evidence": evidence_items,
+                "target_pids": target_pids,
             }
 
         # Track consecutive occurrences of the top workload
@@ -148,6 +154,7 @@ class WorkloadStateManager:
             "score": self.latest_metrics["score"],
             "top_process": self.latest_metrics["top_process"],
             "evidence": self.latest_metrics["evidence"],
+            "target_pids": self.latest_metrics.get("target_pids", []),
         }
 
 

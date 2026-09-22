@@ -11,7 +11,7 @@ import psutil
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import DB_PATH, RULE_SYSTEM_CPU_CONTENTION
-from focusos.rules.process_vocab import is_protected_process
+from focusos.rules.process_vocab import is_protected_process, match_process_to_bucket
 from focusos.process_state import save_original, restore_all, restore_process, is_tracked
 import db
 
@@ -161,10 +161,11 @@ def apply_policy(policy_dict: dict, state: dict, conn=None) -> list[dict]:
             new_nice = old_nice
 
             # Check if this process belongs to the active workload evidence
-            is_target = any(
-                isinstance(item, dict) and item.get("pid") == pid
-                for item in state.get("evidence", [])
-            ) or (p_name.lower() in workload.lower())
+            target_pids = set(state.get("target_pids", []))
+            is_target = (
+                pid in target_pids
+                or match_process_to_bucket(p_name) == workload
+            )
 
             if is_target and target_nice != 0:
                 new_nice = target_nice
