@@ -66,7 +66,13 @@ def evaluate(processes: list[dict], system_metrics: dict) -> dict:
         cpu = float(proc.get("cpu_percent", 0.0) or 0.0)
         
         # Handle RAM info formats (MB float or psutil struct/dict)
-        ram_mb = float(proc.get("memory_rss_mb", 0.0) or proc.get("memory_info", {}).get("rss", 0.0) / (1024 * 1024) if isinstance(proc.get("memory_info"), dict) else 0.0)
+        ram_mb = float(proc.get("memory_rss_mb") or 0.0)
+        if ram_mb <= 0.0:
+            mem_info = proc.get("memory_info")
+            if isinstance(mem_info, dict):
+                ram_mb = float(mem_info.get("rss", 0.0)) / (1024 * 1024)
+            elif hasattr(mem_info, "rss"):
+                ram_mb = float(mem_info.rss) / (1024 * 1024)
         
         matched_bucket = match_process_to_bucket(name)
 
