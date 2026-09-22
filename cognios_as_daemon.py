@@ -180,18 +180,21 @@ def run_rule_engine_loop(stop_event):
             try:
                 # Sample active processes via layer 2 collector
                 top_cpu, top_mem, baselines = collect_layer2_metrics(baselines)
-                # Normalize field names: layer2 uses cpu_peak/ram_peak,
-                # rule engine expects cpu_percent/memory_rss_mb
-                raw_procs = top_cpu + top_mem
-                active_processes = [
-                    {
-                        "pid": p.get("pid"),
+                # Normalize field names and deduplicate processes appearing in both top_cpu and top_mem
+                seen_pids = set()
+                active_processes = []
+                for p in (top_cpu + top_mem):
+                    pid = p.get("pid")
+                    if pid is not None and pid in seen_pids:
+                        continue
+                    if pid is not None:
+                        seen_pids.add(pid)
+                    active_processes.append({
+                        "pid": pid,
                         "name": p.get("name", ""),
                         "cpu_percent": float(p.get("cpu_peak") or p.get("cpu_percent") or 0.0),
                         "memory_rss_mb": float(p.get("ram_peak") or p.get("memory_rss_mb") or 0.0),
-                    }
-                    for p in raw_procs
-                ]
+                    })
 
                 # Get latest system metrics snapshot
                 sys_metrics = collect_layer1_metrics()
