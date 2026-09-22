@@ -420,25 +420,7 @@ def get_focusos_events():
     except Exception:
         pass
 
-    # Fallback dummy events
-    now = time.time()
-    return [
-        {
-            "time": time.strftime("%H:%M:%S", time.localtime(now - 120)),
-            "type": "SCHED",
-            "message": "Classified workload as COMPUTE_HEAVY. P-Cores pinned to PID 10401 (gcc)."
-        },
-        {
-            "time": time.strftime("%H:%M:%S", time.localtime(now - 65)),
-            "type": "PRIO",
-            "message": "Adjusted nice value to -10 for high-priority worker processes."
-        },
-        {
-            "time": time.strftime("%H:%M:%S", time.localtime(now - 10)),
-            "type": "IO",
-            "message": "Applied ionice realtime class to database writer thread."
-        }
-    ]
+    return []
 
 
 # --- BlackBox Data Methods ---
