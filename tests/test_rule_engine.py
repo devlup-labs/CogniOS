@@ -148,6 +148,43 @@ class TestRuleEngine(unittest.TestCase):
             self.assertTrue(any(a["pid"] == 201 and "nice -> -10" in a["action"] for a in actions))
             self.assertTrue(any(a["pid"] == 202 and "depress_nice -> 7" in a["action"] for a in actions))
 
+    def test_09_workload_switch_transition(self):
+        """Test that switching workloads while in OPTIMIZED state triggers RESTORING before OBSERVING/CONFIRMED."""
+        sm = WorkloadStateManager(persistence_count=2, cooldown_sec=1)
+        eval_comp = {
+            "COMPILATION": {
+                "cpu_attribution": 0.8, "ram_attribution": 0.2, "evidence_score": 1.0,
+                "score": 0.8, "process_count": 1, "matched_processes": [{"pid": 1, "name": "gcc", "cpu_percent": 50, "memory_rss_mb": 100}]
+            }
+        }
+        eval_browse = {
+            "BROWSING": {
+                "cpu_attribution": 0.8, "ram_attribution": 0.2, "evidence_score": 1.0,
+                "score": 0.8, "process_count": 1, "matched_processes": [{"pid": 2, "name": "chrome", "cpu_percent": 50, "memory_rss_mb": 100}]
+            }
+        }
+        sys_metrics = {"cpu_usage_percent": 60.0}
+
+        # 1. Establish and optimize COMPILATION
+        sm.update(eval_comp, sys_metrics)
+        st = sm.update(eval_comp, sys_metrics)
+        self.assertEqual(st["state"], WorkloadState.CONFIRMED)
+        sm.mark_optimized()
+        self.assertEqual(sm.current_state, WorkloadState.OPTIMIZED)
+
+        # 2. Switch to BROWSING -> cycle 1 must trigger RESTORING
+        st1 = sm.update(eval_browse, sys_metrics)
+        self.assertEqual(st1["state"], WorkloadState.RESTORING)
+        self.assertEqual(st1["workload"], "BROWSING")
+
+        # 3. Cycle 2 sustained BROWSING -> transitions to OBSERVING
+        st2 = sm.update(eval_browse, sys_metrics)
+        self.assertEqual(st2["state"], WorkloadState.OBSERVING)
+
+        # 4. Cycle 3 sustained BROWSING -> transitions to CONFIRMED
+        st3 = sm.update(eval_browse, sys_metrics)
+        self.assertEqual(st3["state"], WorkloadState.CONFIRMED)
+
 
 if __name__ == "__main__":
     unittest.main()

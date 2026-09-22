@@ -115,25 +115,32 @@ class WorkloadStateManager:
         if candidate_workload == self.current_workload:
             self.consecutive_count += 1
         else:
+            prev_state = self.current_state
             self.current_workload = candidate_workload
             self.consecutive_count = 1
-            if self.current_state != WorkloadState.OPTIMIZED:
+            if prev_state == WorkloadState.OPTIMIZED:
+                self.current_state = WorkloadState.RESTORING
+                self.last_state_change = now
+            else:
                 self.current_state = WorkloadState.OBSERVING
 
         # Evaluate state transitions
-        if self.current_state == WorkloadState.OBSERVING:
+        if self.current_state == WorkloadState.RESTORING:
+            if self.consecutive_count > 1:
+                self.current_state = WorkloadState.OBSERVING
+                self.last_state_change = now
+
+        elif self.current_state == WorkloadState.OBSERVING:
             if self.consecutive_count >= self.persistence_count:
                 self.current_state = WorkloadState.CONFIRMED
                 self.last_state_change = now
 
         elif self.current_state == WorkloadState.OPTIMIZED:
-            # Cooldown check: preserve optimization state unless cooldown expired or workload changed cleanly
+            # Cooldown check: preserve optimization state unless cooldown expired or workload changed
             time_in_opt = now - self.last_optimized_time
             if time_in_opt >= self.cooldown_sec and self.consecutive_count >= self.persistence_count:
-                # Cooldown expired and workload is confirmed persistent
                 pass
-            elif self.consecutive_count == 1 and time_in_opt < self.cooldown_sec:
-                # Still within cooldown window; transition back to observing candidate
+            elif self.consecutive_count == 1:
                 self.current_state = WorkloadState.OBSERVING
 
         return self.get_current_state()
