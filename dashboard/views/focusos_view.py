@@ -17,21 +17,20 @@ def _pct_bar(value: float, color: str = "#00f5c4") -> str:
 
 
 def render():
-    workload_data = dp.get_focusos_detected_workload()
     affinity_data = dp.get_processor_affinity_matrix()
     events = dp.get_focusos_events()
     state = dp.get_latest_focusos_state()
 
-    current_workload = workload_data.get("workload", "IDLE")
-    current_state    = workload_data.get("state", "IDLE")
-    cpu_attr         = workload_data.get("cpu_attribution", 0.0)
-    ram_attr         = workload_data.get("ram_attribution", 0.0)
-    score            = workload_data.get("score", 0.0)
+    current_workload = state.get("workload", "IDLE") if state else "IDLE"
+    current_state    = state.get("state", "IDLE") if state else "IDLE"
+    cpu_attr         = state.get("cpu_attribution", 0.0) if state else 0.0
+    ram_attr         = state.get("ram_attribution", 0.0) if state else 0.0
+    score            = state.get("score", 0.0) if state else 0.0
 
     top_proc          = state.get("top_process", "N/A") if state else "N/A"
     evidence_list     = state.get("evidence", []) if state else []
     consecutive_cycles = state.get("consecutive_cycles", 0) if state else 0
-    sys_cpu           = state.get("system_cpu", psutil.cpu_percent(interval=0.1)) if state else psutil.cpu_percent(interval=0.1)
+    sys_cpu           = state.get("system_cpu") if (state and state.get("system_cpu") is not None) else psutil.cpu_percent(interval=None)
     sys_mem_mb        = state.get("system_memory", 0.0) if state else 0.0
 
     state_badge_color = {
