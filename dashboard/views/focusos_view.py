@@ -141,27 +141,25 @@ def render():
         p_active = affinity_data.get("p_active", 0)
         e_active = affinity_data.get("e_active", 0)
 
-        # Show live top processes from psutil as a direct fallback
+        # Show live top processes from data provider
         top_procs_html = ""
         try:
-            procs = sorted(
-                [p.info for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"])
-                 if p.info.get("cpu_percent", 0) > 0.5],
-                key=lambda x: x.get("cpu_percent", 0),
-                reverse=True
-            )[:5]
+            procs = dp.get_top_processes_list(limit=5)
             for p in procs:
-                cpu_p = p.get("cpu_percent", 0.0)
-                mem_p = p.get("memory_percent", 0.0)
+                cpu_p = p.get("cpu", 0.0)
+                mem_p = p.get("ram", 0.0)
+                p_name = p.get("name", "Unknown")[:18]
                 top_procs_html += (
                     f"<div style='display:flex; justify-content:space-between; font-size:11px; "
                     f"color:#cbd5e1; padding:4px 0; border-bottom:1px solid #0d121c;'>"
-                    f"<span style='font-family:JetBrains Mono; color:#e2e8f0;'>{p['name'][:18]}</span>"
+                    f"<span style='font-family:JetBrains Mono; color:#e2e8f0;'>{p_name}</span>"
                     f"<span style='color:#00f5c4;'>{cpu_p:.1f}%</span>"
                     f"<span style='color:#38bdf8;'>{mem_p:.1f}%</span></div>"
                 )
         except Exception:
             top_procs_html = "<div style='font-size:11px; color:#64748b;'>N/A</div>"
+        if not top_procs_html:
+            top_procs_html = "<div style='font-size:11px; color:#64748b; font-style:italic;'>No active processes detected.</div>"
 
         st.html(f"""
         <div style="background:#0d121c; border-radius:14px; padding:24px; min-height:400px; box-shadow:0 6px 24px rgba(0,0,0,0.3);">
