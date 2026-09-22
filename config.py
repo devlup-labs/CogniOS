@@ -25,7 +25,7 @@ GAMES = ["steam", "csgo", "dota2", "hl2_linux", "minecraft"]
 
 # FocusOS Rule Engine Config
 RULE_CPU_ACTIVE_THRESHOLD = 2.0   # process CPU% to be "relevant"
-RULE_RAM_ACTIVE_THRESHOLD = 0.5   # process RAM% to be "relevant"
+RULE_RAM_ACTIVE_THRESHOLD = 150.0  # process RAM RSS in MB to be "relevant"
 RULE_SYSTEM_CPU_CONTENTION = 35.0  # system CPU% before optimization triggers
 RULE_ATTRIBUTION_THRESHOLD = 0.40  # workload must own >=40% of active CPU
 RULE_PERSISTENCE_COUNT = 3     # consecutive cycles before CONFIRMED

@@ -53,7 +53,10 @@ def evaluate(processes: list[dict], system_metrics: dict) -> dict:
     unknown_procs = []
 
     cpu_threshold = getattr(config, "RULE_CPU_ACTIVE_THRESHOLD", 2.0)
-    ram_threshold = getattr(config, "RULE_RAM_ACTIVE_THRESHOLD", 0.5)
+    ram_threshold = getattr(config, "RULE_RAM_ACTIVE_THRESHOLD", 150.0)
+    if ram_threshold <= 1.0 and system_ram_mb > 1.0:
+        # Backward-compatibility: if configured as percentage/ratio <= 1.0, scale to system MB
+        ram_threshold = (ram_threshold / 100.0) * system_ram_mb if ram_threshold > 0.05 else ram_threshold * system_ram_mb
 
     for proc in processes:
         if not isinstance(proc, dict):
