@@ -196,19 +196,12 @@ def render():
         """)
 
     # Bottom Event Log
-    st.html("""
-    <div style="background:#0d121c; border-radius:14px; padding:24px; margin-top:24px; box-shadow:0 6px 24px rgba(0,0,0,0.3);">
-        <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px;">
-            <span style="color:#94a3b8;"><i class="fa-solid fa-clock-rotate-left"></i></span>
-            <h3 style="margin:0; font-size:18px; font-weight:700; color:#ffffff;">Deterministic Optimization Event Log</h3>
-        </div>
-    """)
-
+    event_rows_html = ""
     shown = 0
     for ev in (events or []):
         badge_bg = "rgba(0,245,196,0.12)"  if ev["type"] == "SCHED" else "rgba(56,189,248,0.12)"
         badge_fg = "#00f5c4"               if ev["type"] == "SCHED" else "#38bdf8"
-        st.html(f"""
+        event_rows_html += f"""
         <div style="display:flex; align-items:flex-start; gap:16px; padding:10px 0;
                     border-bottom:1px solid #131b28; font-family:'JetBrains Mono'; font-size:12px;">
             <span style="color:#64748b; white-space:nowrap;">{ev['time']}</span>
@@ -216,10 +209,18 @@ def render():
                         padding:2px 8px; font-weight:700; font-size:11px; white-space:nowrap;">[{ev['type']}]</span>
             <span style="color:#e2e8f0; word-break:break-word;">{ev['message']}</span>
         </div>
-        """)
+        """
         shown += 1
 
     if shown == 0:
-        st.html("<div style='font-size:13px; color:#64748b; font-style:italic; padding:12px 0;'>No optimization events yet. Daemon is observing — policy actions fire when workload is CONFIRMED and CPU contention exceeds threshold.</div>")
+        event_rows_html = "<div style='font-size:13px; color:#64748b; font-style:italic; padding:12px 0;'>No optimization events yet. Daemon is observing — policy actions fire when workload is CONFIRMED and CPU contention exceeds threshold.</div>"
 
-    st.html("</div>")
+    st.html(f"""
+    <div style="background:#0d121c; border-radius:14px; padding:24px; margin-top:24px; box-shadow:0 6px 24px rgba(0,0,0,0.3);">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px;">
+            <span style="color:#94a3b8;"><i class="fa-solid fa-clock-rotate-left"></i></span>
+            <h3 style="margin:0; font-size:18px; font-weight:700; color:#ffffff;">Deterministic Optimization Event Log</h3>
+        </div>
+        {event_rows_html}
+    </div>
+    """)
