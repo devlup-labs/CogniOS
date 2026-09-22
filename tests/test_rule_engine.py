@@ -14,10 +14,16 @@ from focusos.process_state import save_original, restore_process, is_tracked, cl
 class TestRuleEngine(unittest.TestCase):
 
     def test_01_process_vocabulary(self):
-        """Test vocabulary keyword matching and protection rules."""
+        """Test vocabulary keyword matching, word boundary isolation, and protection rules."""
         self.assertEqual(match_process_to_bucket("gcc"), "COMPILATION")
         self.assertEqual(match_process_to_bucket("g++"), "COMPILATION")
+        self.assertEqual(match_process_to_bucket("clang-14"), "COMPILATION")
+        # Word boundary tests: google-chrome should match BROWSING, not COMPILATION (via 'go')
+        self.assertEqual(match_process_to_bucket("google-chrome"), "BROWSING")
         self.assertEqual(match_process_to_bucket("chrome"), "BROWSING")
+        # bash should NOT match COMPILATION (previously collided with GNU assembler 'as')
+        self.assertIsNone(match_process_to_bucket("bash"))
+        self.assertEqual(match_process_to_bucket("as"), "COMPILATION")
         self.assertEqual(match_process_to_bucket("code"), "CODING")
         self.assertEqual(match_process_to_bucket("zoom"), "VIDEO_CALL")
         self.assertEqual(match_process_to_bucket("steam"), "GAMING")
@@ -25,7 +31,10 @@ class TestRuleEngine(unittest.TestCase):
 
         self.assertTrue(is_protected_process("systemd"))
         self.assertTrue(is_protected_process("pipewire"))
+        self.assertTrue(is_protected_process("gnome-shell"))
+        self.assertTrue(is_protected_process("Xorg"))
         self.assertFalse(is_protected_process("gcc"))
+        self.assertFalse(is_protected_process("chrome"))
 
     def test_02_attribution_math(self):
         """Test CPU and RAM attribution calculations."""
@@ -47,7 +56,7 @@ class TestRuleEngine(unittest.TestCase):
         self.assertGreater(scores["COMPILATION"]["score"], 0.5)
 
     def test_04_state_manager_transitions(self):
-        """Test temporal persistence gate (OBSERVING -> CONFIRMED)."""
+        """Test temporal persistence gate (OBSERVING -> CONFIRMED) and target_pids tracking."""
         sm = WorkloadStateManager(persistence_count=3)
         eval_data = {
             "COMPILATION": {
@@ -56,7 +65,7 @@ class TestRuleEngine(unittest.TestCase):
                 "evidence_score": 1.5,
                 "score": 0.7,
                 "process_count": 2,
-                "matched_processes": [{"pid": 10, "name": "gcc", "cpu_percent": 50.0, "memory_rss_mb": 100.0}]
+                "matched_processes": [{"pid": 101, "name": "gcc", "cpu_percent": 50.0, "memory_rss_mb": 100.0}]
             }
         }
         sys_metrics = {"cpu_usage_percent": 80.0}
@@ -72,6 +81,8 @@ class TestRuleEngine(unittest.TestCase):
         # Cycle 3 -> Persistent threshold reached
         st3 = sm.update(eval_data, sys_metrics)
         self.assertEqual(st3["state"], WorkloadState.CONFIRMED)
+        self.assertIn(101, st3.get("target_pids", []))
+        self.assertTrue(any("gcc" in item for item in st3.get("evidence", [])))
 
     def test_05_policy_mapping(self):
         """Test policy retrieval."""
@@ -94,6 +105,50 @@ class TestRuleEngine(unittest.TestCase):
         self.assertTrue(restored)
         self.assertFalse(is_tracked(current_proc.pid))
 
+    def test_07_apply_policy_prioritization(self):
+        """Test apply_policy prioritizes target processes and depresses background processes."""
+        from unittest.mock import patch
+        from focusos.optimisation import apply_policy
+
+        class MockProc:
+            def __init__(self, pid, name, nice_val=0):
+                self.pid = pid
+                self.info = {"pid": pid, "name": name}
+                self._nice = nice_val
+                self.affinity = []
+            def nice(self, val=None):
+                if val is not None:
+                    self._nice = val
+                return self._nice
+            def cpu_affinity(self, aff=None):
+                if aff is not None:
+                    self.affinity = aff
+                return self.affinity
+            def create_time(self):
+                return 1000.0
+
+        proc_target = MockProc(201, "gcc", 0)
+        proc_bg = MockProc(202, "spotify", 0)
+
+        with patch("psutil.process_iter", return_value=[proc_target, proc_bg]), \
+             patch("focusos.optimisation.is_protected", return_value=False), \
+             patch("focusos.optimisation.save_original", return_value=True):
+
+            state = {"workload": "COMPILATION", "target_pids": [201]}
+            policy = {
+                "workload": "COMPILATION",
+                "target_bucket_nice": -10,
+                "background_nice": 7,
+                "affinity_pin": True,
+            }
+
+            actions = apply_policy(policy, state, conn=None)
+            self.assertEqual(proc_target.nice(), -10)
+            self.assertEqual(proc_bg.nice(), 7)
+            self.assertTrue(any(a["pid"] == 201 and "nice -> -10" in a["action"] for a in actions))
+            self.assertTrue(any(a["pid"] == 202 and "depress_nice -> 7" in a["action"] for a in actions))
+
 
 if __name__ == "__main__":
     unittest.main()
+
