@@ -1,4 +1,4 @@
-"""FocusOS Deterministic Rule Engine Dashboard View."""
+"""FocusOS Resource Engine Dashboard View."""
 
 import re
 import streamlit as st
@@ -59,11 +59,8 @@ def render():
         <div>
             <h1 style="margin:0; font-size: 28px; font-weight: 800; color: #ffffff; display:flex; align-items:center; gap:10px;">
                 <span style="color:#00f5c4;"><i class="fa-solid fa-scale-balanced"></i></span>
-                Rule-Based Resource Attribution Engine
+                Resource Attribution Engine
             </h1>
-            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 14px; font-family: 'JetBrains Mono';">
-                FocusOS Daemon // Deterministic Process Attribution &amp; Safety Guard
-            </p>
         </div>
     </div>
     """)
@@ -92,7 +89,7 @@ def render():
                     <h3 style="margin:0; font-size:20px; font-weight:700; color:#ffffff;">
                         {workload_icon} {current_workload}
                     </h3>
-                    <p style="margin:2px 0 0 0; font-size:12px; color:#64748b;">Deterministic process-to-workload attribution</p>
+                    <p style="margin:2px 0 0 0; font-size:12px; color:#64748b;">Process workload attribution</p>
                 </div>
                 <div style="background: rgba(0,0,0,0.3); color:{state_badge_color};
                             border:1px solid {state_badge_color}; border-radius:6px;
@@ -218,7 +215,7 @@ def render():
     <div style="background:#0d121c; border-radius:14px; padding:24px; margin-top:24px; box-shadow:0 6px 24px rgba(0,0,0,0.3);">
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px;">
             <span style="color:#94a3b8;"><i class="fa-solid fa-clock-rotate-left"></i></span>
-            <h3 style="margin:0; font-size:18px; font-weight:700; color:#ffffff;">Deterministic Optimization Event Log</h3>
+            <h3 style="margin:0; font-size:18px; font-weight:700; color:#ffffff;">Optimization Event Log</h3>
         </div>
         {event_rows_html}
     </div>
