@@ -35,6 +35,7 @@ data/models/*.pt
 data/traces/*
 !data/traces/.gitkeep
 !data/models/.gitkeep
+simulation_state.json
 
 # Logs
 logs/
