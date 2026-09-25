@@ -140,11 +140,158 @@ def get_daemon_status():
     }
 
 
+SIMULATION_STATE_PATH = os.path.join(BASE_DIR, "simulation_state.json")
+
+def get_active_simulation():
+    """Returns active simulation payload if enabled, otherwise None."""
+    if os.path.exists(SIMULATION_STATE_PATH):
+        try:
+            with open(SIMULATION_STATE_PATH, "r") as f:
+                data = json.load(f)
+                if data.get("active", False):
+                    return data
+        except Exception:
+            pass
+    return None
+
+
+import math
+import random
+
+_sim_last_state_hash = None
+_sim_dynamic_history = []
+_last_sim_live_cpu = 20.0
+
+def _calculate_tick_fluctuation(workload, base_cpu, base_ram, base_read, base_write, t_sec):
+    wl = str(workload).lower()
+    if "browse" in wl:
+        cycle = math.sin(t_sec * 0.9) * 2.0 + random.gauss(0, 0.7)
+        spike = random.choices([0.0, random.uniform(3.0, 5.5)], weights=[0.82, 0.18])[0]
+        cpu = round(base_cpu + cycle + spike, 1)
+        ram = round(base_ram + math.sin(t_sec * 0.05) * 0.8 + random.gauss(0, 0.2), 1)
+        d_r = round(max(0.0, base_read + random.choices([0.0, random.uniform(0.5, 2.5)], weights=[0.85, 0.15])[0]), 1)
+        d_w = round(max(0.0, base_write + random.choices([0.0, random.uniform(0.2, 1.2)], weights=[0.9, 0.1])[0]), 1)
+        cpu = max(2.0, min(20.0, cpu))
+        ram = max(15.0, min(36.0, ram))
+    elif "video" in wl:
+        cycle = math.sin(t_sec * 1.5) * 1.1 + random.gauss(0, 0.35)
+        cpu = round(base_cpu + cycle, 1)
+        ram = round(base_ram + math.sin(t_sec * 0.02) * 0.4 + random.gauss(0, 0.1), 1)
+        d_r = round(max(0.0, base_read + random.gauss(0, 0.04)), 1)
+        d_w = round(max(0.0, base_write + random.gauss(0, 0.08)), 1)
+        cpu = max(6.0, min(25.0, cpu))
+        ram = max(15.0, min(32.0, ram))
+    elif "idle" in wl:
+        cpu = round(base_cpu + random.gauss(0, 0.2), 1)
+        ram = round(base_ram + random.gauss(0, 0.08), 1)
+        d_r = 0.0
+        d_w = round(max(0.0, random.choices([0.0, 0.1], weights=[0.95, 0.05])[0]), 1)
+        cpu = max(0.2, min(5.0, cpu))
+        ram = max(10.5, min(17.0, ram))
+    else:  # Coding
+        cycle = math.sin(t_sec * 0.4) * 2.5 + random.gauss(0, 0.8)
+        spike = random.choices([0.0, random.uniform(4.0, 8.5)], weights=[0.86, 0.14])[0]
+        cpu = round(base_cpu + cycle + spike, 1)
+        ram = round(base_ram + math.sin(t_sec * 0.08) * 1.2 + random.gauss(0, 0.3), 1)
+        d_r = round(max(0.0, base_read + random.choices([0.0, random.uniform(1.0, 3.5)], weights=[0.85, 0.15])[0]), 1)
+        d_w = round(max(0.0, base_write + random.choices([0.0, random.uniform(2.0, 5.5)], weights=[0.85, 0.15])[0]), 1)
+        cpu = max(7.0, min(65.0, cpu))
+        ram = max(15.0, min(48.0, ram))
+
+    return cpu, ram, d_r, d_w
+
+
 _telemetry_history_buffer = []
 
 def get_live_system_metrics():
     """Fetches real-time system metrics (CPU, RAM, Disk I/O, Network)."""
-    global _last_io_counters, _telemetry_history_buffer
+    global _last_io_counters, _telemetry_history_buffer, _sim_last_state_hash, _sim_dynamic_history, _last_sim_live_cpu
+    
+    # Check if active simulation is broadcasting from test controller
+    sim = get_active_simulation()
+    if sim:
+        workload = sim.get("workload", "CODING")
+        base_cpu = float(sim.get("cpu_pct", 20.0))
+        base_ram = float(sim.get("memory_pct", 30.0))
+        base_net_in = float(sim.get("net_in_mb", 0.05))
+        base_net_out = float(sim.get("net_out_mb", 0.05))
+        base_read = float(sim.get("disk_read_mb", 0.2))
+        base_write = float(sim.get("disk_write_mb", 0.5))
+
+        current_hash = f"{workload}_{base_cpu}_{base_ram}_{base_net_in}"
+        now = time.time()
+
+        # Seed realistic history wave if newly activated or preset changed
+        if _sim_last_state_hash != current_hash:
+            _sim_last_state_hash = current_hash
+            _sim_dynamic_history = []
+            for i in range(60, 0, -1):
+                t_past = now - i
+                t_str = time.strftime("%H:%M:%S", time.localtime(t_past))
+                c_p, r_p, dr_p, dw_p = _calculate_tick_fluctuation(workload, base_cpu, base_ram, base_read, base_write, t_past)
+                _sim_dynamic_history.append({
+                    "timestamp": t_str,
+                    "cpu": c_p,
+                    "ram": r_p,
+                    "disk_read": dr_p,
+                    "disk_write": dw_p
+                })
+
+        # Calculate current live tick with realistic fluctuations
+        live_cpu, live_ram, live_read, live_write = _calculate_tick_fluctuation(workload, base_cpu, base_ram, base_read, base_write, now)
+        _last_sim_live_cpu = live_cpu
+
+        # Realistic network fluctuations based on workload category
+        wl_lower = workload.lower()
+        if "browse" in wl_lower:
+            burst = random.choices([1.0, random.uniform(2.5, 6.0)], weights=[0.75, 0.25])[0]
+            n_in = max(0.01, round(base_net_in * burst + random.gauss(0, 0.005), 3))
+            n_out = max(0.002, round(base_net_out * (burst * 0.3) + random.gauss(0, 0.002), 3))
+        elif "video" in wl_lower:
+            flutter = 1.0 + math.sin(now * 2.0) * 0.08 + random.gauss(0, 0.03)
+            n_in = max(0.02, round(base_net_in * flutter, 3))
+            n_out = max(0.02, round(base_net_out * flutter, 3))
+        elif "idle" in wl_lower:
+            n_in = max(0.0001, round(base_net_in + random.gauss(0, 0.0002), 4))
+            n_out = max(0.0001, round(base_net_out + random.gauss(0, 0.0002), 4))
+        else:  # Coding
+            burst = random.choices([1.0, random.uniform(1.8, 3.5)], weights=[0.88, 0.12])[0]
+            n_in = max(0.001, round(base_net_in * burst, 3))
+            n_out = max(0.001, round(base_net_out * burst, 3))
+
+        now_str = time.strftime("%H:%M:%S", time.localtime(now))
+        _sim_dynamic_history.append({
+            "timestamp": now_str,
+            "cpu": live_cpu,
+            "ram": live_ram,
+            "disk_read": live_read,
+            "disk_write": live_write
+        })
+        if len(_sim_dynamic_history) > 120:
+            _sim_dynamic_history.pop(0)
+
+        total_gb = round(psutil.virtual_memory().total / (1024**3), 1)
+        used_gb = round(total_gb * (live_ram / 100.0), 2)
+        load1 = round(live_cpu / 10.0, 2)
+
+        return {
+            "timestamp": now_str,
+            "cpu_pct": live_cpu,
+            "memory_pct": live_ram,
+            "memory_used_gb": used_gb,
+            "memory_total_gb": total_gb,
+            "load_avg1": load1,
+            "load_avg5": round(load1 * 0.95, 2),
+            "load_avg15": round(load1 * 0.90, 2),
+            "disk_read_mb": live_read,
+            "disk_write_mb": live_write,
+            "net_in_mb": n_in,
+            "net_out_mb": n_out,
+            "total_procs": 420 + random.randint(-3, 3),
+            "running_procs": len(sim.get("processes", [])) or 4,
+            "net_interface": "eth0 (simulated stream)"
+        }
+
     cpu_pct = psutil.cpu_percent(interval=None)
     mem = psutil.virtual_memory()
 
@@ -237,6 +384,10 @@ def get_live_system_metrics():
 
 def get_telemetry_history(limit=60):
     """Retrieves fresh history of CPU & RAM metrics from DB or live rolling ring-buffer."""
+    sim = get_active_simulation()
+    if sim and _sim_dynamic_history:
+        return pd.DataFrame(_sim_dynamic_history[-limit:])
+
     try:
         if os.path.exists(DB_PATH):
             conn = sqlite3.connect(DB_PATH, timeout=2.0)
@@ -279,6 +430,20 @@ def get_telemetry_history(limit=60):
 
 def get_top_processes_list(limit=10):
     """Retrieves live active process list (PID, Name, CPU%, RAM%)."""
+    sim = get_active_simulation()
+    if sim and sim.get("processes"):
+        base_cpu = float(sim.get("cpu_pct", 25.0))
+        live_cpu = _last_sim_live_cpu if _last_sim_live_cpu > 0 else base_cpu
+        ratio = (live_cpu / base_cpu) if base_cpu > 0 else 1.0
+
+        dynamic_procs = []
+        for p in sim["processes"]:
+            p_copy = dict(p)
+            p_copy["cpu"] = round(max(0.1, p["cpu"] * ratio + random.gauss(0, 0.2)), 1)
+            dynamic_procs.append(p_copy)
+        dynamic_procs = sorted(dynamic_procs, key=lambda x: x["cpu"], reverse=True)
+        return dynamic_procs[:limit]
+
     procs = []
     num_cores = psutil.cpu_count() or 1
     for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
@@ -325,6 +490,50 @@ def get_focusos_detected_workload():
 
 def get_latest_focusos_state():
     """Fetches the most recent deterministic workload state snapshot from SQLite workload_events."""
+    sim = get_active_simulation()
+    if sim:
+        sim_cpu = float(_last_sim_live_cpu if _last_sim_live_cpu > 0 else (sim.get("cpu_pct") or sim.get("cpu") or 25.0))
+        sim_ram = float(sim.get("memory_pct") or sim.get("ram") or 30.0)
+        wl = sim.get("workload", "CODING").upper()
+        top_p = sim.get("top_process")
+        if not top_p or top_p == "system":
+            if "COD" in wl: top_p = "code"
+            elif "BROW" in wl: top_p = "chrome"
+            elif "VIDEO" in wl: top_p = "zoom"
+            elif "COMPIL" in wl: top_p = "gcc"
+            else: top_p = "systemd"
+
+        intensity = str(sim.get("intensity", "Medium")).lower()
+        if "heavy" in intensity:
+            default_cpu_attr, default_ram_attr = 0.88, 0.82
+        elif "light" in intensity:
+            default_cpu_attr, default_ram_attr = 0.62, 0.58
+        else:
+            default_cpu_attr, default_ram_attr = 0.78, 0.72
+
+        ev = sim.get("evidence")
+        if not ev:
+            ev = [
+                {"process": top_p, "signal": f"{top_p} active workload threads ({sim_cpu:.1f}% CPU)"},
+                {"signal": f"Calibrated synthetic simulation ({sim.get('intensity', 'Medium')} {wl})"}
+            ]
+
+        conf = sim.get("confidence", 95.0)
+        score_val = (float(conf) / 100.0) if float(conf) > 1.0 else float(conf)
+
+        return {
+            "workload": wl,
+            "state": sim.get("state", "CONFIRMED"),
+            "cpu_attribution": float(sim.get("cpu_attribution") or default_cpu_attr),
+            "ram_attribution": float(sim.get("ram_attribution") or default_ram_attr),
+            "score": score_val,
+            "system_cpu": sim_cpu,
+            "system_memory": sim_ram * 240.0,
+            "top_process": top_p,
+            "evidence": ev,
+            "consecutive_cycles": int(sim.get("consecutive_cycles", 10)),
+        }
+
     try:
         if os.path.exists(DB_PATH):
             conn = sqlite3.connect(DB_PATH, timeout=2.0)
@@ -362,26 +571,51 @@ def get_latest_focusos_state():
 
 
 def get_processor_affinity_matrix():
-    """Generates core allocation matrix for Performance and Efficiency cores."""
+    """Generates core allocation matrix and live utilization for Performance and Efficiency cores."""
+    total_cpus = psutil.cpu_count(logical=True) or 8
+    p_cores, e_cores = [], []
+    
     try:
         if HAS_FOCUSOS:
             p_cores, e_cores = get_cores()
-            return {
-                "p_cores": p_cores,
-                "e_cores": e_cores,
-                "p_active": len(p_cores),
-                "e_active": len(e_cores)
-            }
     except Exception:
         pass
 
-    total_cpus = psutil.cpu_count(logical=True) or 8
-    half = total_cpus // 2
+    if not p_cores and not e_cores:
+        half = total_cpus // 2
+        p_cores = list(range(half))
+        e_cores = list(range(half, total_cpus))
+
+    sim = get_active_simulation()
+    if sim:
+        workload = sim.get("workload", "CODING").lower()
+        live_cpu = _last_sim_live_cpu if _last_sim_live_cpu > 0 else float(sim.get("cpu_pct", 20.0))
+        per_core = []
+        for i in range(total_cpus):
+            is_p = (i in p_cores)
+            if "coding" in workload:
+                core_load = (live_cpu * random.uniform(1.1, 1.5)) if is_p else (live_cpu * random.uniform(0.2, 0.5))
+            elif "video" in workload:
+                core_load = (live_cpu * 2.0) if i in p_cores[:3] else (live_cpu * 0.3)
+            elif "browse" in workload:
+                core_load = (live_cpu * 1.8) if i in p_cores[:2] else (live_cpu * 0.4)
+            else:  # Idle
+                core_load = random.uniform(0.2, 2.0)
+            per_core.append(round(max(0.2, min(100.0, core_load + random.gauss(0, 0.4))), 1))
+    else:
+        try:
+            raw_cores = psutil.cpu_percent(percpu=True)
+            per_core = [round(c, 1) for c in raw_cores] if raw_cores else [10.0] * total_cpus
+        except Exception:
+            per_core = [10.0] * total_cpus
+
     return {
-        "p_cores": list(range(half)),
-        "e_cores": list(range(half, total_cpus)),
-        "p_active": half,
-        "e_active": half
+        "p_cores": p_cores,
+        "e_cores": e_cores,
+        "p_active": len(p_cores),
+        "e_active": len(e_cores),
+        "per_core_load": per_core,
+        "total_cores": total_cpus
     }
 
 

@@ -178,6 +178,17 @@ def run_rule_engine_loop(stop_event):
 
         while not stop_event.is_set():
             try:
+                # If synthetic simulation mode is active, do not overwrite simulated workload state
+                sim_file = os.path.join(BASE_DIR, "simulation_state.json")
+                if os.path.exists(sim_file):
+                    try:
+                        with open(sim_file, "r") as f:
+                            if json.load(f).get("active"):
+                                stop_event.wait(timeout=1.5)
+                                continue
+                    except Exception:
+                        pass
+
                 # Sample active processes via layer 2 collector (broader sample window)
                 top_cpu, top_mem, baselines = collect_layer2_metrics(baselines, top_n=20)
                 # Normalize field names and deduplicate processes appearing in both top_cpu and top_mem
