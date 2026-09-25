@@ -145,11 +145,5 @@ def main():
         print("Shutdown complete. Goodbye!")
 
 
-from os_doctor.i_forest_predict import flag_anomaly
-def run_os_doctor():
-    flag_anomaly()
-    
 if __name__ == "__main__":
-    os_doctor_thread = threading.Thread(target=run_os_doctor, daemon=True)
-    os_doctor_thread.start()
     main()
