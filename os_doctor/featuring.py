@@ -2,29 +2,112 @@
 import sqlite3
 import json
 import os
+from datetime import datetime
 import pandas as pd
 
 #scaling
 from sklearn.preprocessing import RobustScaler
 import joblib
 
-#  single source of truth for where the fitted scaler lives 
-SCALER_PATH = os.path.join(os.path.dirname(__file__), "models", "robust_scaler.joblib")
-
+# single source of truth for where the fitted scaler lives (absolute path)
 from config import DB_PATH
 
+# The 24 features the Isolation Forest is trained on, in a FIXED order.
+# os_doctor_db.py (training table), i_forest_train.py and inference all import
+# this list, so the column order can never drift between them.
+ML_FEATURES = [
+    # A. scheduler / CPU contention
+    "nr_running_per_core",
+    "involuntary_context_switch_rate",
+    "uninterruptible_d_state_count",
+    # B. CPU
+    "cpu_usage_percent",
+    "cpu_usage_percent_gradient",
+    "cpu_iowait_time",              # NOTE: percent of CPU time in iowait, not seconds since boot
+    "cpu_psi_some_avg10",
+    # C. memory
+    "memory_percent",
+    "memory_percent_gradient",
+    "memory_psi_full_avg10",
+    "direct_reclaim_rate",
+    "major_page_fault_rate",
+    "swap_out_rate",
+    # D. storage / I/O
+    "disk_read_mb_s",
+    "disk_write_mb_s",
+    "io_latency",
+    "io_psi_some_avg10",
+    "io_psi_full_avg10",
+    # E. resource leaks
+    "open_fds_gradient",
+    "thread_count_gradient",
+    "zombie_process_count",
+    # F. hardware / thermal
+    "cpu_frequency_deviation",
+    "thermal_throttling_events",
+    # G. network
+    "tcp_retrans_rate",
+]
+
+# layer1_sys column -> ML feature, taken as the latest value
+_LATEST_VALUE_FEATURES = {
+    "nr_running_per_core": "nr_running_per_core",
+    "involuntary_context_switch_rate": "involuntary_context_switch_rate",
+    "uninterruptible_d_state_count": "uninterruptible_d_state_count",
+    "cpu_usage_percent": "cpu_usage_percent",
+    "cpu_iowait_percent": "cpu_iowait_time",
+    "cpu_psi_some_avg10": "cpu_psi_some_avg10",
+    "memory_percent": "memory_percent",
+    "memory_psi_full_avg10": "memory_psi_full_avg10",
+    "direct_reclaim_rate": "direct_reclaim_rate",
+    "major_page_fault_rate": "major_page_fault_rate",
+    "swap_out_rate": "swap_out_rate",
+    "disk_read_mb_s": "disk_read_mb_s",
+    "disk_write_mb_s": "disk_write_mb_s",
+    "io_latency": "io_latency",
+    "io_psi_some_avg10": "io_psi_some_avg10",
+    "io_psi_full_avg10": "io_psi_full_avg10",
+    "zombie_processes": "zombie_process_count",
+    "thermal_throttling_events": "thermal_throttling_events",
+    "tcp_retrans_rate": "tcp_retrans_rate",
+}
+
+# layer1_sys column -> ML feature, as change per second between the last two rows
+_GRADIENT_FEATURES = {
+    "cpu_usage_percent": "cpu_usage_percent_gradient",
+    "memory_percent": "memory_percent_gradient",
+    "system_open_fds": "open_fds_gradient",
+    "num_threads": "thread_count_gradient",
+}
+
+# layer1_sys column -> ML feature, as (latest value - 120-row rolling mean)
+_DEVIATION_FEATURES = {
+    "cpu_freq": "cpu_frequency_deviation",
+}
+
+# NOTE: On macOS many Linux-only columns (nr_running_per_core, PSI, vmstat,
+# etc.) are always NULL.  We no longer filter rows by a "ready marker"
+# column because that would exclude every row on non-Linux platforms.
+# NULLs are safely coerced to 0.0 via pd.to_numeric + fillna downstream.
+
+
+def _to_epoch_seconds(iso_text):
+    # datetime.isoformat() drops ".ffffff" when microseconds == 0, which breaks
+    # pandas' format guessing, so parse each value with fromisoformat instead.
+    try:
+        return datetime.fromisoformat(iso_text).timestamp()
+    except (TypeError, ValueError):
+        return float("nan")
+
+
 def extract_and_engineer_sys(db_path, window_size=120):
-    query = """
-        SELECT
-            timestamp, 
-            cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_iowait_time, cpu_busy_time,
-            cpu_ctx_switches,
-            memory_percent, swap_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time,
-            disk_write_time, net_rate_mb_s, net_errs, net_drops, load_avg_1, total_processes,
-            running_processes, sleeping_processes, zombie_processes, avg_temp,
-            max_temp, battery_percent
+    source_cols = sorted(set(_LATEST_VALUE_FEATURES) | set(_GRADIENT_FEATURES) | set(_DEVIATION_FEATURES))
+    # ORDER BY id (insert order), not timestamp: a backwards clock jump (NTP)
+    # would otherwise shuffle the rows.
+    query = f"""
+        SELECT id, timestamp, {', '.join(source_cols)}
         FROM layer1_sys
-        ORDER BY timestamp DESC
+        ORDER BY id DESC
         LIMIT ?
     """
 
@@ -34,69 +117,39 @@ def extract_and_engineer_sys(db_path, window_size=120):
 
         df_sys = pd.read_sql_query(query, conn, params=(window_size,))
 
+    if len(df_sys) < 2:
+        return pd.DataFrame()
+
     # Data comes back newest-first (DESC); flip to chronological order so
     # diff()/rolling() see the correct time direction and .iloc[-1] is "now".
     df_sys = df_sys.iloc[::-1].reset_index(drop=True)
 
-    # Latest timestamp, kept as metadata (not a numeric feature for the model)
-    latest_timestamp = df_sys['timestamp'].iloc[-1]
+    # All-NULL columns load as dtype=object with None; coerce to numeric (NaN).
+    # NaN is turned into 0.0 only at the very end.
+    for col in source_cols:
+        df_sys[col] = pd.to_numeric(df_sys[col], errors='coerce')
 
-    # Columns that are all-NULL in sqlite (e.g. temp/iowait/cached on platforms
-    # that don't report them) load as dtype=object with None, not NaN, which
-    # breaks diff()'s subtraction. Coerce to numeric so missing sensors = 0.0.
+    features = {}
 
-    flat_sys_dict = {}
-    # it into metadata_payload instead of the model's feature matrix.
-    # flat_sys_dict['timestamp'] = latest_timestamp
+    for src, name in _LATEST_VALUE_FEATURES.items():
+        features[name] = df_sys[src].iloc[-1]
 
-    gradient_cols = [
-        'cpu_usage_percent',
-        'cpu_iowait_time',
-        'memory_percent',
-        'disk_read_mb_s', 
-        'disk_write_mb_s', 
-        'net_rate_mb_s', 
-        'running_processes',
-    ]
+    # Gradients are per SECOND, using the real gap between the last two rows.
+    # Rows are ~1.2-1.5 s apart (work + 1 s sleep), not exactly 1 s.
+    epoch = df_sys['timestamp'].map(_to_epoch_seconds)
+    gap = epoch.iloc[-1] - epoch.iloc[-2]
+    for src, name in _GRADIENT_FEATURES.items():
+        change = df_sys[src].iloc[-1] - df_sys[src].iloc[-2]
+        features[name] = change / gap if gap > 0 else float("nan")
 
-    deviation_cols = [
-            'cpu_usage_percent',
-            'cpu_ctx_switches',
-            'memory_percent',
-            'swap_percent',
-            'load_avg_1',
-            'avg_temp'
-        ]
+    for src, name in _DEVIATION_FEATURES.items():
+        rolling_baseline = df_sys[src].rolling(window=120, min_periods=1).mean()
+        features[name] = df_sys[src].iloc[-1] - rolling_baseline.iloc[-1]
 
-    cols_to_clean = gradient_cols + deviation_cols
-
-    # Handling NaN values
-    for col in cols_to_clean:
-        if col in df_sys.columns:
-            df_sys[col] = pd.to_numeric(df_sys[col], errors='coerce').fillna(0.0)
-
-    for col in gradient_cols:
-        df_sys[f'{col}_gradient'] = df_sys[col].diff(periods=1).fillna(0.0)
-        df_sys = df_sys.copy()
-
-    for col in gradient_cols:
-        flat_sys_dict[f'{col}_gradient'] = round(df_sys[f'{col}_gradient'].iloc[-1], 2)
-        flat_sys_dict[f'{col}'] = round(df_sys[f'{col}'].iloc[-1], 2)
-
-    for col in deviation_cols:
-        rolling_baseline = df_sys[col].rolling(window=120, min_periods=1).mean()
-        df_sys[f'{col}_deviation'] = df_sys[col] - rolling_baseline
-        df_sys = df_sys.copy()
-
-    for col in deviation_cols:
-        flat_sys_dict[f'{col}_deviation'] = round(df_sys[f'{col}_deviation'].iloc[-1], 2)
-        flat_sys_dict[f'{col}'] = round(df_sys[f'{col}'].iloc[-1], 2)
-
-    # Convert to a single-row 2D DataFrame [1, num_sys_features]
-    sys_vec = pd.DataFrame([flat_sys_dict])
-    sys_vec['timestamp'] = latest_timestamp  # Add timestamp 
-    # for col in sys_vec.columns:
-    #     print(col)
+    # Single-row frame [1, 24] in the fixed ML_FEATURES order; missing -> 0.0
+    sys_vec = pd.DataFrame([{name: features[name] for name in ML_FEATURES}])
+    sys_vec = sys_vec.astype(float).fillna(0.0).round(4)
+    sys_vec['timestamp'] = df_sys['timestamp'].iloc[-1]   # metadata, not a feature
     return sys_vec
 
 def extract_and_engineer_processes(db_path, window_size=24):
@@ -115,7 +168,7 @@ def extract_and_engineer_processes(db_path, window_size=24):
             ram_5_pid, ram_5_ppid, ram_5_name, ram_5_status, ram_5_peak, ram_5_open_fds
 
             FROM layer2_proc
-            ORDER BY timestamp DESC
+            ORDER BY id DESC
             LIMIT ?
         """
     
@@ -140,17 +193,25 @@ def extract_and_engineer_processes(db_path, window_size=24):
 
     flat_proc_dict = {}
 
-    for col in cols:
+    # Names and statuses are text. Before, they were coerced to numbers too,
+    # so every process name in the metadata became 0.0.
+    text_cols = [col for col in cols if col.endswith('_name') or col.endswith('_status')]
+    numeric_cols = [col for col in cols if col not in text_cols]
+
+    for col in numeric_cols:
         if col in df_raw.columns:
             df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0.0)
 
-    for col in cols:
+    df_raw = df_raw.copy()
+    for col in numeric_cols:
             df_raw[f'{col}_gradient'] = df_raw[col].diff(periods=1).fillna(0.0)
-            df_raw = df_raw.copy()
     
-    for col in cols:
+    for col in numeric_cols:
         flat_proc_dict[f'{col}_gradient'] = round(df_raw[f'{col}_gradient'].iloc[-1], 2)
         flat_proc_dict[f'{col}'] = round(df_raw[f'{col}'].iloc[-1], 2)
+
+    for col in text_cols:
+        flat_proc_dict[col] = df_raw[col].iloc[-1]
 
     
     proc_vec = pd.DataFrame([flat_proc_dict])
@@ -158,25 +219,20 @@ def extract_and_engineer_processes(db_path, window_size=24):
     # print(proc_vec)
     return proc_vec
 
-#   Concatenates system and process feature spaces into a fixed-dimensional matrix.
-#   Separates isolation_forest ready numerical rows from human-readable metadata.
+#   Separates the Isolation Forest input (the 24 ML_FEATURES) from
+#   human-readable metadata. Process data is NOT an ML feature any more;
+#   it is kept in the metadata for diagnosis after an anomaly is found.
     
 def build_unified_vector(sys_vec, proc_vec):
 
-    df_unified = pd.concat([sys_vec, proc_vec], axis=1)
-    
+    ml_features_df = sys_vec[ML_FEATURES].astype(float)
 
-    metadata_cols = [col for col in df_unified.columns
-                             if col.endswith('_name') or col.endswith('_id') or col.endswith('_ppid') or col.endswith('_pid') or col.endswith('_status')]
-    metadata_payload = df_unified[metadata_cols].iloc[0].to_dict()
-
-    cols_to_drop = [col for col in df_unified.columns
-                         if col.endswith('_name_gradient') or col.endswith('_name') or col.endswith('_id_gradient') or col.endswith('_id') or col.endswith('_ppid_gradient') or col.endswith('_ppid') or col.endswith('_status_gradient') or col.endswith('_pid') or col.endswith('_pid_gradient') or col.endswith('_status')]
-    
-    ml_features_df = df_unified.drop(columns=cols_to_drop)
-
-    
-    # ml_features_df = ml_features_df.reindex(sorted(ml_features_df.columns), axis=1)
+    metadata_payload = {"timestamp": sys_vec['timestamp'].iloc[0]}
+    for col, value in proc_vec.iloc[0].to_dict().items():
+        # a PID "gradient" has no meaning, skip it
+        if col.endswith('_pid_gradient') or col.endswith('_ppid_gradient'):
+            continue
+        metadata_payload[col] = value
 
     return ml_features_df, metadata_payload
 
@@ -195,7 +251,7 @@ def build_unified_vector(sys_vec, proc_vec):
 # Metadata (PID, PPID, process name) is never touched — it was already stripped out by build_unified_vector() before this stage runs.
 
 
-def fit_and_save_scaler(ml_features_df, scaler_path=SCALER_PATH):
+def fit_and_save_scaler(ml_features_df, scaler_path):
     """
     OFFLINE TRAINING ONLY.
 
@@ -217,6 +273,7 @@ def fit_and_save_scaler(ml_features_df, scaler_path=SCALER_PATH):
     scaler : RobustScaler (fitted)
     ml_features_scaled_df : pd.DataFrame (scaled training features)
     """
+    ml_features_df = ml_features_df[ML_FEATURES]   # fixed column order
     scaler = RobustScaler()
 
     scaled_array = scaler.fit_transform(ml_features_df.values)  # fit ONLY here
@@ -233,7 +290,7 @@ def fit_and_save_scaler(ml_features_df, scaler_path=SCALER_PATH):
     return scaler, ml_features_scaled_df
 
 
-def load_scaler(scaler_path=SCALER_PATH):
+def load_scaler(scaler_path):
     """
     INFERENCE / RUNTIME ONLY.
 
@@ -260,6 +317,7 @@ def scale_features(ml_features_df, scaler):
     expected to pass only the output of build_unified_vector()'s
     ml_features_df, which already excludes PID/PPID/name columns.
     """
+    ml_features_df = ml_features_df[ML_FEATURES]   # same order as at training time
     scaled_array = scaler.transform(ml_features_df.values)
 
     return pd.DataFrame(
@@ -374,5 +432,6 @@ def get_inference_payload_train(db_path, scaler=None):
         return None, None
 
 if __name__ == "__main__":
-    # extract_and_engineer_sys()
-    extract_and_engineer_processes(DB_PATH)
+    features, metadata = get_inference_payload_train(DB_PATH)
+    if features is not None:
+        print(features.T)

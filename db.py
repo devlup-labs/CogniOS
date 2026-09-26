@@ -121,6 +121,27 @@ def insert_process_snapshot(top_cpu, top_ram):
 
 db_path = DB_PATH
 
+# New raw columns for the OS Doctor 24-feature vector.
+# The names here are ALSO the keys in collect_layer1_metrics()'s dict and the
+# keyword names accepted by write_layer1(), so one list controls all three.
+LAYER1_NEW_COLUMNS = {
+    "nr_running_per_core":             "REAL",     # /proc/stat procs_running / cores
+    "involuntary_context_switch_rate": "REAL",     # switches per second
+    "uninterruptible_d_state_count":   "INTEGER",  # processes in D state
+    "cpu_iowait_percent":              "REAL",     # % of CPU time in iowait
+    "cpu_psi_some_avg10":              "REAL",     # /proc/pressure/cpu
+    "memory_psi_full_avg10":           "REAL",     # /proc/pressure/memory
+    "io_psi_some_avg10":               "REAL",     # /proc/pressure/io
+    "io_psi_full_avg10":               "REAL",     # /proc/pressure/io
+    "direct_reclaim_rate":             "REAL",     # allocstall_* per second
+    "major_page_fault_rate":           "REAL",     # pgmajfault per second
+    "swap_out_rate":                   "REAL",     # MB/s swapped out
+    "io_latency":                      "REAL",     # ms per disk operation
+    "system_open_fds":                 "INTEGER",  # /proc/sys/fs/file-nr
+    "thermal_throttling_events":       "REAL",     # throttle events per second
+    "tcp_retrans_rate":                "REAL",     # TCP retransmits per second
+}
+
 def create_connection(db_path):
     conn = sqlite3.connect(db_path, check_same_thread=False)
     _harden_connection(conn)
@@ -177,33 +198,40 @@ def create_connection(db_path):
         )
     ''')
 
-    # Ensure num_threads column exists for older database instances
+    # CREATE TABLE IF NOT EXISTS does nothing on an existing DB, so add any
+    # missing columns here (num_threads + the OS Doctor columns).
     cursor.execute("PRAGMA table_info(layer1_sys)")
     columns = [row[1] for row in cursor.fetchall()]
-    if 'num_threads' not in columns:
-        cursor.execute("ALTER TABLE layer1_sys ADD COLUMN num_threads INTEGER")
+    needed = {"num_threads": "INTEGER", **LAYER1_NEW_COLUMNS}
+    for col, col_type in needed.items():
+        if col not in columns:
+            cursor.execute(f"ALTER TABLE layer1_sys ADD COLUMN {col} {col_type}")
 
     conn.commit()
     return conn
 
 # Function to write the collected metrics into the database
 
-def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, process_data,num_threads):
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO layer1_sys (
-            timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time,
-            cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent,
-            memory_used, memory_available, memory_cached, memory_buffers, swap_percent,
-            swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s,
-            disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15,
-            total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp,
-            max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv,
-            net_packets_sent, net_packets_recv, net_errs, net_drops, process_data,
-            num_threads
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (timestamp, 
+def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, process_data, num_threads, **new_columns):
+    # new_columns: the OS Doctor values, passed by name (see LAYER1_NEW_COLUMNS).
+    # Missing ones are stored as NULL. An unknown name is a typo, so fail loudly.
+    unknown = set(new_columns) - set(LAYER1_NEW_COLUMNS)
+    if unknown:
+        raise ValueError(f"write_layer1: unknown column(s) {sorted(unknown)}")
+
+    column_names = [
+        "timestamp", "cpu_usage_percent", "cpu_freq", "cpu_user_time", "cpu_system_time",
+        "cpu_idle_time", "cpu_iowait_time", "cpu_busy_time", "cpu_ctx_switches", "memory_percent",
+        "memory_used", "memory_available", "memory_cached", "memory_buffers", "swap_percent",
+        "swap_sin", "swap_sout", "disk_usage_percent", "disk_read_mb_s", "disk_write_mb_s",
+        "disk_read_time", "disk_write_time", "load_avg_1", "load_avg_5", "load_avg_15",
+        "total_processes", "running_processes", "sleeping_processes", "zombie_processes", "avg_temp",
+        "max_temp", "battery_percent", "net_rate_mb_s", "net_bytes_sent", "net_bytes_recv",
+        "net_packets_sent", "net_packets_recv", "net_errs", "net_drops", "process_data",
+        "num_threads",
+    ] + list(LAYER1_NEW_COLUMNS)
+
+    values = (timestamp, 
           cpu_usage_percent, 
           cpu_freq, cpu_user_time, 
           cpu_system_time, 
@@ -242,5 +270,12 @@ def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cp
           net_errs,
           net_drops,
           process_data,
-          num_threads))
+          num_threads) + tuple(new_columns.get(col) for col in LAYER1_NEW_COLUMNS)
+
+    placeholders = ", ".join("?" for _ in column_names)
+    cursor = conn.cursor()
+    cursor.execute(
+        f"INSERT INTO layer1_sys ({', '.join(column_names)}) VALUES ({placeholders})",
+        values,
+    )
     conn.commit()

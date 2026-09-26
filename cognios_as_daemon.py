@@ -10,6 +10,7 @@ from db import (
     init_layer2_db,
     write_layer2,
     ensure_wal_mode,
+    LAYER1_NEW_COLUMNS,
 )
 from collectors.layer1_system import collect_layer1_metrics
 from collectors.layer2_process import collect_layer2_metrics
@@ -124,7 +125,9 @@ def run_layer1_loop(stop_event):
                     metrics['net_errs'],
                     metrics['net_drops'],
                     json.dumps(metrics['process_data']),
-                    sum(metrics['num_threads']) if isinstance(metrics.get('num_threads'), list) else int(metrics.get('num_threads') or 0)
+                    sum(metrics['num_threads']) if isinstance(metrics.get('num_threads'), list) else int(metrics.get('num_threads') or 0),
+                    # OS Doctor columns, passed by name
+                    **{col: metrics.get(col) for col in LAYER1_NEW_COLUMNS}
                 )
 
                 # --- Write to BlackBox rolling-window DB ---

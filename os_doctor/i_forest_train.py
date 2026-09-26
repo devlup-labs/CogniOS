@@ -1,112 +1,95 @@
-"""Isolation Forest anomaly model for OS Doctor."""
+"""Isolation Forest anomaly model for OS Doctor — per-workload training."""
 from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import StandardScaler
 import pandas as pd
 from sqlalchemy import create_engine
 import os
 import joblib
 
-expected_columns = [
-    "id",                              
+from config import OS_DOCTOR_DB_PATH, OS_DOCTOR_MODELS_DIR, WORKLOADS
+from os_doctor.featuring import ML_FEATURES, fit_and_save_scaler
 
-    "cpu_usage_percent_gradient",
-    "cpu_usage_percent",
-    "cpu_iowait_time_gradient",
-    "cpu_iowait_time",            
-    "memory_percent_gradient",
-    "memory_percent",             
-    "disk_read_mb_s_gradient",
-    "disk_read_mb_s",             
-    "disk_write_mb_s_gradient",
-    "disk_write_mb_s",            
-    "net_rate_mb_s_gradient",
-    "net_rate_mb_s",               
-    "running_processes_gradient",
-    "running_processes",
-    "cpu_usage_percent_deviation", 
-    "cpu_ctx_switches_deviation",
-    "cpu_ctx_switches",          
-    "memory_percent_deviation",            
-    "swap_percent_deviation",
-    "swap_percent",              
-    "load_avg_1_deviation",
-    "load_avg_1",                
-    "avg_temp_deviation",
-    "avg_temp",
 
-    "timestamp", 
-                   
-    "cpu_1_cpu_peak_gradient",
-    "cpu_1_cpu_peak",             
-    "cpu_2_cpu_peak_gradient",
-    "cpu_2_cpu_peak",             
-    "cpu_3_cpu_peak_gradient",
-    "cpu_3_cpu_peak",             
-    "cpu_4_cpu_peak_gradient",
-    "cpu_4_cpu_peak",             
-    "cpu_5_cpu_peak_gradient",
-    "cpu_5_cpu_peak",             
-    "ram_1_peak_gradient",
-    "ram_1_peak",                 
-    "ram_1_open_fds_gradient",
-    "ram_1_open_fds",             
-    "ram_2_peak_gradient",
-    "ram_2_peak",                 
-    "ram_2_open_fds_gradient",
-    "ram_2_open_fds",             
-    "ram_3_peak_gradient",
-    "ram_3_peak",                 
-    "ram_3_open_fds_gradient",
-    "ram_3_open_fds",             
-    "ram_4_peak_gradient",
-    "ram_4_peak",                 
-    "ram_4_open_fds_gradient",
-    "ram_4_open_fds",             
-    "ram_5_peak_gradient",
-    "ram_5_peak",                 
-    "ram_5_open_fds_gradient",
-    "ram_5_open_fds"
-]
+def train_isolation_forest_model(workload_id):
+    """
+    Train an Isolation Forest model for a specific workload baseline.
 
-# Convert SQL-Table to Pandas DataFrame
-def train_isolation_forest_model():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(current_dir)
-    db_path = os.path.join(parent_dir, "os_doctor.db")
-    engine = create_engine(f"sqlite:///{db_path}")
+    Parameters
+    ----------
+    workload_id : int
+        0 = Idle, 1 = Browsing, 2 = Coding, 3 = Gaming
+    """
+    if workload_id not in WORKLOADS:
+        raise ValueError(f"Unknown workload_id {workload_id}. Must be 0-3.")
+
+    workload = WORKLOADS[workload_id]
+    table_name = workload["table"]
+    model_path = workload["model_path"]
+    scaler_path = workload["scaler_path"]
+    name = workload["name"]
+
+    print(f"Training Isolation Forest for workload '{name}' from table '{table_name}'...")
+
+    engine = create_engine(f"sqlite:///{OS_DOCTOR_DB_PATH}")
 
     df = pd.read_sql_table(
-        table_name="os_doctor_train",
+        table_name=table_name,
         con=engine,
     )
 
-    # Dropping timestamp as it is TEXT
-    # print("Columns before dropping timestamp and id:", df.columns)
-    df.columns = expected_columns
-    df = df.drop(columns=["timestamp", "id"])
+    # Select the 24 features BY NAME. id and timestamp are dropped here.
+    df = df[ML_FEATURES]
 
-    # Dropping rows with any cell = Null
-    df = df.dropna()
-    # print(df.info)
+    # Missing values -> 0.0 (the same rule featuring.py uses at inference)
+    df = df.apply(pd.to_numeric, errors="coerce").fillna(0.0)
 
-    # Scaling
-    scaler = StandardScaler()
-    scaler.set_output(transform="pandas")  # To get dataframe as output instead of numpy array
-    df = scaler.fit_transform(df)
-    # print(df)
+    if len(df) < 256:
+        print(f"Warning: only {len(df)} training rows. Collect more data for a reliable model.")
 
-    #HyperParameters 
+    # Isolation Forest can only split on a feature that varies. A feature that
+    # was constant (e.g. memory PSI always 0.00 on an idle machine) is never
+    # used, so the model cannot flag an anomaly in it later.
+    constant = [col for col in ML_FEATURES if df[col].nunique() <= 1]
+    if constant:
+        print("Warning: these features never changed in the training data, so the "
+              "model is blind to them. Collect data under more varied load:\n  "
+              + ", ".join(constant))
+
+    # Scaling: RobustScaler, fitted and saved per workload.
+    scaler, df = fit_and_save_scaler(df, scaler_path=scaler_path)
+
+    # HyperParameters
     n_estimators = 100
     contamination = 0.01
-    sample_size = 256
+    sample_size = min(256, len(df))
     random_state = 42
-    max_features = 7 # It is better to set max_features = sqrt(total features)
-    model = IsolationForest(n_estimators=n_estimators, contamination=contamination,
-                                max_samples=sample_size, random_state=random_state, max_features=max_features)
+    max_features = 5  # sqrt(24 features) = 4.9 -> 5
+    model = IsolationForest(
+        n_estimators=n_estimators,
+        contamination=contamination,
+        max_samples=sample_size,
+        random_state=random_state,
+        max_features=max_features,
+    )
 
-    # print(df)
-    model.fit(df)
+    model.fit(df.values)
 
-    joblib.dump(scaler, 'scaler.joblib')
-    joblib.dump(model, 'iso_forest_model.joblib')
-    print("Model saved successfully.")
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    joblib.dump(model, model_path)
+    print(f"[{name}] Model saved to {model_path}. Scaler saved to {scaler_path}.")
+
+
+def train_all_workloads():
+    """Train a separate Isolation Forest for every workload that has data."""
+    for wid in sorted(WORKLOADS):
+        workload = WORKLOADS[wid]
+        try:
+            engine = create_engine(f"sqlite:///{OS_DOCTOR_DB_PATH}")
+            df = pd.read_sql_table(table_name=workload["table"], con=engine)
+            if len(df) == 0:
+                print(f"[{workload['name']}] Table '{workload['table']}' is empty. Skipping.")
+                continue
+        except ValueError:
+            print(f"[{workload['name']}] Table '{workload['table']}' not found. Skipping.")
+            continue
+
+        train_isolation_forest_model(wid)

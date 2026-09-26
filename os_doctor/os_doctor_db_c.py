@@ -3,18 +3,16 @@ import time
 from sqlalchemy import create_engine
 
 from os_doctor.featuring import get_inference_payload_train, ML_FEATURES
-from config import DB_PATH, OS_DOCTOR_DB_PATH, OS_DOCTOR_TRAIN_TABLE
+from config import DB_PATH, OS_DOCTOR_DB_PATH
 
-# New table for the 24-feature vector. The old 54-column "os_doctor_train"
-# table is left untouched in the same file; it is simply not used any more.
-TABLE_NAME = OS_DOCTOR_TRAIN_TABLE
+TABLE_NAME = "os_doctor_train_c"
 
 def create_connection(os_doctor_db_path):
     conn = sqlite3.connect(os_doctor_db_path)
-    cursor = conn.cursor()   
+    cursor = conn.cursor()
 
-    # Columns are generated from ML_FEATURES, so this table always matches
-    # what featuring.py produces and what i_forest_train.py reads.
+    # Columns are generated from ML_FEATURES so this table always matches
+    # what featuring.py produces.
     feature_columns = ",\n            ".join(f"{name} REAL" for name in ML_FEATURES)
     query = f'''CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,7 +25,7 @@ def create_connection(os_doctor_db_path):
     conn.commit()
     return conn
 
-def write_to_os_doctor_train(ml_features_df, timestamp, os_doctor_db_path):
+def write_to_os_doctor_train_c(ml_features_df, timestamp, os_doctor_db_path):
 
     engine = create_engine(f"sqlite:///{os_doctor_db_path}")
 
@@ -43,28 +41,26 @@ def write_to_os_doctor_train(ml_features_df, timestamp, os_doctor_db_path):
 
 def execute_os_doctor_db():
     conn = create_connection(OS_DOCTOR_DB_PATH)
-    # start from the last saved row, so a restart of this script also skips duplicates
+    # Track the last written timestamp to avoid duplicate rows when the
+    # daemon isn't producing new telemetry.
     row = conn.execute(f"SELECT timestamp FROM {TABLE_NAME} ORDER BY id DESC LIMIT 1").fetchone()
     last_written_timestamp = row[0] if row else None
 
     try:
-        print("Starting the appending procces for os_doctor_train. Press Ctrl+C to stop")
+        print("Starting the appending process for os_doctor_train_c (coding). Press Ctrl+C to stop")
         while True:
             try:
                 ml_features_df, metadata = get_inference_payload_train(DB_PATH)
                 if ml_features_df is not None:
                     timestamp = metadata["timestamp"]
-                    # If the daemon is stopped, the newest layer1 row does not
-                    # change. Without this check the same moment would be
-                    # saved again every 5 s and flood the training data.
                     if timestamp == last_written_timestamp:
-                        print("No new telemetry since the last row. Skipping.")
+                        print("[coding] No new telemetry since the last row. Skipping.")
                     else:
-                        write_to_os_doctor_train(ml_features_df, timestamp, OS_DOCTOR_DB_PATH)
+                        write_to_os_doctor_train_c(ml_features_df, timestamp, OS_DOCTOR_DB_PATH)
                         last_written_timestamp = timestamp
-                        print("Successfully appended to os_doctor_train")
+                        print("[coding] Successfully appended to os_doctor_train_c")
             except Exception as e:
-                print("Error while appending to os_doctor_train:", e)
+                print(e)
             time.sleep(5)
     except KeyboardInterrupt:
         print("\nAppending process stopped.")
