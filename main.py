@@ -1,8 +1,10 @@
+import argparse
 import os
 import sys
 import subprocess
 import time
 import threading
+import webbrowser
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
@@ -77,7 +79,7 @@ def _daemon_watchdog(daemon_script, telemetry_log_path, restart_delay=3):
     return process
 
 
-def main():
+def main(ui_mode="desktop"):
     _ensure_environment()
 
     print("\n=======================================================")
@@ -102,7 +104,7 @@ def main():
     # Give the daemon a moment to initialise DB before dashboard connects
     time.sleep(2)
 
-    # 2. Start the Streamlit Dashboard
+    # 2. Start the existing dashboard so localhost and launcher use one UI.
     dashboard_log = open(dashboard_log_path, 'w')
     dashboard_process = subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run", dashboard_script, "--server.headless=true"],
@@ -113,15 +115,21 @@ def main():
 
     print("\n=======================================================")
     print("All systems are running!")
-    print("Dashboard is available at: http://localhost:8501")
+    print(f"Opening dashboard in {ui_mode} mode...")
     print(f" Telemetry logs : tail -f '{telemetry_log_path}'")
     print(f" Dashboard logs : tail -f '{dashboard_log_path}'")
     print("=======================================================\n")
     print("Press Ctrl+C to stop all services.")
 
     try:
-        while True:
-            time.sleep(1)
+        if ui_mode == "browser":
+            if not webbrowser.open("http://127.0.0.1:8501", new=2):
+                raise RuntimeError("Could not open the dashboard in a browser.")
+            while True:
+                time.sleep(1)
+        else:
+            from dashboard.desktop import run_dashboard
+            run_dashboard()
     except KeyboardInterrupt:
         print("\nStopping CogniOS System...")
     finally:
@@ -134,11 +142,7 @@ def main():
             except subprocess.TimeoutExpired:
                 dashboard_process.kill()
 
-        try:
-            dashboard_log.close()
-        except Exception:
-            pass
-
+        dashboard_log.close()
         print("Shutdown complete. Goodbye!")
 
 
@@ -147,6 +151,9 @@ def run_os_doctor():
     flag_anomaly()
     
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ui", choices=("browser", "desktop"), default="desktop")
+    args = parser.parse_args()
     os_doctor_thread = threading.Thread(target=run_os_doctor, daemon=True)
     os_doctor_thread.start()
-    main()
+    main(args.ui)
