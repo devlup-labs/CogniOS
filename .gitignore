@@ -47,3 +47,5 @@ dashboard.log
 .vscode/
 .idea/
 
+/Evolution of Blackbox
+.streamlit

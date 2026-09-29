@@ -81,8 +81,8 @@ def main():
     _ensure_environment()
 
     print("\n=======================================================")
-    print("🚀 Starting CogniOS System...")
-    print(f"🐍 Python Environment: {sys.executable}")
+    print(" Starting CogniOS System...")
+    print(f" Python Environment: {sys.executable}")
     print("=======================================================")
 
     telemetry_log_path = os.path.join(BASE_DIR, 'telemetry_daemon.log')
@@ -112,10 +112,10 @@ def main():
     print(f"[✔] CogniOS Dashboard started (PID: {dashboard_process.pid})")
 
     print("\n=======================================================")
-    print("✨ All systems are running!")
-    print("📊 Dashboard is available at: http://localhost:8501")
-    print(f"📝 Telemetry logs : tail -f '{telemetry_log_path}'")
-    print(f"📊 Dashboard logs : tail -f '{dashboard_log_path}'")
+    print("All systems are running!")
+    print("Dashboard is available at: http://localhost:8501")
+    print(f" Telemetry logs : tail -f '{telemetry_log_path}'")
+    print(f" Dashboard logs : tail -f '{dashboard_log_path}'")
     print("=======================================================\n")
     print("Press Ctrl+C to stop all services.")
 
