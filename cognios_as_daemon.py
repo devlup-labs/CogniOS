@@ -1,8 +1,15 @@
 """Daemon entry point for CogniOS — runs Layer 1 and Layer 2 collection concurrently."""
+import os
+import sys
 import time
 import json
 import signal
 import threading
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
 from db import (
     create_connection,
     write_layer1,
@@ -31,6 +38,7 @@ from focusos.state_manager import WorkloadStateManager, WorkloadState
 from focusos.policy import get_policy
 from focusos.optimisation import apply_policy, restore_workload_state
 from focusos.llm_explainer import generate_explanation
+from focusos.models.classifier import predict_live_workload
 import db
 
 
@@ -216,9 +224,12 @@ def run_rule_engine_loop(stop_event):
                 mem_bytes = sys_metrics_norm.get("memory_used", 0)
                 sys_metrics_norm["memory_used"] = float(mem_bytes) / (1024 * 1024) if mem_bytes > 1024 else float(mem_bytes)
 
+                # Get ML Inference for current window
+                ml_result = predict_live_workload()
+
                 # Evaluate against deterministic workload rules
                 scores = evaluate(active_processes, sys_metrics_norm)
-                state = state_manager.update(scores, sys_metrics_norm)
+                state = state_manager.update(scores, sys_metrics_norm, ml_inference=ml_result)
 
                 # Persist telemetry event snapshot
                 db.write_workload_event(
@@ -234,12 +245,15 @@ def run_rule_engine_loop(stop_event):
                     state["top_process"],
                     json.dumps(state["evidence"]),
                     state["consecutive_cycles"],
+                    state.get("ml_confidence", 0.0),
+                    state.get("ml_workload", "IDLE"),
+                    json.dumps(state.get("ml_probabilities", {}))
                 )
 
                 logger.info(
                     f"FocusOS State: {state['state']} | Workload: {state['workload']} | "
                     f"CPU Attr: {state['cpu_attribution']:.0%} | RAM Attr: {state['ram_attribution']:.0%} | "
-                    f"Score: {state['score']:.2f} | "
+                    f"Score: {state['score']:.2f} ({state.get('score_source', 'Rule Engine')}) | "
                     f"Procs: {sum(len(s['matched_processes']) for s in scores.values())}"
                 )
 

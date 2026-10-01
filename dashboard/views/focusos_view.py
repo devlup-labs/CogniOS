@@ -50,8 +50,11 @@ def render():
     top_proc          = str(state.get("top_process") or "system") if state else "system"
     evidence_list     = state.get("evidence", []) if state else []
     consecutive_cycles = int(state.get("consecutive_cycles") or 0) if state else 0
-    sys_cpu           = float(state.get("system_cpu") if (state and state.get("system_cpu") is not None) else (psutil.cpu_percent(interval=None) or 0.0))
-    sys_mem_mb        = float(state.get("system_memory") or 0.0) if state else 0.0
+    ml_confidence     = float(state.get("ml_confidence") or 0.0) if state else 0.0
+    ml_workload       = str(state.get("ml_workload") or "IDLE") if state else "IDLE"
+    live_sys          = dp.get_live_system_metrics()
+    sys_cpu           = float(live_sys.get("cpu_pct", 0.0))
+    sys_mem_mb        = float(live_sys.get("memory_used_gb", 0.0) * 1024)
 
     policy_info = get_policy(current_workload)
 
@@ -75,6 +78,14 @@ def render():
         "UNKNOWN":          "🔍",
     }.get(current_workload, "📊")
 
+    sim = dp.get_active_simulation()
+    is_simulated = bool(sim)
+    mode_badge_html = (
+        '<div style="background:rgba(245,158,11,0.2); color:#f59e0b; border:1px solid #f59e0b; border-radius:6px; padding:6px 14px; font-size:12px; font-weight:700; font-family:\'JetBrains Mono\';">⚠️ SIMULATED (DEMO)</div>'
+        if is_simulated else
+        '<div style="background:rgba(0,245,196,0.15); color:#00f5c4; border:1px solid #00f5c4; border-radius:6px; padding:6px 14px; font-size:12px; font-weight:700; font-family:\'JetBrains Mono\';">● LIVE TELEMETRY</div>'
+    )
+
     # Header with Workload State Badge
     st.html(f"""
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
@@ -86,6 +97,7 @@ def render():
             <p style="margin: 4px 0 0 0; color: #64748b; font-size: 14px;">Workload classification, process scheduling governance, and core topology management.</p>
         </div>
         <div style="display:flex; align-items:center; gap:12px;">
+            {mode_badge_html}
             <div style="background: rgba(0,0,0,0.3); color:{state_badge_color};
                         border:1px solid {state_badge_color}; border-radius:6px;
                         padding:6px 14px; font-size:12px; font-weight:700; font-family:'JetBrains Mono';">
@@ -142,21 +154,25 @@ def render():
                 <div style="flex:1; background:#131b28; border-radius:8px; padding:16px; border-top:2px solid #00f5c4;">
                     <div style="font-size:10px; color:#94a3b8; text-transform:uppercase; margin-bottom:4px;">CPU Attribution</div>
                     <div style="font-size:24px; font-weight:700; color:#ffffff; font-family:'JetBrains Mono';">{cpu_attr:.0%}</div>
+                    <div style="font-size:10px; color:#64748b; margin-top:2px; margin-bottom:6px;">Share of Active Host Load</div>
                     {cpu_bar}
                 </div>
                 <div style="flex:1; background:#131b28; border-radius:8px; padding:16px; border-top:2px solid #38bdf8;">
                     <div style="font-size:10px; color:#94a3b8; text-transform:uppercase; margin-bottom:4px;">RAM Attribution</div>
                     <div style="font-size:24px; font-weight:700; color:#38bdf8; font-family:'JetBrains Mono';">{ram_attr:.0%}</div>
+                    <div style="font-size:10px; color:#64748b; margin-top:2px; margin-bottom:6px;">Share of Used Host RAM</div>
                     {ram_bar}
                 </div>
                 <div style="flex:1; background:#131b28; border-radius:8px; padding:16px; border-top:2px solid #a78bfa;">
                     <div style="font-size:10px; color:#94a3b8; text-transform:uppercase; margin-bottom:4px;">Inference Score</div>
                     <div style="font-size:24px; font-weight:700; color:#a78bfa; font-family:'JetBrains Mono';">{score:.3f}</div>
+                    <div style="font-size:10px; color:#64748b; margin-top:2px; margin-bottom:6px;">{("XGBoost Confidence" if ml_confidence >= score and ml_confidence > 0 else "Rule Engine Score")}</div>
                     {score_bar}
                 </div>
                 <div style="flex:1; background:#131b28; border-radius:8px; padding:16px; border-top:2px solid #f59e0b;">
                     <div style="font-size:10px; color:#94a3b8; text-transform:uppercase; margin-bottom:4px;">System CPU</div>
                     <div style="font-size:24px; font-weight:700; color:#f59e0b; font-family:'JetBrains Mono';">{sys_cpu:.1f}%</div>
+                    <div style="font-size:10px; color:#64748b; margin-top:2px; margin-bottom:6px;">Host Machine Utilization</div>
                     {_pct_bar(sys_cpu / 100.0, "#f59e0b")}
                 </div>
             </div>
@@ -199,80 +215,94 @@ def render():
         with col_act1:
             if st.button("⚡ Apply Optimization Policy Now", use_container_width=True, key="focus_btn_opt"):
                 try:
-                    conn = sqlite3.connect(DB_PATH)
-                    cur = conn.cursor()
-                    now_ts = time.time()
-                    target_nice = policy_info.get("target_bucket_nice", -5)
-                    cur.execute("""
-                        INSERT INTO optimization_events (
-                            timestamp, pid, process_name, workload, action, old_value, new_value, reason, success
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        now_ts, 1024, top_proc, current_workload,
-                        f"nice -> {target_nice}", "0", str(target_nice),
-                        f"Manual trigger: Policy applied for {current_workload}", 1
-                    ))
-                    conn.commit()
+                    from focusos.optimisation import apply_policy
+                    conn = sqlite3.connect(DB_PATH, timeout=5.0)
+                    actions = apply_policy(policy_info, state or {}, conn=conn)
                     conn.close()
-                    st.success(f"Applied FocusOS optimization policy for {current_workload}!")
+                    if actions:
+                        st.success(f"Applied FocusOS optimization policy for {current_workload} to {len(actions)} process(es)!")
+                    else:
+                        st.info(f"Policy evaluated for {current_workload}: No non-protected active processes required adjustments.")
                 except Exception as e:
                     st.error(f"Error applying policy: {e}")
 
         with col_act2:
             if st.button("↺ Restore Default Priorities", use_container_width=True, key="focus_btn_restore"):
                 try:
-                    conn = sqlite3.connect(DB_PATH)
-                    cur = conn.cursor()
-                    now_ts = time.time()
-                    cur.execute("""
-                        INSERT INTO optimization_events (
-                            timestamp, pid, process_name, workload, action, old_value, new_value, reason, success
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        now_ts, 0, "SYSTEM", current_workload,
-                        "RESTORE_ALL", "MODIFIED", "DEFAULT",
-                        "Restored all process scheduling priorities to defaults", 1
-                    ))
-                    conn.commit()
+                    from focusos.optimisation import restore_workload_state
+                    conn = sqlite3.connect(DB_PATH, timeout=5.0)
+                    restored = restore_workload_state(conn=conn)
                     conn.close()
-                    st.info("Restored process priorities to default scheduling!")
+                    if restored > 0:
+                        st.success(f"Restored {restored} process(es) to default scheduling priorities!")
+                    else:
+                        st.info("All processes are currently at default priority states.")
                 except Exception as e:
                     st.error(f"Error restoring priorities: {e}")
 
     with col_opts:
+        is_hybrid = affinity_data.get("is_hybrid", False)
         p_active = affinity_data.get("p_active", 8)
         e_active = affinity_data.get("e_active", 8)
+        p_cores_set = set(affinity_data.get("p_cores", []))
+        e_cores_set = set(affinity_data.get("e_cores", []))
         per_core = affinity_data.get("per_core_load", [])
+        physical_cores = affinity_data.get("physical_cores") or 8
+        arch_type = affinity_data.get("architecture_type") or "HOMOGENEOUS"
+        cpu_model = affinity_data.get("model_name") or "Host CPU"
 
         # Live Top Processes table
-        top_procs_html = ""
+        top_procs_html = f"""
+        <div style='display:flex; justify-content:space-between; font-size:9px; font-weight:700; color:#64748b; text-transform:uppercase; border-bottom:1px solid #1e293b; padding-bottom:4px; margin-bottom:4px;'>
+            <span style='width:35%;'>Process (PID)</span>
+            <span style='width:15%; text-align:right;'>State</span>
+            <span style='width:15%; text-align:right;'>Nice</span>
+            <span style='width:15%; text-align:right;'>CPU</span>
+            <span style='width:20%; text-align:right;'>RAM</span>
+        </div>
+        """
         try:
             procs = dp.get_top_processes_list(limit=6)
             for p in (procs or []):
                 cpu_p = float(p.get("cpu") or 0.0)
+                p_name = str(p.get("name") or "proc")[:14]
+                pid = p.get("pid", "")
+                nice = p.get("nice", 0)
+                status = str(p.get("status", "run"))[:3].upper()
                 mem_p = float(p.get("ram") or 0.0)
-                p_name = str(p.get("name") or "proc")[:16]
+                rss_str = str(p.get("rss_human") or f"{mem_p:.1f}%")
+                
+                # Highlight negative nice (high priority) and positive nice (low priority)
+                nice_color = "#f59e0b" if nice > 0 else ("#00f5c4" if nice < 0 else "#64748b")
+                
                 top_procs_html += (
                     f"<div style='display:flex; justify-content:space-between; font-size:11px; "
-                    f"color:#cbd5e1; padding:5px 0; border-bottom:1px solid #101725;'>"
-                    f"<span style='font-family:JetBrains Mono; color:#e2e8f0;'>{p_name}</span>"
-                    f"<span style='color:#00f5c4; font-family:JetBrains Mono;'>{cpu_p:.1f}%</span>"
-                    f"<span style='color:#38bdf8; font-family:JetBrains Mono;'>{mem_p:.1f}%</span></div>"
+                    f"color:#cbd5e1; padding:6px 0; border-bottom:1px solid #101725;'>"
+                    f"<span style='font-family:JetBrains Mono; color:#e2e8f0; width:35%; overflow:hidden; text-overflow:ellipsis;'>{p_name} <span style='color:#64748b; font-size:9px;'>{pid}</span></span>"
+                    f"<span style='color:#94a3b8; font-family:JetBrains Mono; font-size:10px; width:15%; text-align:right;'>{status}</span>"
+                    f"<span style='color:{nice_color}; font-family:JetBrains Mono; width:15%; text-align:right;'>{nice}</span>"
+                    f"<span style='color:#00f5c4; font-family:JetBrains Mono; width:15%; text-align:right;'>{cpu_p:.1f}%</span>"
+                    f"<span style='color:#38bdf8; font-family:JetBrains Mono; width:20%; text-align:right;'>{rss_str}</span></div>"
                 )
         except Exception:
-            top_procs_html = "<div style='font-size:11px; color:#64748b;'>Telemetry initializing...</div>"
+            top_procs_html += "<div style='font-size:11px; color:#64748b;'>Telemetry initializing...</div>"
 
-        if not top_procs_html:
-            top_procs_html = "<div style='font-size:11px; color:#64748b; font-style:italic;'>No active processes detected.</div>"
+        if not procs:
+            top_procs_html += "<div style='font-size:11px; color:#64748b; font-style:italic;'>No active processes detected.</div>"
 
-        # Interactive 16-Core Matrix HTML Grid
+        # Interactive Matrix HTML Grid
         core_tiles_html = ""
-        total_cores = len(per_core) if per_core else 16
+        total_cores = len(per_core) if per_core else (affinity_data.get("total_cores") or 16)
         for c_idx in range(total_cores):
-            c_val = per_core[c_idx] if c_idx < len(per_core) else 5.0
-            is_p = (c_idx < (total_cores // 2))
-            c_type = "P" if is_p else "E"
-            c_color = "#00f5c4" if is_p else "#a78bfa"
+            c_val = per_core[c_idx] if c_idx < len(per_core) else 0.0
+            if is_hybrid:
+                is_p = c_idx in p_cores_set
+                c_type = "P" if is_p else "E"
+                c_color = "#00f5c4" if is_p else "#a78bfa"
+            else:
+                c_type = "T"
+                c_color = "#00f5c4"
+
             if c_val > 50:
                 load_color = "#f59e0b"
             elif c_val > 25:
@@ -293,6 +323,29 @@ def render():
             </div>
             """
 
+        if is_hybrid:
+            summary_cards_html = f"""
+            <div style="flex:1; background:#131b28; border-radius:8px; padding:12px; border-left:3px solid #00f5c4;">
+                <div style="font-size:10px; color:#94a3b8; margin-bottom:2px;">P-Cores (Perf)</div>
+                <div style="font-size:18px; font-weight:700; color:#00f5c4; font-family:'JetBrains Mono';">{p_active} Cores</div>
+            </div>
+            <div style="flex:1; background:#131b28; border-radius:8px; padding:12px; border-left:3px solid #a78bfa;">
+                <div style="font-size:10px; color:#94a3b8; margin-bottom:2px;">E-Cores (Eff)</div>
+                <div style="font-size:18px; font-weight:700; color:#a78bfa; font-family:'JetBrains Mono';">{e_active} Cores</div>
+            </div>
+            """
+        else:
+            summary_cards_html = f"""
+            <div style="flex:1; background:#131b28; border-radius:8px; padding:12px; border-left:3px solid #00f5c4;">
+                <div style="font-size:10px; color:#94a3b8; margin-bottom:2px;">Physical Cores</div>
+                <div style="font-size:18px; font-weight:700; color:#00f5c4; font-family:'JetBrains Mono';">{physical_cores} Cores ({total_cores}T)</div>
+            </div>
+            <div style="flex:1; background:#131b28; border-radius:8px; padding:12px; border-left:3px solid #38bdf8;">
+                <div style="font-size:10px; color:#94a3b8; margin-bottom:2px;">Architecture</div>
+                <div style="font-size:13px; font-weight:700; color:#38bdf8; font-family:'JetBrains Mono'; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="{cpu_model}">{cpu_model}</div>
+            </div>
+            """
+
         st.html(f"""
         <div style="background:#0d121c; border-radius:14px; padding:24px; min-height:420px; box-shadow:0 6px 24px rgba(0,0,0,0.3);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -301,20 +354,13 @@ def render():
                     <h3 style="margin:0; font-size:18px; font-weight:700; color:#ffffff;">Core Topology</h3>
                 </div>
                 <div style="font-size:11px; font-family:'JetBrains Mono'; color:#94a3b8;">
-                    {total_cores} Total Threads
+                    {physical_cores} Physical • {total_cores} Logical
                 </div>
             </div>
 
             <!-- Core Allocation Summary -->
             <div style="display:flex; gap:10px; margin-bottom:16px;">
-                <div style="flex:1; background:#131b28; border-radius:8px; padding:12px; border-left:3px solid #00f5c4;">
-                    <div style="font-size:10px; color:#94a3b8; margin-bottom:2px;">P-Cores (Perf)</div>
-                    <div style="font-size:18px; font-weight:700; color:#00f5c4; font-family:'JetBrains Mono';">{p_active} Cores</div>
-                </div>
-                <div style="flex:1; background:#131b28; border-radius:8px; padding:12px; border-left:3px solid #a78bfa;">
-                    <div style="font-size:10px; color:#94a3b8; margin-bottom:2px;">E-Cores (Eff)</div>
-                    <div style="font-size:18px; font-weight:700; color:#a78bfa; font-family:'JetBrains Mono';">{e_active} Cores</div>
-                </div>
+                {summary_cards_html}
             </div>
 
             <!-- Per-Core Live Grid -->
@@ -329,7 +375,7 @@ def render():
             <div style="background:#131b28; border-radius:8px; padding:14px;">
                 <div style="font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase;
                             font-family:'JetBrains Mono'; margin-bottom:8px; display:flex; justify-content:space-between;">
-                    <span>Process</span><span>CPU%</span><span>RAM%</span>
+                    <span style="width:45%;">PROCESS</span><span style="width:25%; text-align:right;">CPU (1C=100%)</span><span style="width:30%; text-align:right;">RAM (RSS)</span>
                 </div>
                 {top_procs_html}
             </div>

@@ -1,5 +1,8 @@
-# ARCHIVED: ML pipeline — replaced by deterministic rule-based engine in focusos/rules/
-# Do NOT import this module from the main daemon.
+"""
+FocusOS Statistical Feature Engineering Module
+Computes 22-feature statistical vector from live sliding telemetry window
+for XGBoost Workload Classifier inference.
+"""
 
 import pandas as pd
 import sys
@@ -138,18 +141,18 @@ def extract_features(df: pd.DataFrame):
 
         vscode_active = int(
             process_col.str.contains(
-                "code|code-insiders|vsls-agent|antigravity|sublime|pycharm",
+                "code|code-insiders|vsls-agent|antigravity|sublime|pycharm|cursor",
                 regex=True,
             ).any()
         )
 
-        # HARDCODED — always 0.
-        # Chrome/Chromium processes in telemetry are exclusively the Streamlit
-        # dashboard browser, not real user browser activity.  Including them in
-        # the feature vector inflates the confidence score and corrupts workload
-        # classification.  The exclusion is already applied upstream in
-        # layer1_system.py, but we enforce it here as a second safety net.
-        browser_active = 0
+        # Real user browser detection (Chrome, Chromium, Firefox, Brave, Edge, Opera)
+        browser_active = int(
+            process_col.str.contains(
+                "chrome|chromium|firefox|brave|msedge|opera",
+                regex=True,
+            ).any()
+        )
 
         def detect_compiler_active(data_df):
             compiler_names = {

@@ -12,11 +12,15 @@ WORKLOAD_BUCKETS = {
     "CODING": {
         "code", "code-insiders", "cursor", "pycharm", "idea",
         "sublime_text", "sublime", "vim", "nvim", "emacs",
-        "gedit", "kate"
+        "gedit", "kate", "antigravity-ide", "antigravity",
+        "python", "python3", "node", "npm", "yarn", "git",
+        "bash", "zsh", "fish", "rust-analyzer", "gopls", "pytest",
+        "agy", "terminal", "gnome-terminal", "gnome-terminal-server",
+        "alacritty", "kitty", "wezterm", "tmux"
     },
     "BROWSING": {
-        "chrome", "chromium", "firefox", "brave", "msedge",
-        "opera", "vivaldi"
+        "chrome", "chromium", "google-chrome", "google-chrome-stable",
+        "firefox", "brave", "msedge", "opera", "vivaldi", "epiphany"
     },
     "VIDEO_CALL": {
         "zoom", "teams", "discord", "meet", "slack",
@@ -35,9 +39,11 @@ WORKLOAD_BUCKETS = {
 # Critical system/session processes that must NEVER be modified by optimization
 PROTECTED_NAMES = {
     "systemd", "init", "kthreadd", "migration", "ksoftirqd", "kworker",
-    "rcu_sched", "watchdog", "kdevtmpfs", "xorg", "pipewire", "pulseaudio",
+    "rcu_sched", "rcu_preempt", "rcu", "watchdog", "kdevtmpfs", "xorg", "pipewire", "pulseaudio",
     "gnome-shell", "plasmashell", "sddm", "lightdm", "gdm", "wayland",
-    "dbus-daemon", "networkmanager"
+    "dbus-daemon", "networkmanager", "wireplumber", "mutter", "systemd-resolved",
+    "systemd-udevd", "systemd-journald", "polkitd", "accounts-daemon", "irqbalance",
+    "mutter-x11-frames", "upowerd"
 }
 
 
@@ -63,6 +69,9 @@ def is_protected_process(proc_name: str) -> bool:
         return True
 
     name_lower = os.path.basename(proc_name.strip().lower())
+    if name_lower.startswith("kworker") or name_lower.startswith("rcu") or name_lower.startswith("mt76"):
+        return True
+
     for prot in PROTECTED_NAMES:
         pattern = rf"(^|[^a-z0-9]){re.escape(prot)}([^a-z0-9]|$)"
         if re.search(pattern, name_lower):

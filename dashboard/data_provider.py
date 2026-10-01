@@ -18,7 +18,23 @@ if BASE_DIR not in sys.path:
 
 from config import DB_PATH, BLACKBOX_DB_PATH, ALERTS_DB_PATH
 from blackbox.recorder import get_blackbox_conn, get_window_rows
-from blackbox.replay import replay, build_llm_context
+try:
+    from blackbox.replay import replay, build_llm_context
+except ImportError:
+    try:
+        from blackbox.replay import replay
+        try:
+            from blackbox.replay import generate_llm_context
+            def build_llm_context(conn, crash_time=None, **kwargs):
+                rep = replay(conn, crash_time=crash_time)
+                res = generate_llm_context(rep)
+                return res.get("prompt", str(res)) if isinstance(res, dict) else str(res)
+        except ImportError:
+            def build_llm_context(conn, *args, **kwargs):
+                return "BlackBox context unavailable."
+    except Exception:
+        def replay(conn, *args, **kwargs): return {}
+        def build_llm_context(conn, *args, **kwargs): return "BlackBox context unavailable."
 from blackbox.nl_query import ask_groq, query_telemetry
 
 # Ensure database paths are always absolute regardless of current working directory
@@ -33,6 +49,9 @@ try:
     HAS_FOCUSOS = True
 except Exception as e:
     HAS_FOCUSOS = False
+
+from collectors.system_cpu import sample_system_cpu, get_cpu_monitor
+from collectors.process_monitor import sample_top_processes, get_process_monitor
 
 
 def _parse_timestamp(raw_ts):
@@ -292,13 +311,14 @@ def get_live_system_metrics():
             "net_interface": "eth0 (simulated stream)"
         }
 
-    cpu_pct = psutil.cpu_percent(interval=None)
+    cpu_sample = sample_system_cpu(min_interval_sec=0.05)
+    cpu_pct = cpu_sample["cpu_usage_percent"]
     mem = psutil.virtual_memory()
 
     try:
         load1, load5, load15 = os.getloadavg()
     except Exception:
-        load1, load5, load15 = 0.5, 0.4, 0.3
+        load1, load5, load15 = 0.0, 0.0, 0.0
 
     now = time.time()
     dt = now - _last_io_counters["time"] if _last_io_counters["time"] > 0 else 1.0
@@ -366,6 +386,12 @@ def get_live_system_metrics():
     return {
         "timestamp": now_str,
         "cpu_pct": cpu_pct,
+        "cpu_sample_valid": cpu_sample.get("is_valid", True),
+        "cpu_sample_interval": cpu_sample.get("sample_interval_sec", 0.0),
+        "cpu_user_pct": cpu_sample.get("user_percent", 0.0),
+        "cpu_sys_pct": cpu_sample.get("system_percent", 0.0),
+        "cpu_idle_pct": cpu_sample.get("idle_percent", 100.0),
+        "cpu_iowait_pct": cpu_sample.get("iowait_percent", 0.0),
         "memory_pct": mem_pct,
         "memory_used_gb": mem_used_gb,
         "memory_total_gb": mem_total_gb,
@@ -444,25 +470,33 @@ def get_top_processes_list(limit=10):
         dynamic_procs = sorted(dynamic_procs, key=lambda x: x["cpu"], reverse=True)
         return dynamic_procs[:limit]
 
-    procs = []
-    num_cores = psutil.cpu_count() or 1
-    for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
-        try:
-            info = p.info
-            cpu = (info.get('cpu_percent') or 0.0) / num_cores
-            ram = info.get('memory_percent') or 0.0
-            if cpu > 0 or ram > 0.1:
-                procs.append({
-                    "pid": info['pid'],
-                    "name": info['name'] or f"proc_{info['pid']}",
-                    "cpu": round(cpu, 1),
-                    "ram": round(ram, 1)
-                })
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
-
-    procs = sorted(procs, key=lambda x: (x['cpu'], x['ram']), reverse=True)
-    return procs[:limit]
+    try:
+        procs = sample_top_processes(top_n=limit)
+        return procs
+    except Exception as e:
+        procs = []
+        num_cores = psutil.cpu_count() or 1
+        for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
+            try:
+                info = p.info
+                cpu = (info.get('cpu_percent') or 0.0) / num_cores
+                ram = info.get('memory_percent') or 0.0
+                if cpu > 0 or ram > 0.1:
+                    procs.append({
+                        "pid": info['pid'],
+                        "name": info['name'] or f"proc_{info['pid']}",
+                        "cpu": round(cpu, 1),
+                        "ram": round(ram, 1),
+                        "rss_human": "N/A",
+                        "status": "running",
+                        "nice": 0,
+                        "affinity": list(range(num_cores)),
+                        "num_threads": 1,
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        procs = sorted(procs, key=lambda x: (x['cpu'], x['ram']), reverse=True)
+        return procs[:limit]
 
 
 # --- FocusOS Data Methods ---
@@ -537,54 +571,128 @@ def get_latest_focusos_state():
     try:
         if os.path.exists(DB_PATH):
             conn = sqlite3.connect(DB_PATH, timeout=2.0)
+            conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             row = cur.execute(
-                "SELECT workload, state, cpu_attribution, ram_attribution, workload_score, "
-                "system_cpu, system_memory, top_process, evidence_json, persistence "
-                "FROM workload_events ORDER BY rowid DESC LIMIT 1"
+                "SELECT * FROM workload_events ORDER BY rowid DESC LIMIT 1"
             ).fetchone()
             conn.close()
             
             if row:
-                workload, st, cpu_attr, ram_attr, score, sys_cpu, sys_mem, top_proc, ev_raw, cycles = row
+                row_dict = dict(row)
+                ts = row_dict.get("timestamp")
+                # Verify telemetry freshness (within last 15 seconds)
+                is_fresh = False
                 try:
-                    evidence = json.loads(ev_raw) if ev_raw else []
+                    if ts and (time.time() - float(ts) < 15.0):
+                        is_fresh = True
                 except Exception:
-                    evidence = []
-                return {
-                    "workload": workload,
-                    "state": st,
-                    "cpu_attribution": float(cpu_attr or 0.0),
-                    "ram_attribution": float(ram_attr or 0.0),
-                    "score": float(score or 0.0),
-                    "system_cpu": float(sys_cpu or 0.0),
-                    "system_memory": float(sys_mem or 0.0),
-                    "top_process": top_proc,
-                    "evidence": evidence,
-                    "consecutive_cycles": cycles,
-                }
+                    pass
+
+                if is_fresh:
+                    ev_raw = row_dict.get("evidence_json")
+                    try:
+                        evidence = json.loads(ev_raw) if ev_raw else []
+                    except Exception:
+                        evidence = []
+                    return {
+                        "workload": row_dict.get("workload", "IDLE"),
+                        "state": row_dict.get("state", "OBSERVING"),
+                        "cpu_attribution": float(row_dict.get("cpu_attribution") or 0.0),
+                        "ram_attribution": float(row_dict.get("ram_attribution") or 0.0),
+                        "score": float(row_dict.get("workload_score") or 0.0),
+                        "system_cpu": float(row_dict.get("system_cpu") or 0.0),
+                        "system_memory": float(row_dict.get("system_memory") or 0.0),
+                        "top_process": row_dict.get("top_process", "system"),
+                        "evidence": evidence,
+                        "consecutive_cycles": int(row_dict.get("persistence") or 0),
+                        "ml_confidence": float(row_dict.get("ml_confidence") or 0.0),
+                        "ml_workload": row_dict.get("ml_workload", "IDLE"),
+                    }
     except Exception as e:
         print(f"[get_latest_focusos_state] error: {e}")
         pass
     
-    return None
+    # If no recent row in DB, evaluate live telemetry on the fly (Daemon offline mode)
+    try:
+        from focusos.models.classifier import predict_live_workload
+        from focusos.rules.rule_engine import evaluate
+        from focusos.state_manager import WorkloadStateManager
+        from collectors.layer1_system import collect_layer1_metrics
+
+        ml_result = predict_live_workload()
+        sys_metrics = collect_layer1_metrics()
+        
+        sys_metrics_norm = dict(sys_metrics)
+        mem_bytes = sys_metrics_norm.get("memory_used", 0)
+        sys_metrics_norm["memory_used"] = float(mem_bytes) / (1024 * 1024) if mem_bytes > 1024 else float(mem_bytes)
+
+        active_processes = get_top_processes_list(20)
+        if active_processes:
+            for p in active_processes:
+                p["cpu_percent"] = p.get("cpu", 0.0)
+                p["memory_rss_mb"] = p.get("rss_mb", 0.0)
+
+        scores = evaluate(active_processes, sys_metrics_norm)
+        sm = WorkloadStateManager()
+        state = sm.update(scores, sys_metrics_norm, ml_inference=ml_result)
+        
+        return {
+            "workload": state["workload"],
+            "state": state["state"],
+            "cpu_attribution": state["cpu_attribution"],
+            "ram_attribution": state["ram_attribution"],
+            "score": state["score"],
+            "system_cpu": sys_metrics.get("cpu_usage_percent", 0.0),
+            "system_memory": sys_metrics_norm.get("memory_used", 0.0),
+            "top_process": state["top_process"],
+            "evidence": state["evidence"],
+            "consecutive_cycles": state["consecutive_cycles"],
+            "ml_confidence": state.get("ml_confidence", 0.0),
+            "ml_workload": state.get("ml_workload", "IDLE"),
+        }
+    except Exception as e:
+        print(f"[get_latest_focusos_state] fallback live evaluation error: {e}")
+
+    live_cpu = psutil.cpu_percent(interval=None)
+    return {
+        "workload": "IDLE",
+        "state": "OBSERVING",
+        "cpu_attribution": 0.0,
+        "ram_attribution": 0.0,
+        "score": 0.0,
+        "system_cpu": float(live_cpu or 0.0),
+        "system_memory": float(live_mem_mb),
+        "top_process": top_p,
+        "evidence": [{"signal": "Host operating at baseline telemetry"}],
+        "consecutive_cycles": 1,
+    }
 
 
 def get_processor_affinity_matrix():
     """Generates core allocation matrix and live utilization for Performance and Efficiency cores."""
-    total_cpus = psutil.cpu_count(logical=True) or 8
-    p_cores, e_cores = [], []
-    
     try:
-        if HAS_FOCUSOS:
-            p_cores, e_cores = get_cores()
+        from collectors.cpu_topology import get_topology
+        topo = get_topology()
+        total_cpus = topo.logical_cpus
+        physical_cores = topo.physical_cores
+        is_hybrid = topo.is_hybrid
+        p_cores = topo.p_cores
+        e_cores = topo.e_cores
+        arch_type = topo.architecture_type
+        model_name = topo.model_name
+        raw_available = topo.raw_data_available
+        threads_per_core = topo.threads_per_core
     except Exception:
-        pass
-
-    if not p_cores and not e_cores:
-        half = total_cpus // 2
-        p_cores = list(range(half))
-        e_cores = list(range(half, total_cpus))
+        total_cpus = psutil.cpu_count(logical=True) or 8
+        physical_cores = psutil.cpu_count(logical=False) or total_cpus
+        is_hybrid = False
+        p_cores = list(range(total_cpus))
+        e_cores = []
+        arch_type = "HOMOGENEOUS"
+        model_name = "Host CPU"
+        raw_available = False
+        threads_per_core = 1
 
     sim = get_active_simulation()
     if sim:
@@ -603,19 +711,26 @@ def get_processor_affinity_matrix():
                 core_load = random.uniform(0.2, 2.0)
             per_core.append(round(max(0.2, min(100.0, core_load + random.gauss(0, 0.4))), 1))
     else:
-        try:
-            raw_cores = psutil.cpu_percent(percpu=True)
-            per_core = [round(c, 1) for c in raw_cores] if raw_cores else [10.0] * total_cpus
-        except Exception:
-            per_core = [10.0] * total_cpus
+        monitor = get_cpu_monitor()
+        last_measurement = monitor.get_last_measurement()
+        per_core = last_measurement.get("per_core_percent", [])
+        if not per_core or len(per_core) != total_cpus:
+            fresh = monitor.sample(min_interval_sec=0.05)
+            per_core = fresh.get("per_core_percent", [0.0] * total_cpus)
 
     return {
         "p_cores": p_cores,
         "e_cores": e_cores,
-        "p_active": len(p_cores),
-        "e_active": len(e_cores),
+        "p_active": len(p_cores) if is_hybrid else total_cpus,
+        "e_active": len(e_cores) if is_hybrid else 0,
+        "is_hybrid": is_hybrid,
         "per_core_load": per_core,
-        "total_cores": total_cpus
+        "total_cores": total_cpus,
+        "physical_cores": physical_cores,
+        "threads_per_core": threads_per_core,
+        "architecture_type": arch_type,
+        "model_name": model_name,
+        "raw_data_available": raw_available,
     }
 
 

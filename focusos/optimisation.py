@@ -40,50 +40,14 @@ def is_protected(proc: psutil.Process) -> bool:
 
 def get_cores():
     """Returns lists of P-cores and E-cores for hybrid architectures, or empty lists if non-hybrid."""
-    p_cores = []
-    e_cores = []
-    
-    if os.path.exists("/sys/devices/cpu_core/cpus") and os.path.exists("/sys/devices/cpu_atom/cpus"):
-        try:
-            with open("/sys/devices/cpu_core/cpus", "r") as f:
-                for r in f.read().strip().split(','):
-                    if '-' in r:
-                        start, end = map(int, r.split('-'))
-                        p_cores.extend(range(start, end + 1))
-                    else:
-                        p_cores.append(int(r))
-            with open("/sys/devices/cpu_atom/cpus", "r") as f:
-                for r in f.read().strip().split(','):
-                    if '-' in r:
-                        start, end = map(int, r.split('-'))
-                        e_cores.extend(range(start, end + 1))
-                    else:
-                        e_cores.append(int(r))
-            return p_cores, e_cores
-        except Exception:
-            pass
-
-    base_path = "/sys/devices/system/cpu/"
-    frequencies = {}
-    
     try:
-        if os.path.exists(os.path.join(base_path, "cpu0", "cpufreq")):
-            for folder in os.listdir(base_path):
-                if folder.startswith("cpu") and folder[3:].isdigit():
-                    cpu_id = int(folder[3:])
-                    freq_file = os.path.join(base_path, folder, "cpufreq/cpuinfo_max_freq")
-                    if os.path.exists(freq_file):
-                        with open(freq_file, "r") as f:
-                            frequencies[cpu_id] = int(f.read().strip())
-                            
-            unique_speeds = sorted(list(set(frequencies.values())))
-            if len(unique_speeds) > 1:
-                p_cores = [cpu for cpu, freq in frequencies.items() if freq == max(unique_speeds)]
-                e_cores = [cpu for cpu, freq in frequencies.items() if freq == min(unique_speeds)]
+        from collectors.cpu_topology import get_topology
+        topo = get_topology()
+        if topo.is_hybrid:
+            return topo.p_cores, topo.e_cores
+        return [], []
     except Exception:
-        pass
-                    
-    return p_cores, e_cores
+        return [], []
 
 
 def get_active_network_interface() -> str:
@@ -173,6 +137,10 @@ def apply_policy(policy_dict: dict, state: dict, conn=None) -> list[dict]:
                     if policy_dict.get("affinity_pin") and fg_cores:
                         proc.cpu_affinity(fg_cores)
                     
+                    if policy_dict.get("io_priority") == "high":
+                        if hasattr(proc, "ionice"):
+                            proc.ionice(psutil.IOPRIO_CLASS_BE, 0)
+                    
                     action_record = {
                         "pid": pid,
                         "process_name": p_name,
@@ -205,6 +173,10 @@ def apply_policy(policy_dict: dict, state: dict, conn=None) -> list[dict]:
                     proc.nice(bg_nice)
                     if bg_cores:
                         proc.cpu_affinity(bg_cores)
+                    
+                    if policy_dict.get("io_priority") == "high":
+                        if hasattr(proc, "ionice"):
+                            proc.ionice(psutil.IOPRIO_CLASS_IDLE)
                     
                     action_record = {
                         "pid": pid,

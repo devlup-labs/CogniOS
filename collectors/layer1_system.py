@@ -8,22 +8,19 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import utils
 from utils.helpers import rate_mb_s
+from collectors.system_cpu import sample_system_cpu
 
 # ---------------------------------------------------------------------------
-# HARDCODED EXCLUSION — CogniOS self-telemetry & browser noise suppression
-# Chrome/Chromium entries reflect the Streamlit dashboard, not real user
-# browser activity.  CogniOS daemon Python processes would corrupt the
-# compiler_active signal and inflate CPU readings in FocusOS inference.
+# CogniOS internal self-telemetry noise suppression
+# Exclude the background daemon and dashboard runner so internal scripts
+# do not inflate CPU readings. Real user browsers (Chrome/Chromium/Firefox)
+# and development tools are preserved.
 # ---------------------------------------------------------------------------
 _EXCLUDE_EXACT_NAMES: frozenset = frozenset({
-    "chrome", "chromium", "chromium-browser",
-    "google-chrome", "google-chrome-stable",
     "chrome_crashpad_handler", "nacl_helper",
     "chrome_sandbox",
 })
 _EXCLUDE_SUBSTRINGS: tuple = (
-    "chrome",
-    "chromium",
     "cognios",          # any cognios_as_daemon / cognios_* variant
     "streamlit",        # dashboard runner itself
 )
@@ -48,6 +45,8 @@ _last = {
 def collect_layer1_metrics():
     now = time.time()
     timestamp = datetime.now(timezone.utc).isoformat()
+    # Prime system-wide CPU counter
+    psutil.cpu_percent(interval=None)
     #process
     try:
         procs = {}
@@ -77,8 +76,9 @@ def collect_layer1_metrics():
     except Exception:
         process_data = []
         num_threads= []
-    # CPU Metrics
-    cpu_usage_percent = psutil.cpu_percent(interval=None)
+    # CPU Metrics via Linux /proc/stat counter delta
+    cpu_sample = sample_system_cpu(min_interval_sec=0.05)
+    cpu_usage_percent = cpu_sample["cpu_usage_percent"]
     cpu_times = psutil.cpu_times()
     cpu_user_time = cpu_times.user
     cpu_system_time = cpu_times.system
@@ -219,6 +219,9 @@ def collect_layer1_metrics():
     return {
         "timestamp": timestamp,
         "cpu_usage_percent": cpu_usage_percent,
+        "cpu_sample_valid": cpu_sample.get("is_valid", True),
+        "cpu_sample_interval": cpu_sample.get("sample_interval_sec", 0.0),
+        "per_core_percent": cpu_sample.get("per_core_percent", []),
         "cpu_current_freq": cpu_current_freq,
         "cpu_user_time": cpu_user_time,
         "cpu_system_time": cpu_system_time,

@@ -266,21 +266,36 @@ def init_workload_events_table(conn):
             system_memory    REAL,
             top_process      TEXT,
             evidence_json    TEXT,
-            persistence      INTEGER
+            persistence      INTEGER,
+            ml_confidence    REAL,
+            ml_workload      TEXT,
+            ml_probabilities TEXT
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_workload_events_ts ON workload_events (timestamp)")
+
+    # Ensure backwards compatibility for existing databases by safely adding new columns
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(workload_events)")
+    existing_cols = {c[1] for c in cursor.fetchall()}
+    for col, col_type in [("ml_confidence", "REAL"), ("ml_workload", "TEXT"), ("ml_probabilities", "TEXT")]:
+        if col not in existing_cols:
+            try:
+                conn.execute(f"ALTER TABLE workload_events ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
     conn.commit()
 
 
-def write_workload_event(conn, timestamp, workload, state, cpu_attribution, ram_attribution, workload_score, system_cpu, system_memory, top_process, evidence_json, persistence):
+def write_workload_event(conn, timestamp, workload, state, cpu_attribution, ram_attribution, workload_score, system_cpu, system_memory, top_process, evidence_json, persistence, ml_confidence=0.0, ml_workload="IDLE", ml_probabilities="{}"):
     """Writes a workload evaluation snapshot to workload_events."""
     conn.execute("""
         INSERT INTO workload_events (
             timestamp, workload, state, cpu_attribution, ram_attribution,
-            workload_score, system_cpu, system_memory, top_process, evidence_json, persistence
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (timestamp, workload, state, cpu_attribution, ram_attribution, workload_score, system_cpu, system_memory, top_process, evidence_json, persistence))
+            workload_score, system_cpu, system_memory, top_process, evidence_json, persistence,
+            ml_confidence, ml_workload, ml_probabilities
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (timestamp, workload, state, cpu_attribution, ram_attribution, workload_score, system_cpu, system_memory, top_process, evidence_json, persistence, ml_confidence, ml_workload, ml_probabilities))
     conn.commit()
 
 

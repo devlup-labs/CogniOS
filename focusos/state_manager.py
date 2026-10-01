@@ -40,13 +40,29 @@ class WorkloadStateManager:
             "top_process": "N/A",
             "evidence": [],
             "target_pids": [],
+            "ml_confidence": 0.0,
+            "ml_workload": "IDLE",
+            "ml_probabilities": {},
+            "score_source": "RULE_ENGINE",
         }
 
-    def update(self, evaluation_scores: dict, system_metrics: dict) -> dict:
-        """Updates temporal state with the latest rule engine evaluation snapshot."""
+    def update(self, evaluation_scores: dict, system_metrics: dict, ml_inference: dict = None) -> dict:
+        """Updates temporal state with the latest rule engine and ML model evaluation snapshot."""
         now = time.time()
         system_cpu = float(system_metrics.get("cpu_usage_percent", 0.0))
         idle_threshold = getattr(config, "RULE_IDLE_CPU_THRESHOLD", 10.0)
+
+        # Parse ML inference if provided
+        ml_workload = None
+        ml_conf = 0.0
+        ml_valid = False
+        if ml_inference and ml_inference.get("is_valid"):
+            ml_workload = str(ml_inference.get("workload", "IDLE")).upper()
+            ml_conf = float(ml_inference.get("confidence", 0.0))
+            ml_valid = True
+            self.latest_metrics["ml_confidence"] = ml_conf
+            self.latest_metrics["ml_workload"] = ml_workload
+            self.latest_metrics["ml_probabilities"] = ml_inference.get("probabilities", {})
 
         # Check system IDLE: only go IDLE if CPU is very low AND no workload process matches anything
         has_active_workload = any(
@@ -63,10 +79,13 @@ class WorkloadStateManager:
             else:
                 self.current_state = WorkloadState.IDLE
             
-            self.history.append({"workload": "IDLE", "score": 0.0})
+            idle_score = ml_conf if (ml_valid and ml_workload == "IDLE") else 0.0
+            self.latest_metrics["score"] = idle_score
+            self.latest_metrics["score_source"] = "XGBoost ML Model" if (ml_valid and ml_workload == "IDLE") else "Rule Engine"
+            self.history.append({"workload": "IDLE", "score": idle_score})
             return self.get_current_state()
 
-        # Determine highest scoring candidate bucket
+        # Determine highest scoring candidate bucket from rule engine
         candidate_workload = "UNKNOWN"
         top_res = None
         top_score = -1.0
@@ -77,11 +96,28 @@ class WorkloadStateManager:
                 candidate_workload = bucket
                 top_res = data
 
-        self.history.append({"workload": candidate_workload, "score": top_score})
+        # ML-assisted candidate selection: if rule engine has no strong process match, but ML has high confidence
+        if (candidate_workload == "UNKNOWN" or top_score < 0.2) and ml_valid and ml_conf >= 0.60 and ml_workload != "IDLE":
+            candidate_workload = ml_workload
+            score_to_use = ml_conf
+            score_source = "XGBoost ML Model"
+        elif ml_valid and ml_conf > 0.0:
+            score_to_use = ml_conf
+            score_source = "XGBoost ML Model"
+        else:
+            score_to_use = max(0.0, top_score)
+            score_source = "Rule Engine"
+
+        self.history.append({"workload": candidate_workload, "score": score_to_use})
+
+        evidence_items = []
+        if ml_valid and ml_conf > 0.0:
+            evidence_items.append(
+                f"XGBoost Classifier: {ml_workload} ({ml_conf * 100:.1f}% confidence)"
+            )
 
         if top_res:
             top_proc_name = top_res["matched_processes"][0]["name"] if top_res["matched_processes"] else "N/A"
-            evidence_items = []
             for p in top_res["matched_processes"][:5]:
                 cpu_pct = p.get('cpu_percent', 0.0)
                 ram_mb = p.get('memory_rss_mb', 0.0)
@@ -105,10 +141,27 @@ class WorkloadStateManager:
             self.latest_metrics = {
                 "cpu_attribution": top_res["cpu_attribution"],
                 "ram_attribution": top_res["ram_attribution"],
-                "score": top_res["score"],
+                "score": score_to_use,
+                "score_source": score_source,
                 "top_process": top_proc_name,
                 "evidence": evidence_items,
                 "target_pids": target_pids,
+                "ml_confidence": ml_conf,
+                "ml_workload": ml_workload or "IDLE",
+                "ml_probabilities": ml_inference.get("probabilities", {}) if ml_inference else {},
+            }
+        else:
+            self.latest_metrics = {
+                "cpu_attribution": 0.0,
+                "ram_attribution": 0.0,
+                "score": score_to_use,
+                "score_source": score_source,
+                "top_process": "system",
+                "evidence": evidence_items,
+                "target_pids": [],
+                "ml_confidence": ml_conf,
+                "ml_workload": ml_workload or "IDLE",
+                "ml_probabilities": ml_inference.get("probabilities", {}) if ml_inference else {},
             }
 
         # Track consecutive occurrences of the top workload
@@ -156,12 +209,16 @@ class WorkloadStateManager:
             "workload": self.current_workload,
             "state": self.current_state,
             "consecutive_cycles": self.consecutive_count,
-            "cpu_attribution": self.latest_metrics["cpu_attribution"],
-            "ram_attribution": self.latest_metrics["ram_attribution"],
-            "score": self.latest_metrics["score"],
-            "top_process": self.latest_metrics["top_process"],
-            "evidence": self.latest_metrics["evidence"],
+            "cpu_attribution": self.latest_metrics.get("cpu_attribution", 0.0),
+            "ram_attribution": self.latest_metrics.get("ram_attribution", 0.0),
+            "score": self.latest_metrics.get("score", 0.0),
+            "score_source": self.latest_metrics.get("score_source", "Rule Engine"),
+            "top_process": self.latest_metrics.get("top_process", "N/A"),
+            "evidence": self.latest_metrics.get("evidence", []),
             "target_pids": self.latest_metrics.get("target_pids", []),
+            "ml_confidence": self.latest_metrics.get("ml_confidence", 0.0),
+            "ml_workload": self.latest_metrics.get("ml_workload", "IDLE"),
+            "ml_probabilities": self.latest_metrics.get("ml_probabilities", {}),
         }
 
 

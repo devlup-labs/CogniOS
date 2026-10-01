@@ -5,7 +5,11 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import config
-from focusos.rules.process_vocab import match_process_to_bucket, WORKLOAD_BUCKETS
+from focusos.rules.process_vocab import (
+    match_process_to_bucket,
+    WORKLOAD_BUCKETS,
+    is_protected_process,
+)
 from focusos.attribution import (
     compute_cpu_attribution,
     compute_ram_attribution,
@@ -35,6 +39,11 @@ def evaluate(processes: list[dict], system_metrics: dict) -> dict:
         }
     """
     system_cpu = max(0.1, float(system_metrics.get("cpu_usage_percent", 0.0)))
+    try:
+        import psutil
+        total_cores = int(system_metrics.get("core_count") or psutil.cpu_count() or 1)
+    except Exception:
+        total_cores = int(system_metrics.get("core_count") or 1)
     
     # System RAM used in MB
     system_ram_mb = float(system_metrics.get("memory_used", 0.0))
@@ -63,10 +72,13 @@ def evaluate(processes: list[dict], system_metrics: dict) -> dict:
             continue
 
         name = proc.get("name", "")
-        cpu = float(proc.get("cpu_percent", 0.0) or 0.0)
+        if is_protected_process(name):
+            continue
+
+        cpu = float(proc.get("cpu_percent") if proc.get("cpu_percent") is not None else (proc.get("cpu") or 0.0))
         
-        # Handle RAM info formats (MB float or psutil struct/dict)
-        ram_mb = float(proc.get("memory_rss_mb") or 0.0)
+        # Handle RAM info formats (MB float, rss_mb, or psutil struct/dict)
+        ram_mb = float(proc.get("memory_rss_mb") if proc.get("memory_rss_mb") is not None else (proc.get("rss_mb") or 0.0))
         if ram_mb <= 0.0:
             mem_info = proc.get("memory_info")
             if isinstance(mem_info, dict):
@@ -99,7 +111,7 @@ def evaluate(processes: list[dict], system_metrics: dict) -> dict:
 
     for bucket, data in buckets.items():
         count = len(data["procs"])
-        cpu_attr = compute_cpu_attribution(data["cpu_sum"], system_cpu)
+        cpu_attr = compute_cpu_attribution(data["cpu_sum"], system_cpu, total_cores=total_cores)
         ram_attr = compute_ram_attribution(data["ram_sum"], system_ram_mb)
         evidence = compute_evidence_score(count, bucket)
         score = compute_workload_score(cpu_attr, ram_attr, evidence)
@@ -117,7 +129,7 @@ def evaluate(processes: list[dict], system_metrics: dict) -> dict:
     if unknown_procs:
         unk_cpu_sum = sum(p["cpu_percent"] for p in unknown_procs)
         unk_ram_sum = sum(p["memory_rss_mb"] for p in unknown_procs)
-        cpu_attr = compute_cpu_attribution(unk_cpu_sum, system_cpu)
+        cpu_attr = compute_cpu_attribution(unk_cpu_sum, system_cpu, total_cores=total_cores)
         ram_attr = compute_ram_attribution(unk_ram_sum, system_ram_mb)
         evidence = compute_evidence_score(len(unknown_procs), "UNKNOWN")
         score = compute_workload_score(cpu_attr, ram_attr, evidence)
@@ -140,11 +152,16 @@ if __name__ == "__main__":
         {"pid": 102, "name": "cc1plus", "cpu_percent": 30.0, "memory_rss_mb": 150.0},
         {"pid": 103, "name": "chrome", "cpu_percent": 5.0, "memory_rss_mb": 800.0},
     ]
-    sample_sys = {"cpu_usage_percent": 85.0, "memory_used": 4000.0}
+    sample_sys_1 = {"cpu_usage_percent": 85.0, "memory_used": 4000.0, "core_count": 1}
+    eval_res_1 = evaluate(sample_procs, sample_sys_1)
+    assert "COMPILATION" in eval_res_1
+    comp_1 = eval_res_1["COMPILATION"]
+    assert comp_1["process_count"] == 2
+    assert comp_1["cpu_attribution"] == round(75.0 / 85.0, 4)
 
-    eval_res = evaluate(sample_procs, sample_sys)
-    assert "COMPILATION" in eval_res
-    comp = eval_res["COMPILATION"]
-    assert comp["process_count"] == 2
-    assert comp["cpu_attribution"] == round(75.0 / 85.0, 4)
-    print(f"[✔] rule_engine evaluation passed successfully. COMPILATION score: {comp['score']}")
+    sample_sys_16 = {"cpu_usage_percent": 85.0, "memory_used": 4000.0, "core_count": 16}
+    eval_res_16 = evaluate(sample_procs, sample_sys_16)
+    comp_16 = eval_res_16["COMPILATION"]
+    assert comp_16["cpu_attribution"] == round((75.0 / 16.0) / 85.0, 4)
+
+    print(f"[✔] rule_engine evaluation passed successfully. COMPILATION score: {comp_1['score']}")

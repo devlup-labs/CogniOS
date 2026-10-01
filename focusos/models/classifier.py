@@ -1,10 +1,7 @@
 """
-# ARCHIVED: ML pipeline — replaced by deterministic rule-based engine in focusos/rules/
-# Do NOT import this module from the main daemon.
-classifier.py — FocusOS XGBoost Workload Classifier (IdeaPad 22-Core Edition)
-==============================================================================
-Trains a direct supervised XGBoost classifier on the 22-feature IdeaPad
-dataset and exposes ``WorkloadPredictor`` for real-time inference.
+FocusOS XGBoost Workload Classifier
+Trains and serves direct supervised XGBoost classifier on the 22-feature
+system telemetry vector, exposing WorkloadPredictor for live inference.
 
 Workload classes: idle · coding · browsing · video_call
 """
@@ -17,6 +14,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import classification_report, confusion_matrix
+import threading
 import xgboost as xgb
 
 # ──────────────────────────────────────────────────────────────────────
@@ -75,16 +73,27 @@ EXPECTED_CLASSES = {"idle", "coding", "browsing", "video_call"}
 class WorkloadPredictor:
     """Production inference predictor for FocusOS workload classification."""
 
-    def __init__(self, models_dir: str = MODELS_DIR):
-        self.models_dir = models_dir
+    def __init__(self, models_dir: str = None):
+        if not models_dir or not os.path.exists(os.path.join(models_dir, "xgboost_model.json")):
+            candidates = [
+                MODELS_DIR,
+                os.path.join(os.path.dirname(PROJECT_DIR), "models_saved"),
+                os.path.join(os.path.dirname(os.path.dirname(PROJECT_DIR)), "focusos/models_saved"),
+                os.path.join(os.path.dirname(os.path.dirname(PROJECT_DIR)), "focusos/models/models_saved"),
+            ]
+            for c in candidates:
+                if os.path.exists(os.path.join(c, "xgboost_model.json")):
+                    models_dir = c
+                    break
+        self.models_dir = models_dir or MODELS_DIR
         self.scaler: StandardScaler = joblib.load(
-            os.path.join(models_dir, "scaler.pkl")
+            os.path.join(self.models_dir, "scaler.pkl")
         )
         self.label_encoder: LabelEncoder = joblib.load(
-            os.path.join(models_dir, "label_encoder.pkl")
+            os.path.join(self.models_dir, "label_encoder.pkl")
         )
         self.xgb = xgb.XGBClassifier()
-        self.xgb.load_model(os.path.join(models_dir, "xgboost_model.json"))
+        self.xgb.load_model(os.path.join(self.models_dir, "xgboost_model.json"))
 
     def predict(self, features_df: pd.DataFrame) -> dict | list[dict] | None:
         """
@@ -142,6 +151,121 @@ class WorkloadPredictor:
             )
 
         return results[0] if len(results) == 1 else results
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Production Live Inference Service
+# ──────────────────────────────────────────────────────────────────────
+_GLOBAL_PREDICTOR = None
+_GLOBAL_PREDICTOR_LOCK = threading.Lock()
+
+
+def get_predictor(models_dir: str = None) -> WorkloadPredictor:
+    """Thread-safe singleton accessor for WorkloadPredictor."""
+    global _GLOBAL_PREDICTOR
+    if _GLOBAL_PREDICTOR is None:
+        with _GLOBAL_PREDICTOR_LOCK:
+            if _GLOBAL_PREDICTOR is None:
+                _GLOBAL_PREDICTOR = WorkloadPredictor(models_dir=models_dir)
+    return _GLOBAL_PREDICTOR
+
+
+def predict_live_workload(window_df: pd.DataFrame = None, db_path: str = None) -> dict:
+    """
+    Executes live workload inference using XGBoost on the current sliding window.
+
+    Returns a standardized dictionary:
+    {
+        "workload": "CODING" | "BROWSING" | "VIDEO_CALL" | "IDLE" | "UNKNOWN",
+        "workload_raw": str,
+        "confidence": float (0.0 to 1.0),
+        "confidence_pct": float (0.0 to 100.0),
+        "probabilities": dict (e.g. {"coding": 0.85, ...}),
+        "features": dict of 22 features,
+        "model_type": "xgboost",
+        "sample_count": int,
+        "is_valid": bool,
+        "status": str
+    }
+    """
+    from focusos.sliding_window import get_window_from_db
+    from focusos.feature_engineer import extract_features
+
+    try:
+        if window_df is None:
+            window_df = get_window_from_db(db_path=db_path) if db_path else get_window_from_db()
+
+        if window_df is None or window_df.empty:
+            return {
+                "workload": "IDLE",
+                "workload_raw": "idle",
+                "confidence": 0.0,
+                "confidence_pct": 0.0,
+                "probabilities": {"browsing": 0.0, "coding": 0.0, "idle": 1.0, "video_call": 0.0},
+                "features": {},
+                "model_type": "xgboost",
+                "sample_count": 0,
+                "is_valid": False,
+                "status": "empty_window",
+            }
+
+        feats_df = extract_features(window_df)
+        if feats_df is None or feats_df.empty:
+            return {
+                "workload": "UNKNOWN",
+                "workload_raw": "unknown",
+                "confidence": 0.0,
+                "confidence_pct": 0.0,
+                "probabilities": {},
+                "features": {},
+                "model_type": "xgboost",
+                "sample_count": len(window_df),
+                "is_valid": False,
+                "status": "feature_extraction_failed",
+            }
+
+        predictor = get_predictor()
+        pred = predictor.predict(feats_df)
+        if isinstance(pred, list):
+            pred = pred[0]
+
+        raw_wl = str(pred.get("workload", "idle")).lower()
+        conf_pct = float(pred.get("confidence", 0.0))
+        conf_ratio = round(conf_pct / 100.0, 4)
+        norm_wl = raw_wl.upper()
+
+        probs_pct = pred.get("probabilities", {})
+        probs_ratio = {k: round(float(v) / 100.0, 4) for k, v in probs_pct.items()}
+        features_dict = feats_df.iloc[0].to_dict()
+
+        return {
+            "workload": norm_wl,
+            "workload_raw": raw_wl,
+            "confidence": conf_ratio,
+            "confidence_pct": conf_pct,
+            "probabilities": probs_ratio,
+            "probabilities_pct": probs_pct,
+            "features": features_dict,
+            "model_type": "xgboost",
+            "sample_count": len(window_df),
+            "is_valid": True,
+            "status": "ok",
+        }
+    except Exception as exc:
+        return {
+            "workload": "UNKNOWN",
+            "workload_raw": "unknown",
+            "confidence": 0.0,
+            "confidence_pct": 0.0,
+            "probabilities": {},
+            "features": {},
+            "model_type": "xgboost",
+            "sample_count": 0,
+            "is_valid": False,
+            "error": str(exc),
+            "status": "error",
+        }
+
 
 
 # ──────────────────────────────────────────────────────────────────────

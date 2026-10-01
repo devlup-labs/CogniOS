@@ -7,24 +7,51 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 
 
-def compute_cpu_attribution(bucket_cpu_sum: float, system_cpu_used: float) -> float:
+def compute_cpu_attribution(
+    bucket_cpu_sum: float,
+    system_cpu_used: float,
+    total_cores: int = 1,
+    denominator: str = "active_load"
+) -> float:
     """Calculates CPU Resource Attribution Score.
     
-    Attribution = CPU_bucket / max(System_CPU_in_use, 0.1)
-    Clamped to [0.0, 1.0].
+    Parameters:
+    - bucket_cpu_sum: Sum of process CPU% in this workload bucket (standard Linux multicore scale where 100% = 1 core).
+    - system_cpu_used: Total host-wide CPU in use (0.0 to 100.0%).
+    - total_cores: Number of logical CPU cores on the host machine.
+    - denominator:
+        - "active_load": Workload share of active host CPU load (clamped to [0.0, 1.0]).
+                         Formula = (bucket_cpu_sum / max(1, total_cores)) / max(system_cpu_used, 0.1)
+        - "host_capacity": Workload CPU consumption relative to full host computing capacity (0.0 to 1.0).
+                         Formula = (bucket_cpu_sum / max(1, total_cores)) / 100.0
     """
     if system_cpu_used <= 0.1 or bucket_cpu_sum <= 0.0:
         return 0.0
     
-    attr = bucket_cpu_sum / system_cpu_used
+    cores = max(1, total_cores)
+    # Convert multicore process CPU sum (where 100% = 1 core) to host-wide capacity %
+    bucket_norm_cpu = bucket_cpu_sum / cores
+
+    if denominator == "host_capacity":
+        attr = bucket_norm_cpu / 100.0
+    else:
+        # Default: share of active host CPU load
+        attr = bucket_norm_cpu / max(system_cpu_used, 0.1)
+        
     return min(1.0, max(0.0, round(attr, 4)))
 
 
-def compute_ram_attribution(bucket_rss_mb: float, system_rss_used_mb: float) -> float:
+def compute_ram_attribution(
+    bucket_rss_mb: float,
+    system_rss_used_mb: float,
+    denominator: str = "used_memory"
+) -> float:
     """Calculates RAM Resource Attribution Score.
     
-    Attribution = RAM_bucket / max(System_RAM_used_mb, 1.0)
-    Clamped to [0.0, 1.0].
+    Parameters:
+    - bucket_rss_mb: Sum of RSS memory used by workload processes in MB.
+    - system_rss_used_mb: Total host RAM currently used in MB.
+    - denominator: "used_memory" (share of host used RAM)
     """
     if system_rss_used_mb <= 1.0 or bucket_rss_mb <= 0.0:
         return 0.0
@@ -87,9 +114,10 @@ def compute_workload_score(
 
 
 if __name__ == "__main__":
-    assert compute_cpu_attribution(60.0, 80.0) == 0.75
+    assert compute_cpu_attribution(60.0, 80.0, total_cores=1) == 0.75
+    assert compute_cpu_attribution(60.0, 80.0, total_cores=16) == round((60.0 / 16.0) / 80.0, 4)
     assert compute_cpu_attribution(0.0, 0.0) == 0.0
-    assert compute_cpu_attribution(100.0, 80.0) == 1.0
+    assert compute_cpu_attribution(100.0, 80.0, total_cores=1) == 1.0
     assert compute_ram_attribution(2000.0, 8000.0) == 0.25
     assert compute_evidence_score(3, "COMPILATION") == 3.0
     assert compute_workload_score(0.0, 0.0, 0.0, 1.0) == 0.0
