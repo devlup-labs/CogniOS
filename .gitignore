@@ -35,6 +35,7 @@ data/models/*.pt
 data/traces/*
 !data/traces/.gitkeep
 !data/models/.gitkeep
+ui-overhead-results/
 
 # Logs
 logs/
@@ -47,3 +48,5 @@ dashboard.log
 .vscode/
 .idea/
 
+/Evolution of Blackbox
+.streamlit

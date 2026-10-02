@@ -3,10 +3,14 @@ import os
 import sqlite3
 import time
 import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import json
 import subprocess
+import threading
+import numpy as np
 from focusos.collector import get_top_processes
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from focusos.sliding_window import get_window_from_db
 from config import DB_PATH
 from config import COMPILERS
 from config import IDES
@@ -15,11 +19,124 @@ from config import GAMES
 from config import CALLS
 '''These lists are not yet written in cofig file, will be updated soon'''
 
+def capture_process_states():
+	"""Captures exact state (nice, cpu_affinity, ionice) of all running processes."""
+	state = {}
+	for proc in psutil.process_iter(attrs=['pid', 'name']):
+		try:
+			pid = proc.info['pid']
+			p = psutil.Process(pid)
+			proc_state = {}
+			try:
+				proc_state['nice'] = p.nice()
+			except psutil.AccessDenied:
+				pass
+			try:
+				proc_state['affinity'] = p.cpu_affinity()
+			except (psutil.AccessDenied, AttributeError):
+				pass
+			try:
+				io = p.ionice()
+				proc_state['ioclass'] = io.ioclass
+				proc_state['iovalue'] = io.value
+			except (psutil.AccessDenied, AttributeError):
+				pass
+			if proc_state:
+				state[pid] = proc_state
+		except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+			continue
+	return state
+
+def restore_process_states(saved_state: dict):
+	"""Restores the exact state of processes from a saved snapshot."""
+	restored_count = 0
+	for pid, state in saved_state.items():
+		try:
+			p = psutil.Process(pid)
+			if 'nice' in state:
+				p.nice(state['nice'])
+			if 'affinity' in state and state['affinity']:
+				p.cpu_affinity(state['affinity'])
+			if 'ioclass' in state:
+				p.ionice(state['ioclass'], state.get('iovalue', 0))
+			restored_count += 1
+		except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, ValueError):
+			continue
+	return restored_count
+
+def verify_and_rollback(pre_state: dict, workload: str, baseline_mean: float, baseline_std: float):
+	"""Monitors telemetry post-optimization and rolls back on regression."""
+	time.sleep(60)
+	df_window = get_window_from_db(limit=60)
+	if df_window is None or df_window.empty:
+		return
+	
+	post_cpu = df_window['cpu_usage_percent'].values
+	post_mean = np.mean(post_cpu)
+	
+	std = baseline_std + 0.001
+	z_score = (post_mean - baseline_mean) / std
+	
+	if z_score < -2.5:
+		restored = restore_process_states(pre_state)
+		log_optimization_result(workload, 100.0, [f"Rollback triggered (Z={z_score:.2f})"], f"Performance regression detected. Restored {restored} processes.")
+		print(f"Rollback executed: Z-score {z_score:.2f} < -2.5. Restored {restored} processes.")
+	else:
+		log_optimization_result(workload, 100.0, [f"Optimization verified (Z={z_score:.2f})"], "Telemetry within acceptable bounds.")
+
+
+def apply_settings(p: psutil.Process, nice=None, affinity=None, io_class=None, io_value=0):
+	applied = {'nice': False, 'affinity': False, 'io': False}
+	if nice is not None:
+		try:
+			p.nice(nice)
+			applied['nice'] = True
+		except psutil.AccessDenied:
+			print(f"Warning: Permission denied to set nice for PID {p.pid}")
+		except Exception:
+			pass
+			
+	if affinity is not None:
+		try:
+			p.cpu_affinity(affinity)
+			applied['affinity'] = True
+		except psutil.AccessDenied:
+			print(f"Warning: Permission denied to set affinity for PID {p.pid}")
+		except Exception:
+			pass
+			
+	if io_class is not None:
+		try:
+			if io_class == 'b':
+				p.ionice(psutil.IOPRIO_CLASS_BE, io_value)
+			elif io_class == 'r':
+				p.ionice(psutil.IOPRIO_CLASS_RT, io_value)
+			elif io_class == 'i':
+				p.ionice(psutil.IOPRIO_CLASS_IDLE)
+			applied['io'] = True
+		except (AttributeError, ValueError):
+			pass
+		except psutil.AccessDenied:
+			print(f"Warning: Permission denied to set IO priority for PID {p.pid}")
+		except Exception:
+			pass
+			
+	return applied
+
 def apply_optimization(workload: str, confidence: float, explanation: str = "") -> bool:
 	if confidence < 80:
 		print(f"Optimisation aborted: Confidence for {workload} is less than 80%")
 		log_optimization_result(workload, confidence, ["Optimization skipped (Confidence < 80%)"], explanation)
 		return False
+
+	pre_state = capture_process_states()
+	df_baseline = get_window_from_db(limit=60)
+	baseline_mean = 0.0
+	baseline_std = 1.0
+	if df_baseline is not None and not df_baseline.empty:
+		baseline_mean = np.mean(df_baseline['cpu_usage_percent'].values)
+		baseline_std = np.std(df_baseline['cpu_usage_percent'].values)
+
 	actions = []
 
 	# Gathering hardware architecture details
@@ -39,139 +156,164 @@ def apply_optimization(workload: str, confidence: float, explanation: str = "") 
 	top_cpu, top_mem = get_top_processes(5)
 	unique_processes_dict = {p['pid']: p for p in top_cpu + top_mem}
 	unique_processes = list(unique_processes_dict.values())
+	unique_pids = set(unique_processes_dict.keys())
 	
 	workload_clean = workload.lower().replace("_", " ")
 
 	if workload_clean != "video call":
 			set_network_fair_queuing(False)
 
+	rules_exact = {}
+	rules_top_bg = None
+	bg_exclusions = set()
+	all_cores = list(range(total_cores))
+
+	# Define rules based on workload
 	if workload_clean == "compiling":
-		#prioritising the compilers
-		count_nice = sum(prioritise_process(compiler,-12) for compiler in COMPILERS)
-		count_affinity = sum(pin_process_to_cores(compiler, foreground_cores) for compiler in COMPILERS)
-		count_io = sum(set_io_priority(compiler, 'b', 3) for compiler in COMPILERS)
-		count_nice_bg = 0
-		count_affinity_bg = 0
+		for c in COMPILERS:
+			rules_exact[c.lower()] = {'nice': -12, 'affinity': foreground_cores, 'io_class': 'b', 'io_value': 3}
+		for i in IDES:
+			if i.lower() in rules_exact:
+				rules_exact[i.lower()]['nice'] = -5
+			else:
+				rules_exact[i.lower()] = {'nice': -5}
+		rules_top_bg = {'nice': 7, 'io_class': 'i', 'io_value': 0, 'affinity': background_cores}
+		bg_exclusions = set([x.lower() for x in COMPILERS + IDES])
 
-		#moderately prioritising IDEs
-		count_nice_ide = sum(prioritise_process(ide,-5) for ide in IDES)
-
-		#de-prioritising top processes that are background processes
-		for p in unique_processes:
-				proc_name = p["name"].lower()
-				if proc_name not in COMPILERS and proc_name not in IDES:
-						count_nice_bg += prioritise_process(proc_name, 7)
-						set_io_priority(proc_name, 'i', 0)
-						pin_process_to_cores(proc_name, background_cores)
-
-		if count_nice > 0 or count_nice_bg > 0:
-			actions.append(f"Prioritised {count_nice} compiler(s), pinned {count_affinity} to core(s) {foreground_cores}, set {count_io} to idle IO")
- 
- 
 	elif workload_clean == "gaming":
-		#will reset the affinity of the bg processes to free up gaming cores and pin game processes to foreground cores
-		count_nice = sum(prioritise_process(game, -10) for game in GAMES)
-		count_affinity = sum(pin_process_to_cores(game, foreground_cores) for game in GAMES)
-		count_io = sum(set_io_priority(game, 'b', 1) for game in GAMES)
-		
-		count_bg = 0
-		for p in unique_processes:
-				proc_name = p["name"].lower()
-				if proc_name not in GAMES:
-						count_bg += prioritise_process(proc_name, 10)
-						set_io_priority(proc_name, 'i', 0)
-						pin_process_to_cores(proc_name, background_cores)
+		for g in GAMES:
+			rules_exact[g.lower()] = {'nice': -10, 'affinity': foreground_cores, 'io_class': 'b', 'io_value': 1}
+		rules_top_bg = {'nice': 10, 'io_class': 'i', 'io_value': 0, 'affinity': background_cores}
+		bg_exclusions = set([x.lower() for x in GAMES])
 
-		if count_nice > 0 or count_bg > 0:
-			actions.append(f"Prioritised {count_nice} game process(es), granted {count_affinity} full core affinity")
-	
-	
 	elif workload_clean == "coding":
-		count_nice = sum(prioritise_process(ide, -5) for ide in IDES)
-		count_affinity = sum(pin_process_to_cores(ide, foreground_cores) for ide in IDES)
-		count_browser_aff = sum(pin_process_to_cores(browser, background_cores) for browser in BROWSERS)
-		
-		if count_nice > 0:
-			actions.append(f"Prioritised {count_nice} IDE process(es), pinned {count_browser_aff} browser(s) to cores {background_cores}")
-	
-	
+		for i in IDES:
+			rules_exact[i.lower()] = {'nice': -5, 'affinity': foreground_cores}
+		for b in BROWSERS:
+			rules_exact[b.lower()] = {'affinity': background_cores}
+			
 	elif workload_clean == "browsing":
-		#reset all the process to normal priority and spread across all cores
-		count_nice = sum(prioritise_process(browser, 0) for browser in BROWSERS)
-		count_affinity = sum(pin_process_to_cores(browser, foreground_cores) for browser in BROWSERS)
-		
-		# Deprioritize background I/O to yield disk cache to the browser process
-		for p in unique_processes:
-				proc_name = p["name"].lower()
-				if proc_name not in BROWSERS:
-						set_io_priority(proc_name, 'i', 0)
-
-		if count_nice > 0:
-			actions.append(f"Browsing: Restored {count_nice} browser(s) to normal nice priority across {count_affinity} core(s)")
-
+		for b in BROWSERS:
+			rules_exact[b.lower()] = {'nice': 0, 'affinity': foreground_cores}
+		rules_top_bg = {'io_class': 'i', 'io_value': 0}
+		bg_exclusions = set([x.lower() for x in BROWSERS])
 
 	elif workload_clean == "video call":
-		#prioritising the communication 
-		count_nice = sum(prioritise_process(call, -5) for call in CALLS)
-		count_affinity = sum(pin_process_to_cores(call, foreground_cores) for call in CALLS)
-		
-		# Deprioritize background I/O to prevent loss of audio or video packets
-		for p in unique_processes:
-				proc_name = p["name"].lower()
-				if proc_name not in CALLS:
-						set_io_priority(proc_name, 'i', 0)
-						
-		# Fair Queuing with the help of tc (Traffic control tool), will require sudo privilages
+		for c in CALLS:
+			rules_exact[c.lower()] = {'nice': -5, 'affinity': foreground_cores}
+		rules_top_bg = {'io_class': 'i', 'io_value': 0}
+		bg_exclusions = set([x.lower() for x in CALLS])
 		set_network_fair_queuing(True)
+		
+	elif workload_clean == "idle":
+		for p in COMPILERS + IDES + GAMES + BROWSERS + CALLS:
+			rules_exact[p.lower()] = {'nice': 0, 'affinity': all_cores, 'io_class': 'b', 'io_value': 7}
 
-		actions.append(f"Video calling: Prioritising {count_nice} communication process")
+	# Apply rules in a single pass
+	stats = {
+		'nice': 0, 'affinity': 0, 'io': 0,
+		'bg_nice': 0, 'bg_affinity': 0, 'bg_io': 0,
+		'ide_nice': 0, 'browser_affinity': 0
+	}
+
+	for proc in psutil.process_iter(attrs=['pid', 'name']):
+		try:
+			pid = proc.info['pid']
+			p_name = proc.info['name'] or ""
+			p_name_lower = p_name.lower()
+			
+			applied = False
+			
+			if p_name_lower in rules_exact:
+				rule = rules_exact[p_name_lower]
+				res = apply_settings(psutil.Process(pid), **rule)
+				if res['nice']: stats['nice'] += 1
+				if res['affinity']: stats['affinity'] += 1
+				if res['io']: stats['io'] += 1
+				
+				# Track specific counts for logging if needed
+				if workload_clean == "coding":
+					if p_name_lower in [x.lower() for x in BROWSERS] and res['affinity']:
+						stats['browser_affinity'] += 1
+					if p_name_lower in [x.lower() for x in IDES] and res['nice']:
+						stats['ide_nice'] += 1
+				applied = True
+				
+			if not applied and rules_top_bg and pid in unique_pids:
+				if p_name_lower not in bg_exclusions:
+					res = apply_settings(psutil.Process(pid), **rules_top_bg)
+					if res['nice']: stats['bg_nice'] += 1
+					if res['affinity']: stats['bg_affinity'] += 1
+					if res['io']: stats['bg_io'] += 1
+		except (psutil.NoSuchProcess, psutil.ZombieProcess):
+			continue
+
+	# Build logging actions
+	if workload_clean == "compiling":
+		if stats['nice'] > 0 or stats['bg_nice'] > 0:
+			msg = []
+			if stats['nice'] > 0:
+				msg.append(f"Prioritised {stats['nice']} compiler(s)/IDE(s), pinned {stats['affinity']} to core(s) {foreground_cores}, set {stats['io']} to best effort IO")
+			if stats['bg_nice'] > 0:
+				msg.append(f"Deprioritised {stats['bg_nice']} bg process(es)")
+			actions.append("; ".join(msg))
+			
+	elif workload_clean == "gaming":
+		if stats['nice'] > 0 or stats['bg_nice'] > 0:
+			msg = []
+			if stats['nice'] > 0:
+				msg.append(f"Prioritised {stats['nice']} game process(es), granted {stats['affinity']} full core affinity")
+			if stats['bg_nice'] > 0:
+				msg.append(f"Deprioritised {stats['bg_nice']} bg process(es)")
+			actions.append("; ".join(msg))
+			
+	elif workload_clean == "coding":
+		if stats['ide_nice'] > 0 or stats['browser_affinity'] > 0:
+			actions.append(f"Prioritised {stats['ide_nice']} IDE process(es), pinned {stats['browser_affinity']} browser(s) to cores {background_cores}")
+			
+	elif workload_clean == "browsing":
+		if stats['nice'] > 0 or stats['bg_io'] > 0:
+			actions.append(f"Browsing: Restored {stats['nice']} browser(s) to normal priority, yielded IO for {stats['bg_io']} bg processes")
+
+	elif workload_clean == "video call":
+		if stats['nice'] > 0 or stats['bg_io'] > 0:
+			actions.append(f"Video calling: Prioritised {stats['nice']} communication process(es), yielded IO for {stats['bg_io']} bg processes")
 
 	elif workload_clean == "idle":
-		target_proc = set(COMPILERS + IDES + GAMES + BROWSERS + CALLS)
-		
-		count_nice = 0
-		count_aff = 0
-		all_cores = list(range(total_cores))
-
-		# Iterate through currently running active processes
-		for p in unique_processes:
-				proc_name = p["name"].lower()
-				
-				# Check if the running process is one of our managed applications
-				if any(target in proc_name for target in target_proc):
-						# Reset CPU nice priority to baseline (0)
-						count_nice += prioritise_process(p["name"], 0)
-						
-						# Reset CPU affinity across all available cores
-						count_aff += pin_process_to_cores(p["name"], all_cores)
-						
-						# Release from Idle I/O to Best Effort (Value 7)
-						set_io_priority(p["name"], 'b', 7)
-
-		actions.append(f"Idle: Restored {count_nice} running workload process(es) to normal priority and granted full core affinity across {count_aff} core(s).")
-
+		if stats['nice'] > 0:
+			actions.append(f"Idle: Restored {stats['nice']} running workload process(es) to normal priority and full core affinity")
 
 	if len(actions) > 0:
 		try:
 			log_optimization_result(workload, confidence, actions, explanation)
 			print(f"Optimization Successful: {actions[-1]}")
+			verifier_thread = threading.Thread(target=verify_and_rollback, args=(pre_state, workload, baseline_mean, baseline_std), daemon=True)
+			verifier_thread.start()
 			return True
 		except Exception as e:
 			print(f"Database logging error :{e}")
 	return True
 
-#reads 'route' proc file and indentifies acctive network interface, with a fallback to ethernet
-def get_active_network_interface() -> str:
-		try:
-				with open("/proc/net/route") as f:
-						for line in f:
-								fields = line.strip().split()
-								if len(fields) >= 4 and fields[1] == '00000000' and int(fields[3], 16) & 2:  #to ensure that the route has an active gateway and is not an idle or local route
-										return fields[0]
-		except Exception:
-				pass
-		return "eth0"
 
+def get_active_network_interface() -> str:
+	try:
+		if os.path.exists("/proc/net/route"):
+			with open("/proc/net/route") as f:
+				for line in f:
+					fields = line.strip().split()
+					if len(fields) >= 4 and fields[1] == '00000000' and int(fields[3], 16) & 2:
+						return fields[0]
+	except Exception:
+		pass
+	
+	try:
+		stats = psutil.net_if_stats()
+		for iface, stat in stats.items():
+			if stat.isup and iface != 'lo':
+				return iface
+	except Exception:
+		pass
+	return "eth0"
 
 def set_network_fair_queuing(enable: bool) -> bool:
 		"""Uses subprocess library for Fair Queuing with the help of tc (Traffic control tool) command."""
@@ -185,69 +327,6 @@ def set_network_fair_queuing(enable: bool) -> bool:
 
 
 #assigns a process to a specific core via cpu affinity
-def pin_process_to_cores(proc_name: str,cores: list[int]) -> int:
-	optimised_count=0
-	for proc in psutil.process_iter(attrs=['pid','name']):
-		try:
-			current_name=proc.info['name'] or ""
-			if proc_name.lower() in current_name.lower():
-				pid=proc.info['pid']
-				process_obj=psutil.Process(pid)
-
-				process_obj.cpu_affinity(cores) 
-				optimised_count+=1
-		except(psutil.NoSuchProcess,psutil.AccessDenied,psutil.ZombieProcess):
-			continue
-		except Exception:
-			continue
-	return optimised_count
-
-
-#it safely adjusts the cpu scheduling priority 19 to -20(nicest)
-def prioritise_process(proc_name: str, nice_val: int) -> int:
-	"""Safely adjusts the CPU scheduling priority (nice: -20 highest to 19 lowest)."""
-	optimised_count = 0
-	for proc in psutil.process_iter(attrs=['pid', 'name']):
-			try:
-					current_name = proc.info['name'] or ""
-					if proc_name.lower() in current_name.lower():
-							pid = proc.info['pid']
-							process_obj = psutil.Process(pid)
-							process_obj.nice(nice_val)
-							optimised_count += 1
-			except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-					continue
-			except Exception:
-					continue
-	return optimised_count
-
-
-def set_io_priority(proc_name: str, io_class: str, io_value: int = 0) -> int:
-	optimised_count = 0
-	for proc in psutil.process_iter(attrs=["pid", "name"]):
-		current_pid = proc.info["pid"]
-		try:
-			current_name = proc.info["name"] or ""
-			if proc_name.lower() in current_name.lower():
-				process_obj = psutil.Process(current_pid)
-				try:
-					if io_class.lower() == 'b':
-						process_obj.ionice(psutil.IOPRIO_CLASS_BE, io_value)
-						optimised_count += 1
-					elif io_class.lower() == 'r':
-						process_obj.ionice(psutil.IOPRIO_CLASS_RT, io_value)
-						optimised_count += 1
-					elif io_class.lower() == 'i':
-						process_obj.ionice(psutil.IOPRIO_CLASS_IDLE)
-						optimised_count += 1
-				except (AttributeError, ValueError):
-					continue
-		except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied):
-			continue
-	return optimised_count
-
-
-#retrieves core details and returns as 2 lists
 def get_cores():
 		p_cores = []
 		e_cores = []
