@@ -20,6 +20,24 @@ def _on_scrub_preset(offset_minutes: int):
 
 @st.fragment(run_every=2)
 def render():
+    st.markdown("""
+        <style>
+        div[data-testid="stButton"] button[kind="secondary"] {
+            background: #101725 !important;
+            color: #e2e8f0 !important;
+            border: 1px solid #1a2638 !important;
+        }
+        div[data-testid="stButton"] button[kind="secondary"] * {
+            color: inherit !important;
+        }
+        div[data-testid="stButton"] button[kind="secondary"]:hover {
+            background: #172236 !important;
+            color: #00f5c4 !important;
+            border-color: #00f5c4 !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     # ---------------------------------------------------------
     # 1. State Management & Data Fetching
     # ---------------------------------------------------------
