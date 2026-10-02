@@ -2,8 +2,8 @@ import argparse
 import os
 import sys
 import subprocess
+import shutil
 import time
-import threading
 import webbrowser
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -11,9 +11,6 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from check_requirements import ensure_requirements
-
-_stop_watchdog = threading.Event()
-
 
 def _get_venv_python():
     """Returns the path to the project's .venv python executable if it exists."""
@@ -49,34 +46,27 @@ def _ensure_environment():
     ensure_requirements(auto_install=True, quiet=False)
 
 
-def _daemon_watchdog(daemon_script, telemetry_log_path, restart_delay=3):
-    """Watches the daemon process and restarts it if it crashes."""
-    restart_count = 0
-    process = None
+def _daemon_running():
+    if shutil.which("systemctl"):
+        try:
+            if subprocess.run(
+                ["systemctl", "--user", "is-active", "--quiet", "cognios"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            ).returncode == 0:
+                return True
+        except (OSError, subprocess.SubprocessError):
+            pass
 
-    while not _stop_watchdog.is_set():
-        with open(telemetry_log_path, 'a') as log:
-            process = subprocess.Popen(
-                [sys.executable, daemon_script],
-                stdout=log,
-                stderr=log,
-            )
-        if restart_count == 0:
-            print(f"[✔] CogniOS Engine started (PID: {process.pid})")
-        else:
-            print(f"[⟳] CogniOS Engine restarted (PID: {process.pid}, attempt #{restart_count})")
-
-        process.wait()
-
-        if _stop_watchdog.is_set():
-            break
-
-        exit_code = process.returncode
-        print(f"[!] CogniOS Engine exited (code={exit_code}). Restarting in {restart_delay}s...")
-        restart_count += 1
-        _stop_watchdog.wait(timeout=restart_delay)
-
-    return process
+    try:
+        return subprocess.run(
+            ["pgrep", "-f", "cognios_as_daemon.py"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode == 0
+    except OSError:
+        return False
 
 
 def main(ui_mode="desktop"):
@@ -87,22 +77,13 @@ def main(ui_mode="desktop"):
     print(f" Python Environment: {sys.executable}")
     print("=======================================================")
 
-    telemetry_log_path = os.path.join(BASE_DIR, 'telemetry_daemon.log')
     dashboard_log_path = os.path.join(BASE_DIR, 'dashboard.log')
-    daemon_script = os.path.join(BASE_DIR, "cognios_as_daemon.py")
     dashboard_script = os.path.join(BASE_DIR, "dashboard", "app.py")
 
-    # 1. Start daemon under watchdog thread so it auto-restarts on crash
-    watchdog_thread = threading.Thread(
-        target=_daemon_watchdog,
-        args=(daemon_script, telemetry_log_path),
-        daemon=True,
-        name="daemon-watchdog",
-    )
-    watchdog_thread.start()
-
-    # Give the daemon a moment to initialise DB before dashboard connects
-    time.sleep(2)
+    if _daemon_running():
+        print("CogniOS daemon is running.")
+    else:
+        print("CogniOS daemon is not running. Start it with: systemctl --user start cognios")
 
     # 2. Start the existing dashboard so localhost and launcher use one UI.
     dashboard_log = open(dashboard_log_path, 'w')
@@ -116,7 +97,6 @@ def main(ui_mode="desktop"):
     print("\n=======================================================")
     print("All systems are running!")
     print(f"Opening dashboard in {ui_mode} mode...")
-    print(f" Telemetry logs : tail -f '{telemetry_log_path}'")
     print(f" Dashboard logs : tail -f '{dashboard_log_path}'")
     print("=======================================================\n")
     print("Press Ctrl+C to stop all services.")
@@ -133,8 +113,6 @@ def main(ui_mode="desktop"):
     except KeyboardInterrupt:
         print("\nStopping CogniOS System...")
     finally:
-        _stop_watchdog.set()
-
         if dashboard_process.poll() is None:
             dashboard_process.terminate()
             try:
@@ -146,14 +124,8 @@ def main(ui_mode="desktop"):
         print("Shutdown complete. Goodbye!")
 
 
-from os_doctor.i_forest_predict import flag_anomaly
-def run_os_doctor():
-    flag_anomaly()
-    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--ui", choices=("browser", "desktop"), default="desktop")
     args = parser.parse_args()
-    os_doctor_thread = threading.Thread(target=run_os_doctor, daemon=True)
-    os_doctor_thread.start()
     main(args.ui)
