@@ -1,10 +1,17 @@
 """Daemon entry point for CogniOS — runs Layer 1 and Layer 2 collection concurrently."""
 import ctypes
+import os
+import sys
 import time
 import json
 import signal
 import sys
 import threading
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
 from db import (
     create_connection,
     write_layer1,
@@ -16,6 +23,7 @@ from db import (
 from collectors.layer1_system import collect_layer1_metrics
 from collectors.layer2_process import collect_layer2_metrics
 from config import DB_PATH
+import config
 from logging_utils import get_layer_logger
 from notifier import run_notifier, update_metrics, notify, notify_critical
 
@@ -28,11 +36,13 @@ from blackbox.heartbeat import (
 )
 from blackbox.replay import replay
 
-from focusos.models.classifier import WorkloadPredictor, FEATURE_COLUMNS
-from focusos.feature_engineer import extract_features
-from focusos.sliding_window import get_window_from_db
+from focusos.rules.rule_engine import evaluate
+from focusos.state_manager import WorkloadStateManager, WorkloadState
+from focusos.policy import get_policy
+from focusos.optimisation import apply_policy, restore_workload_state
 from focusos.llm_explainer import generate_explanation
-from focusos.optimisation import apply_optimization
+from focusos.models.classifier import predict_live_workload
+import db
 
 
 def _humanize_duration(seconds):
@@ -179,83 +189,122 @@ def run_layer2_loop(stop_event):
         logger.info("Layer 2 thread exited.")
 
 
-def run_focusos_loop(stop_event):
+def run_rule_engine_loop(stop_event):
     logger = get_layer_logger("focusos")
-    logger.info("Starting FocusOS inference loop.")
+    logger.info("Starting FocusOS Deterministic Rule Engine loop.")
     
-    try:
-        predictor = WorkloadPredictor()
-    except Exception as e:
-        logger.error(f"Failed to load WorkloadPredictor: {e}")
-        return
+    state_manager = WorkloadStateManager()
+    conn = None
 
-    last_workload = None
-    last_explanation = ""
-    last_explanation_time = 0
-    COOLDOWN_SECONDS = 30
-    
     try:
+        conn = db.create_connection(DB_PATH)
+        db.init_workload_events_table(conn)
+        db.init_optimization_events_table(conn)
+
+        baselines = {}
+        contention_threshold = getattr(config, "RULE_SYSTEM_CPU_CONTENTION", 35.0)
+
         while not stop_event.is_set():
             try:
-                df_window = get_window_from_db()
-                if df_window is not None and not df_window.empty and len(df_window) >= 5:
-                    features = extract_features(df_window)
-                    if features is not None:
-                        result = predictor.predict(features)
-                        if result:
-                            workload = result['workload']
-                            confidence = result['confidence']
+                # If synthetic simulation mode is active, do not overwrite simulated workload state
+                sim_file = os.path.join(BASE_DIR, "simulation_state.json")
+                if os.path.exists(sim_file):
+                    try:
+                        with open(sim_file, "r") as f:
+                            if json.load(f).get("active"):
+                                stop_event.wait(timeout=1.5)
+                                continue
+                    except Exception:
+                        pass
 
-                            try:
-                                importances = predictor.xgb.feature_importances_
-                                top_indices = importances.argsort()[::-1][:3]
-                                top_features = {}
-                                for idx in top_indices:
-                                    feat_name = FEATURE_COLUMNS[idx]
-                                    feat_val = float(features[feat_name].iloc[0])
-                                    top_features[feat_name] = round(feat_val, 4)
-                            except Exception as e:
-                                logger.error(f"Error extracting top features: {e}")
-                                top_features = {}
+                # Sample active processes via layer 2 collector (broader sample window)
+                top_cpu, top_mem, baselines = collect_layer2_metrics(baselines, top_n=20)
+                # Normalize field names and deduplicate processes appearing in both top_cpu and top_mem
+                seen_pids = set()
+                active_processes = []
+                for p in (top_cpu + top_mem):
+                    pid = p.get("pid")
+                    if pid is not None and pid in seen_pids:
+                        continue
+                    if pid is not None:
+                        seen_pids.add(pid)
+                    active_processes.append({
+                        "pid": pid,
+                        "name": p.get("name", ""),
+                        "cpu_percent": float(p.get("cpu_peak") or p.get("cpu_percent") or 0.0),
+                        "memory_rss_mb": float(p.get("ram_peak") or p.get("memory_rss_mb") or 0.0),
+                    })
 
-                            current_time = time.time()
+                # Get latest system metrics snapshot
+                sys_metrics = collect_layer1_metrics()
+                now = time.time()
 
-                            # Regenerate LLM explanation only on workload change or cooldown
-                            if (workload != last_workload) or (current_time - last_explanation_time >= COOLDOWN_SECONDS):
-                                last_explanation = generate_explanation(workload, confidence, top_features)
-                                last_workload = workload
-                                last_explanation_time = current_time
+                # memory_used comes in bytes from layer1 — convert to MB for attribution math
+                sys_metrics_norm = dict(sys_metrics)
+                mem_bytes = sys_metrics_norm.get("memory_used", 0)
+                sys_metrics_norm["memory_used"] = float(mem_bytes) / (1024 * 1024) if mem_bytes > 1024 else float(mem_bytes)
 
-                            # Write fresh prediction every cycle → dashboard stays live.
-                            # apply_optimization() skipped intentionally (wired in later).
-                            try:
-                                import json as _json
-                                import sqlite3 as _sq
-                                # last_explanation may be a dict from generate_explanation
-                                _expl = last_explanation if isinstance(last_explanation, str) else _json.dumps(last_explanation)
-                                _conn = _sq.connect(DB_PATH, timeout=5.0)
-                                _conn.execute(
-                                    "INSERT INTO focusos_events "
-                                    "(timestamp, workload, confidence, actions, explanation) "
-                                    "VALUES (?, ?, ?, ?, ?)",
-                                    (
-                                        time.time(), workload, confidence,
-                                        _json.dumps([f"Detected: {workload} ({confidence:.1f}%)"]),
-                                        _expl,
-                                    )
-                                )
-                                _conn.commit()
-                                _conn.close()
-                            except Exception as _e:
-                                logger.warning(f"focusos_events write failed: {_e}")
-                            logger.info(f"FocusOS: {workload} ({confidence:.1f}%)") 
+                # Get ML Inference for current window
+                ml_result = predict_live_workload()
+
+                # Evaluate against deterministic workload rules
+                scores = evaluate(active_processes, sys_metrics_norm)
+                state = state_manager.update(scores, sys_metrics_norm, ml_inference=ml_result)
+
+                # Persist telemetry event snapshot
+                db.write_workload_event(
+                    conn,
+                    now,
+                    state["workload"],
+                    state["state"],
+                    state["cpu_attribution"],
+                    state["ram_attribution"],
+                    state["score"],
+                    sys_metrics.get("cpu_usage_percent", 0.0),
+                    sys_metrics_norm.get("memory_used", 0.0),
+                    state["top_process"],
+                    json.dumps(state["evidence"]),
+                    state["consecutive_cycles"],
+                    state.get("ml_confidence", 0.0),
+                    state.get("ml_workload", "IDLE"),
+                    json.dumps(state.get("ml_probabilities", {}))
+                )
+
+                logger.info(
+                    f"FocusOS State: {state['state']} | Workload: {state['workload']} | "
+                    f"CPU Attr: {state['cpu_attribution']:.0%} | RAM Attr: {state['ram_attribution']:.0%} | "
+                    f"Score: {state['score']:.2f} ({state.get('score_source', 'Rule Engine')}) | "
+                    f"Procs: {sum(len(s['matched_processes']) for s in scores.values())}"
+                )
+
+                # Trigger safety-gated policy optimization on confirmed workload under CPU contention
+                if state["state"] == WorkloadState.CONFIRMED:
+                    sys_cpu = sys_metrics.get("cpu_usage_percent", 0.0)
+                    if sys_cpu >= contention_threshold:
+                        policy = get_policy(state["workload"])
+                        actions = apply_policy(policy, state, conn)
+                        state_manager.mark_optimized()
+                        if actions:
+                            logger.info(f"Applied optimization policy for {state['workload']}: {len(actions)} actions executed.")
+                    else:
+                        logger.info(f"Workload CONFIRMED ({state['workload']}) but CPU contention below threshold ({sys_cpu:.1f}% < {contention_threshold}%), skipping optimization.")
+
+                elif state["state"] == WorkloadState.RESTORING:
+                    restored = restore_workload_state(conn)
+                    if restored > 0:
+                        logger.info(f"Restored {restored} processes to original scheduling priorities.")
 
             except Exception as e:
-                logger.error(f"Error in FocusOS inference loop: {e}")
+                logger.error(f"Error in Rule Engine loop: {e}")
 
-            time.sleep(2)
+            stop_event.wait(timeout=2)
+
+    except Exception as e:
+        logger.error(f"Fatal error initializing Rule Engine loop: {e}")
     finally:
-        logger.info("Stopping FocusOS inference loop.")
+        if conn:
+            conn.close()
+        logger.info("Stopping FocusOS Rule Engine loop.")
 
 
 def run_daemon():
@@ -282,7 +331,7 @@ def run_daemon():
 
     t1 = threading.Thread(target=run_layer1_loop, args=(stop_event,), daemon=True)
     t2 = threading.Thread(target=run_layer2_loop, args=(stop_event,), daemon=True)
-    t3 = threading.Thread(target=run_focusos_loop, args=(stop_event,), daemon=True)
+    t3 = threading.Thread(target=run_rule_engine_loop, args=(stop_event,), daemon=True)
     t4 = threading.Thread(target=flag_anomaly, daemon=True)
     t5 = threading.Thread(target=run_llm_daemon, daemon=True)
     t6 = threading.Thread(target=run_notifier, args=(stop_event,), daemon=True)

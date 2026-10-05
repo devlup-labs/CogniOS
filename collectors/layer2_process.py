@@ -3,7 +3,7 @@ import time
 import psutil 
 
 
-def collect_layer2_metrics(prev_states=None):
+def collect_layer2_metrics(prev_states=None, top_n=15):
     if prev_states is None:
         prev_states = {}
 
@@ -131,7 +131,7 @@ def collect_layer2_metrics(prev_states=None):
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
 
-    top_cpu = sorted(processed_snapshots, key=lambda x: x['cpu_score'], reverse=True)[:5]
-    top_mem = sorted(processed_snapshots, key=lambda x: x['ram_score'], reverse=True)[:5]
+    top_cpu = sorted(processed_snapshots, key=lambda x: x['cpu_score'], reverse=True)[:top_n]
+    top_mem = sorted(processed_snapshots, key=lambda x: x['ram_score'], reverse=True)[:top_n]
 
     return top_cpu, top_mem, current_states
