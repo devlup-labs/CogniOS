@@ -36,6 +36,7 @@ data/traces/*
 !data/traces/.gitkeep
 !data/models/.gitkeep
 simulation_state.json
+ui-overhead-results/
 
 # Logs
 logs/
@@ -48,3 +49,5 @@ dashboard.log
 .vscode/
 .idea/
 
+/Evolution of Blackbox
+.streamlit

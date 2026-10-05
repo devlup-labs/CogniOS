@@ -1,9 +1,11 @@
 """Daemon entry point for CogniOS — runs Layer 1 and Layer 2 collection concurrently."""
+import ctypes
 import os
 import sys
 import time
 import json
 import signal
+import sys
 import threading
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +25,7 @@ from collectors.layer2_process import collect_layer2_metrics
 from config import DB_PATH
 import config
 from logging_utils import get_layer_logger
+from notifier import run_notifier, update_metrics, notify, notify_critical
 
 from blackbox.recorder import get_blackbox_conn, create_blackbox_table, write_telemetry
 from blackbox.heartbeat import (
@@ -40,6 +43,17 @@ from focusos.optimisation import apply_policy, restore_workload_state
 from focusos.llm_explainer import generate_explanation
 from focusos.models.classifier import predict_live_workload
 import db
+
+
+def _humanize_duration(seconds):
+    parts = []
+    for unit, size in (("day", 86400), ("hour", 3600), ("minute", 60), ("second", 1)):
+        value, seconds = divmod(int(round(seconds)), size)
+        if value:
+            parts.append(f"{value} {unit}{'' if value == 1 else 's'}")
+    if len(parts) > 1:
+        return ", ".join(parts[:-1]) + " and " + parts[-1]
+    return parts[0] if parts else "0 seconds"
 
 
 def run_layer1_loop(stop_event):
@@ -62,6 +76,11 @@ def run_layer1_loop(stop_event):
             "Previous session may have crashed! "
             f"Gap = {crash_info['heartbeat_gap']}s; "
             f"signals = {', '.join(signals)}"
+        )
+        duration = _humanize_duration(crash_info["heartbeat_gap"])
+        notify_critical(
+            f"CogniOS detected that the previous session may have stopped unexpectedly. "
+            f"It was last heard from {duration} ago."
         )
         result = replay(bb_conn)
         logger.warning("BlackBox pre-crash timeline:\n" + result['timeline_text'])
@@ -129,6 +148,7 @@ def run_layer1_loop(stop_event):
                 # --- Write to BlackBox rolling-window DB ---
                 write_telemetry(bb_conn, metrics)
                 update_heartbeat(bb_conn)
+                update_metrics(metrics)
 
                 logger.info(f"Successfully saved metrics for timestamp: {metrics['timestamp']}")
 
@@ -288,6 +308,12 @@ def run_rule_engine_loop(stop_event):
 
 
 def run_daemon():
+    if sys.platform == "linux":
+        prctl = ctypes.CDLL(None, use_errno=True).prctl
+        prctl.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong)
+        if prctl(15, b"cognios-daemon", 0, 0, 0) != 0:
+            get_layer_logger("daemon").warning("Could not set process name to cognios-daemon.")
+
     ensure_wal_mode(DB_PATH)
 
     stop_event = threading.Event()
@@ -301,17 +327,21 @@ def run_daemon():
     from os_doctor.i_forest_predict import flag_anomaly
     from os_doctor.llm_layer import run_llm_daemon
 
+    notify("CogniOS", "CogniOS started")
+
     t1 = threading.Thread(target=run_layer1_loop, args=(stop_event,), daemon=True)
     t2 = threading.Thread(target=run_layer2_loop, args=(stop_event,), daemon=True)
     t3 = threading.Thread(target=run_rule_engine_loop, args=(stop_event,), daemon=True)
     t4 = threading.Thread(target=flag_anomaly, daemon=True)
     t5 = threading.Thread(target=run_llm_daemon, daemon=True)
+    t6 = threading.Thread(target=run_notifier, args=(stop_event,), daemon=True)
     
     t1.start()
     t2.start()
     t3.start()
     t4.start()
     t5.start()
+    t6.start()
 
     try:
         while t1.is_alive() or t2.is_alive() or t3.is_alive():
