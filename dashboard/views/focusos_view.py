@@ -110,97 +110,228 @@ def render():
     col_target, col_opts = st.columns([2, 1], gap="medium")
 
     with col_target:
-        # Format Evidence items gracefully (handling dict or string objects)
+        # Format Evidence items gracefully with rich categorised cards
         evidence_html_items = ""
-        for ev in (evidence_list or [])[:6]:
+        for ev in (evidence_list or [])[:8]:
             if isinstance(ev, dict):
                 proc = ev.get("process", top_proc)
                 sig = ev.get("signal", str(ev))
-                proc_badge = f"<span style='background:rgba(0,245,196,0.15); color:#00f5c4; border-radius:4px; padding:1px 6px; font-family:JetBrains Mono; font-weight:700; font-size:11px;'>{proc}</span>"
                 evidence_html_items += (
-                    f"<div style='font-size:12px; color:#cbd5e1; margin-bottom:8px; display:flex; align-items:center; gap:8px;'>"
-                    f"<span style='color:#00f5c4;'>✓</span> {proc_badge} <span style='color:#e2e8f0;'>{sig}</span></div>"
+                    f'<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; '
+                    f'background:rgba(255,255,255,0.02); border:1px solid #162030; border-radius:6px; margin-bottom:6px; font-family:\'JetBrains Mono\';">'
+                    f'<div style="display:flex; align-items:center; gap:8px;">'
+                    f'<span style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); border-radius:4px; padding:2px 6px; font-size:10px; font-weight:700;">SIMULATED</span>'
+                    f'<span style="color:#ffffff; font-weight:700; font-size:12px;">{proc}</span>'
+                    f'</div>'
+                    f'<span style="color:#cbd5e1; font-size:11px;">{sig}</span>'
+                    f'</div>'
                 )
-            else:
+                continue
+
+            text = str(ev).strip()
+
+            # Process-level signals: e.g. "python (PID 15045) — CPU: 23.5%, RAM: 1420 MB"
+            proc_match = re.match(r"^([a-zA-Z0-9_\-\.]+)\s*\(PID\s*(\d+)\)\s*—\s*CPU:\s*([0-9\.]+%?),\s*RAM:\s*([0-9\.]+\s*[a-zA-Z]+)", text)
+            if proc_match:
+                p_name, pid, cpu_val, ram_val = proc_match.groups()
+                cpu_display = cpu_val if '%' in cpu_val else cpu_val + '%'
                 evidence_html_items += (
-                    f"<div style='font-size:12px; color:#cbd5e1; margin-bottom:8px; display:flex; align-items:center; gap:8px;'>"
-                    f"<span style='color:#00f5c4;'>✓</span> <span style='color:#e2e8f0;'>{ev}</span></div>"
+                    f'<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; '
+                    f'background:rgba(255,255,255,0.015); border:1px solid #162030; border-radius:6px; margin-bottom:6px; font-family:\'JetBrains Mono\';">'
+                    f'<div style="display:flex; align-items:center; gap:8px;">'
+                    f'<span style="background:rgba(0,245,196,0.12); color:#00f5c4; border:1px solid rgba(0,245,196,0.25); border-radius:4px; padding:2px 6px; font-size:10px; font-weight:700;">PROCESS</span>'
+                    f'<span style="color:#ffffff; font-weight:700; font-size:12px;">{p_name}</span>'
+                    f'<span style="background:rgba(255,255,255,0.06); color:#94a3b8; font-size:10px; padding:1px 5px; border-radius:3px;">PID {pid}</span>'
+                    f'</div>'
+                    f'<div style="display:flex; align-items:center; gap:12px; font-size:11px;">'
+                    f'<span style="color:#00f5c4; font-weight:600;"><i class="fa-solid fa-bolt" style="font-size:9px; margin-right:4px;"></i>{cpu_display} CPU</span>'
+                    f'<span style="color:#38bdf8; font-weight:600;"><i class="fa-solid fa-memory" style="font-size:9px; margin-right:4px;"></i>{ram_val}</span>'
+                    f'</div>'
+                    f'</div>'
                 )
+                continue
+
+            # Model telemetry: XGBoost
+            if text.startswith("XGBoost"):
+                is_override = "overridden" in text.lower()
+                badge_color = "#f59e0b" if is_override else "#a78bfa"
+                badge_bg = "rgba(245,158,11,0.15)" if is_override else "rgba(167,139,250,0.15)"
+                badge_border = "rgba(245,158,11,0.3)" if is_override else "rgba(167,139,250,0.3)"
+                tag = "AI TELEMETRY" if is_override else "AI CLASSIFIER"
+                cleaned = text.replace('XGBoost Classifier: ', '').replace('XGBoost Network Signature: ', '')
+                evidence_html_items += (
+                    f'<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; '
+                    f'background:rgba(255,255,255,0.015); border:1px solid #162030; border-radius:6px; margin-bottom:6px; font-family:\'JetBrains Mono\';">'
+                    f'<div style="display:flex; align-items:center; gap:8px;">'
+                    f'<span style="background:{badge_bg}; color:{badge_color}; border:1px solid {badge_border}; border-radius:4px; padding:2px 6px; font-size:10px; font-weight:700;">{tag}</span>'
+                    f'<span style="color:#e2e8f0; font-size:12px;">{cleaned}</span>'
+                    f'</div>'
+                    f'<span style="color:{badge_color}; font-size:10px; font-weight:700; letter-spacing:0.5px;">XGBOOST</span>'
+                    f'</div>'
+                )
+                continue
+
+            # Aggregate attribution line
+            if "attributed" in text:
+                evidence_html_items += (
+                    f'<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; '
+                    f'background:rgba(0,245,196,0.03); border:1px solid rgba(0,245,196,0.15); border-radius:6px; margin-bottom:6px; font-family:\'JetBrains Mono\';">'
+                    f'<div style="display:flex; align-items:center; gap:8px;">'
+                    f'<span style="background:rgba(0,245,196,0.15); color:#00f5c4; border-radius:4px; padding:2px 6px; font-size:10px; font-weight:700;">ATTRIBUTION</span>'
+                    f'<span style="color:#ffffff; font-size:12px; font-weight:600;">{text}</span>'
+                    f'</div>'
+                    f'<span style="color:#00f5c4; font-size:11px; font-weight:700;">✓ COMPUTED</span>'
+                    f'</div>'
+                )
+                continue
+
+            # Temporal stability
+            if "sustained" in text.lower() or "cycles" in text.lower():
+                evidence_html_items += (
+                    f'<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; '
+                    f'background:rgba(56,189,248,0.03); border:1px solid rgba(56,189,248,0.15); border-radius:6px; margin-bottom:6px; font-family:\'JetBrains Mono\';">'
+                    f'<div style="display:flex; align-items:center; gap:8px;">'
+                    f'<span style="background:rgba(56,189,248,0.15); color:#38bdf8; border-radius:4px; padding:2px 6px; font-size:10px; font-weight:700;">STABILITY</span>'
+                    f'<span style="color:#e2e8f0; font-size:12px;">{text}</span>'
+                    f'</div>'
+                    f'<span style="color:#38bdf8; font-size:11px; font-weight:700;">DEBOUNCED</span>'
+                    f'</div>'
+                )
+                continue
+
+            # CPU Contention
+            if "contention" in text.lower():
+                evidence_html_items += (
+                    f'<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; '
+                    f'background:rgba(245,158,11,0.04); border:1px solid rgba(245,158,11,0.2); border-radius:6px; margin-bottom:6px; font-family:\'JetBrains Mono\';">'
+                    f'<div style="display:flex; align-items:center; gap:8px;">'
+                    f'<span style="background:rgba(245,158,11,0.15); color:#f59e0b; border-radius:4px; padding:2px 6px; font-size:10px; font-weight:700;">CONTENTION</span>'
+                    f'<span style="color:#fbbf24; font-size:12px;">{text}</span>'
+                    f'</div>'
+                    f'<span style="color:#f59e0b; font-size:11px; font-weight:700;">TRIGGER READY</span>'
+                    f'</div>'
+                )
+                continue
+
+            # Fallback item
+            evidence_html_items += (
+                f'<div style="display:flex; align-items:center; gap:8px; padding:8px 12px; '
+                f'background:rgba(255,255,255,0.015); border:1px solid #162030; border-radius:6px; margin-bottom:6px; font-family:\'JetBrains Mono\'; font-size:12px; color:#cbd5e1;">'
+                f'<span style="color:#00f5c4; font-weight:700;">✓</span>'
+                f'<span>{text}</span>'
+                f'</div>'
+            )
 
         if not evidence_html_items:
-            evidence_html_items = "<div style='font-size:12px; color:#64748b; font-style:italic;'>No active workload signals detected. System telemetry indicates baseline/idle activity.</div>"
+            evidence_html_items = "<div style='font-size:12px; color:#64748b; font-style:italic; padding:12px;'>No active workload signals detected. System telemetry indicates baseline/idle activity.</div>"
 
         cpu_bar    = _pct_bar(cpu_attr, "#00f5c4")
         ram_bar    = _pct_bar(ram_attr, "#38bdf8")
         score_bar  = _pct_bar(score,    "#a78bfa")
 
+        sig_count = len(evidence_list) if evidence_list else 0
+
         st.html(f"""
-        <div style="background:#0d121c; border-radius:14px; padding:24px; min-height: 420px; box-shadow:0 6px 24px rgba(0,0,0,0.3); margin-bottom: 20px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
-                <div>
-                    <h3 style="margin:0; font-size:22px; font-weight:800; color:#ffffff; display:flex; align-items:center; gap:8px;">
-                        <span>{workload_icon}</span> <span>{current_workload}</span>
-                    </h3>
-                    <p style="margin:2px 0 0 0; font-size:12px; color:#64748b;">Dominant Workload Inference & Attribution</p>
+        <div style="background:#0d121c; border-radius:14px; padding:24px; min-height: 420px; box-shadow:0 6px 24px rgba(0,0,0,0.3); margin-bottom: 20px; border:1px solid #162030;">
+            <!-- Header bar with icon and primary target -->
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid #162030;">
+                <div style="display:flex; align-items:center; gap:14px;">
+                    <div style="font-size:26px; width:48px; height:48px; border-radius:10px; background:#101725; border:1px solid #1a2638; display:flex; align-items:center; justify-content:center;">
+                        {workload_icon}
+                    </div>
+                    <div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <h3 style="margin:0; font-size:22px; font-weight:800; color:#ffffff; font-family:'JetBrains Mono';">{current_workload}</h3>
+                            <span style="background:{state_badge_color}22; color:{state_badge_color}; border:1px solid {state_badge_color}55; border-radius:4px; padding:2px 8px; font-size:10px; font-weight:700; font-family:'JetBrains Mono';">● {current_state}</span>
+                        </div>
+                        <p style="margin:3px 0 0 0; font-size:12px; color:#64748b;">Dominant Workload Inference &amp; Real-Time Attribution</p>
+                    </div>
                 </div>
                 <div style="text-align:right;">
-                    <span style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono';">PRIMARY TARGET:</span>
-                    <span style="font-size:13px; color:#00f5c4; font-family:'JetBrains Mono'; font-weight:700; margin-left:6px;">{top_proc}</span>
+                    <div style="font-size:10px; color:#94a3b8; font-family:'JetBrains Mono'; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">Primary Target Process</div>
+                    <div style="display:inline-flex; align-items:center; gap:6px; background:#101725; border:1px solid rgba(0,245,196,0.3); border-radius:6px; padding:4px 10px; margin-top:4px;">
+                        <span style="color:#00f5c4; font-size:8px;">●</span>
+                        <span style="font-size:13px; color:#00f5c4; font-family:'JetBrains Mono'; font-weight:700;">{top_proc}</span>
+                    </div>
                 </div>
             </div>
 
             <!-- Attribution Metrics Grid -->
-            <div style="display:flex; gap:14px; margin-bottom:20px;">
-                <div style="flex:1; background:#131b28; border-radius:8px; padding:16px; border-top:2px solid #00f5c4;">
-                    <div style="font-size:10px; color:#94a3b8; text-transform:uppercase; margin-bottom:4px;">CPU Attribution</div>
-                    <div style="font-size:24px; font-weight:700; color:#ffffff; font-family:'JetBrains Mono';">{cpu_attr:.0%}</div>
-                    <div style="font-size:10px; color:#64748b; margin-top:2px; margin-bottom:6px;">Share of Active Host Load</div>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-bottom:20px;">
+                <div style="background:#101725; border:1px solid #162030; border-radius:10px; padding:16px; border-top:3px solid #00f5c4;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <span style="font-size:10px; color:#94a3b8; text-transform:uppercase; font-family:'JetBrains Mono'; font-weight:600; letter-spacing:0.5px;">CPU Attribution</span>
+                        <span style="color:#00f5c4; font-size:12px;"><i class="fa-solid fa-microchip"></i></span>
+                    </div>
+                    <div style="font-size:26px; font-weight:800; color:#ffffff; font-family:'JetBrains Mono'; letter-spacing:-0.5px;">{cpu_attr:.0%}</div>
+                    <div style="font-size:10px; color:#64748b; margin-top:2px; margin-bottom:8px;">Share of Active Host Load</div>
                     {cpu_bar}
                 </div>
-                <div style="flex:1; background:#131b28; border-radius:8px; padding:16px; border-top:2px solid #38bdf8;">
-                    <div style="font-size:10px; color:#94a3b8; text-transform:uppercase; margin-bottom:4px;">RAM Attribution</div>
-                    <div style="font-size:24px; font-weight:700; color:#38bdf8; font-family:'JetBrains Mono';">{ram_attr:.0%}</div>
-                    <div style="font-size:10px; color:#64748b; margin-top:2px; margin-bottom:6px;">Share of Used Host RAM</div>
+                <div style="background:#101725; border:1px solid #162030; border-radius:10px; padding:16px; border-top:3px solid #38bdf8;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <span style="font-size:10px; color:#94a3b8; text-transform:uppercase; font-family:'JetBrains Mono'; font-weight:600; letter-spacing:0.5px;">RAM Attribution</span>
+                        <span style="color:#38bdf8; font-size:12px;"><i class="fa-solid fa-memory"></i></span>
+                    </div>
+                    <div style="font-size:26px; font-weight:800; color:#38bdf8; font-family:'JetBrains Mono'; letter-spacing:-0.5px;">{ram_attr:.0%}</div>
+                    <div style="font-size:10px; color:#64748b; margin-top:2px; margin-bottom:8px;">Share of Used Host RAM</div>
                     {ram_bar}
                 </div>
-                <div style="flex:1; background:#131b28; border-radius:8px; padding:16px; border-top:2px solid #a78bfa;">
-                    <div style="font-size:10px; color:#94a3b8; text-transform:uppercase; margin-bottom:4px;">Inference Score</div>
-                    <div style="font-size:24px; font-weight:700; color:#a78bfa; font-family:'JetBrains Mono';">{score:.3f}</div>
-                    <div style="font-size:10px; color:#64748b; margin-top:2px; margin-bottom:6px;">{("XGBoost Confidence" if ml_confidence >= score and ml_confidence > 0 else "Rule Engine Score")}</div>
+                <div style="background:#101725; border:1px solid #162030; border-radius:10px; padding:16px; border-top:3px solid #a78bfa;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <span style="font-size:10px; color:#94a3b8; text-transform:uppercase; font-family:'JetBrains Mono'; font-weight:600; letter-spacing:0.5px;">Inference Score</span>
+                        <span style="color:#a78bfa; font-size:12px;"><i class="fa-solid fa-brain"></i></span>
+                    </div>
+                    <div style="font-size:26px; font-weight:800; color:#a78bfa; font-family:'JetBrains Mono'; letter-spacing:-0.5px;">{score:.3f}</div>
+                    <div style="font-size:10px; color:#64748b; margin-top:2px; margin-bottom:8px;">{("XGBoost Confidence" if ml_confidence >= score and ml_confidence > 0 else "Rule Engine Score")}</div>
                     {score_bar}
                 </div>
-                <div style="flex:1; background:#131b28; border-radius:8px; padding:16px; border-top:2px solid #f59e0b;">
-                    <div style="font-size:10px; color:#94a3b8; text-transform:uppercase; margin-bottom:4px;">System CPU</div>
-                    <div style="font-size:24px; font-weight:700; color:#f59e0b; font-family:'JetBrains Mono';">{sys_cpu:.1f}%</div>
-                    <div style="font-size:10px; color:#64748b; margin-top:2px; margin-bottom:6px;">Host Machine Utilization</div>
+                <div style="background:#101725; border:1px solid #162030; border-radius:10px; padding:16px; border-top:3px solid #f59e0b;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <span style="font-size:10px; color:#94a3b8; text-transform:uppercase; font-family:'JetBrains Mono'; font-weight:600; letter-spacing:0.5px;">System CPU</span>
+                        <span style="color:#f59e0b; font-size:12px;"><i class="fa-solid fa-gauge-high"></i></span>
+                    </div>
+                    <div style="font-size:26px; font-weight:800; color:#f59e0b; font-family:'JetBrains Mono'; letter-spacing:-0.5px;">{sys_cpu:.1f}%</div>
+                    <div style="font-size:10px; color:#64748b; margin-top:2px; margin-bottom:8px;">Host Machine Utilization</div>
                     {_pct_bar(sys_cpu / 100.0, "#f59e0b")}
                 </div>
             </div>
 
-            <!-- Evidence Panel -->
-            <div style="background:#131b28; border-radius:8px; padding:16px; margin-bottom:16px;">
-                <div style="font-size:11px; font-weight:700; color:#00f5c4; text-transform:uppercase;
-                            font-family:'JetBrains Mono'; margin-bottom:10px; letter-spacing:0.5px;">
-                    ⚡ Real-Time Attribution Evidence &amp; Process Signals
+            <!-- Evidence & Signals Panel -->
+            <div style="background:#101725; border:1px solid #162030; border-radius:10px; padding:18px; margin-bottom:18px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="color:#00f5c4; font-size:13px;"><i class="fa-solid fa-bolt"></i></span>
+                        <span style="font-size:11px; font-weight:700; color:#00f5c4; text-transform:uppercase; font-family:'JetBrains Mono'; letter-spacing:0.5px;">
+                            Real-Time Attribution Evidence &amp; Process Signals
+                        </span>
+                    </div>
+                    <span style="background:rgba(0,245,196,0.12); color:#00f5c4; border:1px solid rgba(0,245,196,0.25); border-radius:4px; padding:2px 8px; font-size:10px; font-weight:700; font-family:'JetBrains Mono';">
+                        ● {sig_count} SIGNALS CORRELATED
+                    </span>
                 </div>
-                {evidence_html_items}
+                <div style="max-height: 240px; overflow-y: auto; padding-right: 4px;">
+                    {evidence_html_items}
+                </div>
             </div>
 
             <!-- FocusOS Active Policy Details -->
-            <div style="background:#101725; border:1px solid #1a2638; border-radius:8px; padding:16px;">
+            <div style="background:#101725; border:1px solid #162030; border-radius:10px; padding:16px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; font-family:'JetBrains Mono';">
-                        🛡️ Active Governance Policy: {policy_info.get('description', current_workload)}
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="color:#38bdf8;"><i class="fa-solid fa-shield-halved"></i></span>
+                        <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; font-family:'JetBrains Mono';">
+                            Active Governance Policy: {policy_info.get('description', current_workload)}
+                        </div>
                     </div>
-                    <div style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono';">
-                        I/O Priority: <strong style="color:#00f5c4;">{policy_info.get('io_priority', 'normal').upper()}</strong>
+                    <div style="background:rgba(0,245,196,0.1); border:1px solid rgba(0,245,196,0.25); border-radius:4px; padding:2px 8px; font-size:10px; font-family:'JetBrains Mono'; color:#00f5c4; font-weight:700;">
+                        I/O: {policy_info.get('io_priority', 'normal').upper()}
                     </div>
                 </div>
-                <div style="display:flex; gap:12px; font-size:12px; font-family:'JetBrains Mono'; color:#cbd5e1; margin-bottom:8px;">
+                <div style="display:flex; gap:16px; font-size:12px; font-family:'JetBrains Mono'; color:#cbd5e1; margin-bottom:10px; background:rgba(255,255,255,0.02); padding:8px 12px; border-radius:6px; border:1px solid #162030;">
                     <span>Target Nice: <strong style="color:#00f5c4;">{policy_info.get('target_bucket_nice', 0)}</strong></span>
-                    <span>•</span>
+                    <span style="color:#475569;">•</span>
                     <span>Background Nice: <strong style="color:#f59e0b;">+{policy_info.get('background_nice', 0)}</strong></span>
-                    <span>•</span>
+                    <span style="color:#475569;">•</span>
                     <span>Core Pinning: <strong style="color:#a78bfa;">{'ACTIVE' if policy_info.get('affinity_pin') else 'DYNAMIC'}</strong></span>
                 </div>
                 <div style="font-size:12px; color:#94a3b8; line-height:1.5;">
@@ -382,46 +513,116 @@ def render():
         </div>
         """)
 
-    # Bottom Event Log
+    # Bottom Event Log — Upgraded High-Density Observability Console
     event_rows_html = ""
     shown = 0
     for ev in (events or []):
-        evt_type = str(ev.get("type", "SCHED")).upper()
-        if "PRIO" in evt_type or "NICE" in evt_type:
-            badge_bg, badge_fg = "rgba(0,245,196,0.15)", "#00f5c4"
-        elif "RESTORE" in evt_type:
-            badge_bg, badge_fg = "rgba(245,158,11,0.15)", "#f59e0b"
+        ts = ev.get('time', 'Just now')
+        p_name = ev.get('process_name') or "System"
+        pid = ev.get('pid')
+        workload = str(ev.get('workload') or 'SYSTEM').upper()
+        act = str(ev.get('action') or '')
+        old_v = str(ev.get('old_value') or '')
+        new_v = str(ev.get('new_value') or '')
+        reason = str(ev.get('reason') or '')
+        success = ev.get('success', True)
+        
+        # If legacy message string exists without structured fields
+        if p_name == "System" and ev.get('message') and not reason:
+            reason = ev.get('message')
+
+        # Workload badge style
+        wl_badge_style = {
+            "CODING": ("💻", "rgba(0,245,196,0.12)", "#00f5c4"),
+            "BROWSING": ("🌐", "rgba(56,189,248,0.12)", "#38bdf8"),
+            "VIDEO_CALL": ("📹", "rgba(167,139,250,0.12)", "#a78bfa"),
+            "COMPILATION": ("⚙️", "rgba(245,158,11,0.12)", "#f59e0b"),
+            "GAMING": ("🎮", "rgba(236,72,153,0.12)", "#ec4899"),
+            "MEDIA_PROCESSING": ("🎬", "rgba(244,63,94,0.12)", "#f43f5e"),
+            "RESTORE_ALL": ("↺", "rgba(56,189,248,0.12)", "#38bdf8"),
+        }.get(workload, ("📊", "rgba(148,163,184,0.12)", "#94a3b8"))
+        
+        # Action badge style
+        if "restore" in act.lower() or "restore" in workload.lower():
+            act_badge = '<span style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); border-radius:4px; padding:2px 8px; font-weight:700; font-size:11px;">↺ RESTORED</span>'
+        elif "nice" in act.lower():
+            try:
+                new_nice_int = int(new_v)
+                old_nice_int = int(old_v)
+                if new_nice_int < old_nice_int:
+                    act_badge = f'<span style="background:rgba(0,245,196,0.15); color:#00f5c4; border:1px solid rgba(0,245,196,0.3); border-radius:4px; padding:2px 8px; font-weight:700; font-size:11px;">nice {old_nice_int} → {new_nice_int} (Boost)</span>'
+                else:
+                    act_badge = f'<span style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); border-radius:4px; padding:2px 8px; font-weight:700; font-size:11px;">nice {old_nice_int} → +{new_nice_int} (Depress)</span>'
+            except Exception:
+                act_badge = f'<span style="background:rgba(245,158,11,0.15); color:#f59e0b; border-radius:4px; padding:2px 8px; font-weight:700; font-size:11px;">{act} [{old_v}→{new_v}]</span>'
         else:
-            badge_bg, badge_fg = "rgba(56,189,248,0.15)", "#38bdf8"
+            act_badge = f'<span style="background:rgba(148,163,184,0.15); color:#cbd5e1; border-radius:4px; padding:2px 8px; font-weight:700; font-size:11px;">{act or "EXEC"}</span>'
+
+        status_icon = '<span style="color:#00f5c4; font-weight:700; margin-right:6px;">✓</span>' if success else '<span style="color:#ef4444; font-weight:700; margin-right:6px;">✕</span>'
+        pid_display = f'<span style="background:rgba(255,255,255,0.06); color:#94a3b8; font-size:10px; padding:1px 5px; border-radius:3px; margin-left:6px; font-weight:500;">PID {pid}</span>' if pid and pid != 0 else ''
+        row_bg = 'rgba(255,255,255,0.015)' if shown % 2 == 0 else 'transparent'
 
         event_rows_html += f"""
-        <div style="display:flex; align-items:flex-start; gap:16px; padding:10px 0;
-                    border-bottom:1px solid #131b28; font-family:'JetBrains Mono'; font-size:12px;">
-            <span style="color:#64748b; white-space:nowrap;">{ev.get('time', 'Just now')}</span>
-            <span style="background:{badge_bg}; color:{badge_fg}; border-radius:4px;
-                        padding:2px 8px; font-weight:700; font-size:11px; white-space:nowrap;">[{evt_type}]</span>
-            <span style="color:#e2e8f0; word-break:break-word;">{ev.get('message', '')}</span>
+        <div style="display:grid; grid-template-columns: 85px 190px 140px 190px 1fr; align-items:center; gap:12px; padding:9px 14px;
+                    border-bottom:1px solid #141d2b; font-family:'JetBrains Mono'; font-size:12px; background:{row_bg}; border-radius:4px;">
+            <span style="color:#64748b; font-size:11px;">{ts}</span>
+            <div style="display:flex; align-items:center; overflow:hidden;">
+                <span style="color:#ffffff; font-weight:700; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">{p_name}</span>
+                {pid_display}
+            </div>
+            <div>
+                <span style="background:{wl_badge_style[1]}; color:{wl_badge_style[2]}; border-radius:4px; padding:2px 7px; font-size:11px; font-weight:700; display:inline-flex; align-items:center; gap:4px;">
+                    <span>{wl_badge_style[0]}</span> <span>{workload}</span>
+                </span>
+            </div>
+            <div>{act_badge}</div>
+            <div style="color:#cbd5e1; font-size:11px; display:flex; align-items:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                {status_icon}
+                <span style="overflow:hidden; text-overflow:ellipsis;" title="{reason}">{reason}</span>
+            </div>
         </div>
         """
         shown += 1
 
     if shown == 0:
         event_rows_html = f"""
-        <div style="display:flex; align-items:flex-start; gap:16px; padding:10px 0; font-family:'JetBrains Mono'; font-size:12px;">
-            <span style="color:#64748b; white-space:nowrap;">{time.strftime("%H:%M:%S")}</span>
-            <span style="background:rgba(0,245,196,0.15); color:#00f5c4; border-radius:4px; padding:2px 8px; font-weight:700; font-size:11px;">[STANDBY]</span>
-            <span style="color:#94a3b8;">FocusOS Daemon observing — automatic scheduling policies fire when workload is CONFIRMED and CPU contention exceeds 35%.</span>
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:20px; background:#101725; border-radius:8px; border:1px dashed #1a2638; font-family:'JetBrains Mono';">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <span style="background:rgba(0,245,196,0.15); color:#00f5c4; border-radius:4px; padding:3px 10px; font-weight:700; font-size:11px;">● STANDBY</span>
+                <span style="color:#94a3b8; font-size:12px;">Autonomous FocusOS Daemon observing — automatic scheduling triggers when workload is CONFIRMED and CPU contention > 35%.</span>
+            </div>
+            <span style="color:#64748b; font-size:11px;">{time.strftime("%H:%M:%S")}</span>
+        </div>
+        """
+    else:
+        # Wrap with column header and scrollable container
+        event_rows_html = f"""
+        <div style="display:grid; grid-template-columns: 85px 190px 140px 190px 1fr; gap:12px; padding:8px 14px; background:#101725; border-radius:6px; margin-bottom:8px; font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase; font-family:'JetBrains Mono'; letter-spacing:0.5px;">
+            <span>Time</span>
+            <span>Target Process</span>
+            <span>Workload</span>
+            <span>Policy Action</span>
+            <span>Rationale / Outcome</span>
+        </div>
+        <div style="max-height: 420px; overflow-y: auto; padding-right: 2px;">
+            {event_rows_html}
         </div>
         """
 
     st.html(f"""
-    <div style="background:#0d121c; border-radius:14px; padding:24px; margin-top:20px; box-shadow:0 6px 24px rgba(0,0,0,0.3);">
+    <div style="background:#0d121c; border-radius:14px; padding:24px; margin-top:20px; box-shadow:0 6px 24px rgba(0,0,0,0.3); border:1px solid #162030;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-            <div style="display:flex; align-items:center; gap:8px;">
-                <span style="color:#00f5c4;"><i class="fa-solid fa-clock-rotate-left"></i></span>
-                <h3 style="margin:0; font-size:18px; font-weight:700; color:#ffffff;">Kernel Optimization &amp; Scheduling Log</h3>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <span style="color:#00f5c4; font-size:16px;"><i class="fa-solid fa-clock-rotate-left"></i></span>
+                <div>
+                    <h3 style="margin:0; font-size:18px; font-weight:700; color:#ffffff;">Kernel Optimization &amp; Scheduling Log</h3>
+                    <p style="margin:2px 0 0 0; font-size:11px; color:#64748b;">Audited Linux process niceness, CPU affinity, and I/O scheduling adjustments</p>
+                </div>
             </div>
-            <span style="font-size:11px; color:#64748b; font-family:'JetBrains Mono';">Showing last 20 events</span>
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="background:rgba(0,245,196,0.12); color:#00f5c4; border:1px solid rgba(0,245,196,0.25); border-radius:4px; padding:3px 10px; font-size:11px; font-weight:700; font-family:'JetBrains Mono';">● LIVE AUDIT</span>
+                <span style="font-size:11px; color:#64748b; font-family:'JetBrains Mono';">Showing last {shown} events</span>
+            </div>
         </div>
         {event_rows_html}
     </div>

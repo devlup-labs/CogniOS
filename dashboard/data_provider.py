@@ -756,13 +756,23 @@ def get_focusos_events():
                     old_v = r["old_value"]
                     new_v = r["new_value"]
                     reason = r["reason"]
+                    workload = str(r.get("workload") or "SYSTEM").upper()
+                    success = bool(int(r["success"])) if pd.notna(r.get("success")) else True
                     
                     msg = f"{p_name} (PID {pid}): {act} [{old_v} -> {new_v}] — {reason}"
-                    evt_type = "PRIO" if "nice" in act.lower() else "SCHED"
+                    evt_type = "PRIO" if "nice" in str(act).lower() else ("RESTORE" if "restore" in str(act).lower() else "SCHED")
                     
                     events.append({
                         "time": ts,
                         "type": evt_type,
+                        "pid": pid,
+                        "process_name": p_name,
+                        "workload": workload,
+                        "action": str(act or ""),
+                        "old_value": str(old_v or ""),
+                        "new_value": str(new_v or ""),
+                        "reason": str(reason or ""),
+                        "success": success,
                         "message": msg
                     })
                 return events

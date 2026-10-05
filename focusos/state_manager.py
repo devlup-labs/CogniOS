@@ -96,15 +96,18 @@ class WorkloadStateManager:
                 candidate_workload = bucket
                 top_res = data
 
-        # ML-assisted candidate selection: if rule engine has no strong process match, but ML has high confidence
-        if (candidate_workload == "UNKNOWN" or top_score < 0.2) and ml_valid and ml_conf >= 0.60 and ml_workload != "IDLE":
+        # ML-assisted candidate selection:
+        # 1. If rule engine has no strong process match and ML is confident
+        if (candidate_workload == "UNKNOWN" or top_score < 0.3) and ml_valid and ml_conf >= 0.60 and ml_workload != "IDLE":
             candidate_workload = ml_workload
             score_to_use = ml_conf
             score_source = "XGBoost ML Model"
-        elif ml_valid and ml_conf > 0.0:
-            score_to_use = ml_conf
-            score_source = "XGBoost ML Model"
+        elif ml_valid and ml_workload == candidate_workload:
+            # Both Rule Engine and ML agree on the exact same workload!
+            score_to_use = max(top_score, ml_conf)
+            score_source = "XGBoost ML Model" if ml_conf >= top_score else "Rule Engine"
         else:
+            # Rule Engine has clear process evidence which defines the workload
             score_to_use = max(0.0, top_score)
             score_source = "Rule Engine"
 
@@ -112,9 +115,14 @@ class WorkloadStateManager:
 
         evidence_items = []
         if ml_valid and ml_conf > 0.0:
-            evidence_items.append(
-                f"XGBoost Classifier: {ml_workload} ({ml_conf * 100:.1f}% confidence)"
-            )
+            if ml_workload == candidate_workload:
+                evidence_items.append(
+                    f"XGBoost Classifier: {ml_workload} ({ml_conf * 100:.1f}% confidence)"
+                )
+            else:
+                evidence_items.append(
+                    f"XGBoost Network Signature: {ml_workload} ({ml_conf * 100:.1f}%) — overridden by active {candidate_workload} process load"
+                )
 
         if top_res:
             top_proc_name = top_res["matched_processes"][0]["name"] if top_res["matched_processes"] else "N/A"
