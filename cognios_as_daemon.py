@@ -42,7 +42,6 @@ from focusos.policy import get_policy
 from focusos.optimisation import apply_policy, restore_workload_state
 from focusos.llm_explainer import generate_explanation
 from focusos.models.classifier import predict_live_workload
-import db
 
 
 def _humanize_duration(seconds):
