@@ -221,17 +221,19 @@ def run_rule_engine_loop(stop_event):
                 top_cpu, top_mem, baselines = collect_layer2_metrics(baselines, top_n=20)
                 # Normalize field names and deduplicate processes appearing in both top_cpu and top_mem
                 seen_pids = set()
-                active_processes = []
+                num_cores = max(1, psutil.cpu_count() or 1)
                 for p in (top_cpu + top_mem):
                     pid = p.get("pid")
                     if pid is not None and pid in seen_pids:
                         continue
                     if pid is not None:
                         seen_pids.add(pid)
+                    raw_cpu = float(p.get("cpu_normalized") if p.get("cpu_normalized") is not None else (p.get("cpu_peak") or p.get("cpu_percent") or 0.0))
+                    avg_cpu = round(raw_cpu / num_cores if raw_cpu > 100.0 else raw_cpu, 1)
                     active_processes.append({
                         "pid": pid,
                         "name": p.get("name", ""),
-                        "cpu_percent": float(p.get("cpu_peak") or p.get("cpu_percent") or 0.0),
+                        "cpu_percent": avg_cpu,
                         "memory_rss_mb": float(p.get("ram_peak") or p.get("memory_rss_mb") or 0.0),
                     })
 

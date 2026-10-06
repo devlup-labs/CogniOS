@@ -585,11 +585,17 @@ def main():
         research_view.render()
 
     # --- Non-blocking Auto Refresh (browser-side timer) ---
-    if HAS_AUTOREFRESH:
-        refresh_interval_ms = int(getattr(config, 'AUTO_REFRESH', 2) * 1000)
-        st_autorefresh(interval=refresh_interval_ms, key="dashboard_autorefresh")
-    else:
-        st.sidebar.warning("⚠️ `streamlit-autorefresh` missing. Run `pip install streamlit-autorefresh` for live updates.")
+    # Only fire a full-page rerun for views that have NO @st.fragment decorator.
+    # Fragment-based views (overview, focusos, blackbox) self-refresh their own
+    # DOM subtree via run_every=N. Stacking st_autorefresh on top causes a second
+    # uncoordinated full-page rerun that produces the visible "blink" effect.
+    FRAGMENT_VIEWS = {"overview", "focusos", "blackbox"}
+    if curr not in FRAGMENT_VIEWS:
+        if HAS_AUTOREFRESH:
+            refresh_interval_ms = int(getattr(config, 'AUTO_REFRESH', 2) * 1000)
+            st_autorefresh(interval=refresh_interval_ms, key="dashboard_autorefresh")
+        else:
+            st.sidebar.warning("⚠️ `streamlit-autorefresh` missing. Run `pip install streamlit-autorefresh` for live updates.")
 
 
 if __name__ == "__main__":

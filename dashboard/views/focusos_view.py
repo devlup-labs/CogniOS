@@ -35,7 +35,7 @@ def _pct_bar(value: float, color: str = "#00f5c4") -> str:
     )
 
 
-@st.fragment(run_every=1)
+@st.fragment(run_every=2)
 def render():
     affinity_data = dp.get_processor_affinity_matrix()
     events = dp.get_focusos_events()
@@ -55,6 +55,18 @@ def render():
     live_sys          = dp.get_live_system_metrics()
     sys_cpu           = float(live_sys.get("cpu_pct", 0.0))
     sys_mem_mb        = float(live_sys.get("memory_used_gb", 0.0) * 1024)
+
+    # --- Fingerprint guard: skip re-rendering heavy HTML if data hasn't changed ---
+    # Round noisy floats to 1dp to avoid triggering re-renders on tiny fluctuations
+    _fingerprint = (
+        current_workload, current_state, consecutive_cycles,
+        round(cpu_attr, 1), round(ram_attr, 1), round(score, 2),
+        top_proc, round(sys_cpu, 1), ml_workload,
+        len(events),
+    )
+    if st.session_state.get("_focusos_fp") == _fingerprint:
+        return   # Nothing meaningful changed — skip the full DOM repaint (no blink)
+    st.session_state["_focusos_fp"] = _fingerprint
 
     policy_info = get_policy(current_workload)
 
@@ -131,10 +143,14 @@ def render():
             text = str(ev).strip()
 
             # Process-level signals: e.g. "python (PID 15045) — CPU: 23.5%, RAM: 1420 MB"
-            proc_match = re.match(r"^([a-zA-Z0-9_\-\.]+)\s*\(PID\s*(\d+)\)\s*—\s*CPU:\s*([0-9\.]+%?),\s*RAM:\s*([0-9\.]+\s*[a-zA-Z]+)", text)
+            proc_match = re.match(r"^([a-zA-Z0-9_\-\.]+)\s*\(PID\s*(\d+)\)\s*—\s*CPU:\s*([0-9\.]+)%?,\s*RAM:\s*([0-9\.]+\s*[a-zA-Z]+)", text)
             if proc_match:
                 p_name, pid, cpu_val, ram_val = proc_match.groups()
-                cpu_display = cpu_val if '%' in cpu_val else cpu_val + '%'
+                cpu_float = float(cpu_val)
+                num_cores = max(1, psutil.cpu_count() or 1)
+                if cpu_float > 100.0:
+                    cpu_float = round(cpu_float / num_cores, 1)
+                cpu_display = f"{cpu_float:.1f}%"
                 evidence_html_items += (
                     f'<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; '
                     f'background:rgba(255,255,255,0.015); border:1px solid #162030; border-radius:6px; margin-bottom:6px; font-family:\'JetBrains Mono\';">'
@@ -394,8 +410,10 @@ def render():
         """
         try:
             procs = dp.get_top_processes_list(limit=6)
+            num_cores = max(1, psutil.cpu_count() or 1)
             for p in (procs or []):
-                cpu_p = float(p.get("cpu") or 0.0)
+                raw_cpu = float(p.get("cpu_normalized") if p.get("cpu_normalized") is not None else (p.get("cpu") or 0.0))
+                cpu_p = round(raw_cpu / num_cores if raw_cpu > 100.0 else raw_cpu, 1)
                 p_name = str(p.get("name") or "proc")[:14]
                 pid = p.get("pid", "")
                 nice = p.get("nice", 0)

@@ -137,8 +137,9 @@ class ProcessMonitor:
                     results.append({
                         "pid": pid,
                         "name": name,
-                        "cpu": cpu_pct,
-                        "cpu_percent": cpu_pct,
+                        "cpu": cpu_normalized,
+                        "cpu_percent": cpu_normalized,
+                        "cpu_raw": cpu_pct,
                         "cpu_normalized": cpu_normalized,
                         "ram": mem_pct,
                         "memory_percent": mem_pct,

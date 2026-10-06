@@ -472,6 +472,10 @@ def get_top_processes_list(limit=10):
 
     try:
         procs = sample_top_processes(top_n=limit)
+        num_cores = max(1, psutil.cpu_count() or 1)
+        for p in procs:
+            raw_cpu = float(p.get("cpu_normalized") if p.get("cpu_normalized") is not None else p.get("cpu", 0.0))
+            p["cpu"] = round(raw_cpu / num_cores if raw_cpu > 100.0 else raw_cpu, 1)
         return procs
     except Exception as e:
         procs = []

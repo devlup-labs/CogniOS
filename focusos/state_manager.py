@@ -127,7 +127,9 @@ class WorkloadStateManager:
         if top_res:
             top_proc_name = top_res["matched_processes"][0]["name"] if top_res["matched_processes"] else "N/A"
             for p in top_res["matched_processes"][:5]:
-                cpu_pct = p.get('cpu_percent', 0.0)
+                raw_cpu = float(p.get('cpu_percent', 0.0))
+                num_cores = max(1, psutil.cpu_count() or 1)
+                cpu_pct = round(raw_cpu / num_cores if raw_cpu > 100.0 else raw_cpu, 1)
                 ram_mb = p.get('memory_rss_mb', 0.0)
                 evidence_items.append(
                     f"{p['name']} (PID {p['pid']}) — CPU: {cpu_pct:.1f}%, RAM: {ram_mb:.0f} MB"
