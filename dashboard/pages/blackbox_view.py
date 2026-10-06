@@ -1,1 +1,0 @@
-"""Blackbox dashboard page."""
