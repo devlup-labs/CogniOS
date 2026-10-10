@@ -45,7 +45,7 @@ def _warn_once(source, message):
     # Log a missing source only once, not every second.
     if source not in _warned:
         _warned.add(source)
-        logger.warning(message)
+        # Suppressed: logger.warning(message)
 
 
 def _read_procs_running():
