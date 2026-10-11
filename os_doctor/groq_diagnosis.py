@@ -393,9 +393,8 @@ def format_report(alert_id: int, diagnosis: dict) -> str:
         f"{'═' * 66}",
         f"  OS Doctor  ·  Alert #{alert_id}  ·  Workload: {wl}  ·  Severity: {sev}",
         f"{'═' * 66}",
-        f"",
         f"  Confidence : {conf.get('combined', '?')}%  "
-        f"(deviation signal: {conf.get('deviation_component', '?')}%)",
+        f"(FocusOS: {conf.get('focusos_confidence', '?')}%, deviation: {conf.get('deviation_component', '?')}%)",
         f"  Top deviation : {conf.get('top_deviation_iqr', '?')} IQR  "
         f"(cap: {conf.get('deviation_cap_iqr', '?')} IQR = 100%)",
         f"",
@@ -497,10 +496,11 @@ def log_report_to_file(report: str) -> None:
 def process_alert(conn: sqlite3.Connection, alert_id: int, metadata_json: str, data_json: str) -> None:
     try:
         metadata = json.loads(metadata_json)
-        data     = json.loads(data_json)
-        raw      = data.get("raw", {})
-        wid      = data.get("workload_id")
-        score    = data.get("anomaly_score", 0.0)
+        data         = json.loads(data_json)
+        raw          = data.get("raw", {})
+        wid          = data.get("workload_id")
+        focusos_conf = float(data.get("focusos_confidence", 0.85) or 0.85)
+        score        = data.get("anomaly_score", 0.0)
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         print(f"[groq_diagnosis] alert {alert_id}: malformed JSON, skipping ({exc})")
         return
@@ -510,13 +510,16 @@ def process_alert(conn: sqlite3.Connection, alert_id: int, metadata_json: str, d
         print(f"[groq_diagnosis] alert {alert_id}: no baselines loaded, skipping.")
         return
 
-    # 1. Best-fit baseline
-    best_wid, best_baseline, mean_dev = select_best_baseline(raw, baselines)
-    baseline_corrected = (best_wid != wid)
-    workload_name = best_baseline["name"]
+    # 1. Use predicted workload baseline (with fallback if missing)
+    if wid in baselines:
+        target_baseline = baselines[wid]
+        workload_name   = target_baseline["name"]
+    else:
+        best_wid, target_baseline, _ = select_best_baseline(raw, baselines)
+        workload_name   = target_baseline["name"]
 
-    # 2. Extract context
-    all_devs  = compute_deviations(raw, best_baseline)
+    # 2. Extract context using deviations from predicted workload
+    all_devs  = compute_deviations(raw, target_baseline)
     top_procs = extract_top_processes(metadata, n=3)
     
     if not all_devs:
@@ -556,12 +559,12 @@ def process_alert(conn: sqlite3.Connection, alert_id: int, metadata_json: str, d
     diagnosis["issue_key"] = issue_key
     diagnosis["top_deviations"] = all_devs[:5]
     diagnosis["top_procs"] = top_procs
-    diagnosis["baseline_corrected"] = baseline_corrected
-    diagnosis["baseline_mean_dev_iqr"] = mean_dev
     
     dev_conf = min(1.0, max(0.0, top_dev_val / 5.0))
+    combined_conf = round(((focusos_conf * 0.5) + (dev_conf * 0.5)) * 100, 1)
     diagnosis["confidence"] = {
-        "combined": round(dev_conf * 100, 1),
+        "combined": combined_conf,
+        "focusos_confidence": round(focusos_conf * 100, 1),
         "deviation_component": round(dev_conf * 100, 1),
         "top_deviation_iqr": round(top_dev_val, 4),
         "deviation_cap_iqr": 5.0

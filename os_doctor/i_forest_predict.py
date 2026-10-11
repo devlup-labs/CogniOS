@@ -81,7 +81,16 @@ def flag_anomaly(get_workload_id):
     try:
         while True:
             try:
-                workload_id = get_workload_id()
+                workload_input = get_workload_id()
+                if isinstance(workload_input, (tuple, list)):
+                    workload_id = workload_input[0]
+                    focusos_confidence = float(workload_input[1]) if len(workload_input) > 1 and workload_input[1] is not None else 0.85
+                elif isinstance(workload_input, dict):
+                    workload_id = workload_input.get("workload_id")
+                    focusos_confidence = float(workload_input.get("confidence", 0.85))
+                else:
+                    workload_id = workload_input
+                    focusos_confidence = 0.85
 
                 if workload_id not in models:
                     print(f"[predict] No model for workload {workload_id}. Skipping tick.")
@@ -109,7 +118,7 @@ def flag_anomaly(get_workload_id):
                 anomaly_score = model.decision_function(scaled_array)
                 prediction = model.predict(scaled_array)
 
-                print(f"[{name}] Anomaly score: {round(anomaly_score[0], 4)}")
+                print(f"[{name}] Anomaly score: {round(anomaly_score[0], 4)} (FocusOS conf: {focusos_confidence})")
 
                 if prediction[0] == -1:
                     print(f"[{name}] ⚠ ANOMALY detected! Score: {round(anomaly_score[0], 4)}")
@@ -119,6 +128,7 @@ def flag_anomaly(get_workload_id):
                         "scaled": scaled_df.to_dict(orient="records")[0],
                         "workload_id": workload_id,
                         "workload_name": name,
+                        "focusos_confidence": focusos_confidence,
                         "anomaly_score": round(anomaly_score[0], 4),
                     }
                     write_to_alerts_table(data, metadata)

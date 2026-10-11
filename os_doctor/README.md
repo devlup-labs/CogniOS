@@ -61,7 +61,7 @@ os_doctor/
 │── _init_.py             # Marks the directory as a Python package
 │── featuring.py          # Feature engineering and preprocessing
 │── i_forest.py           # Isolation Forest model implementation
-│── llm_layer.py          # LLM integration and response generation
+│── groq_diagnosis.py     # LLM integration, baseline selection, and response generation
 │── streamlit.py          # Streamlit web application
 │── README.md             # Project overview and setup guide
 ```
@@ -97,7 +97,7 @@ This module bridges the gap between transactional database storage and in-memory
 
 ### 3. `build_unified_vectors`
 
-- **Description:** Combines the three individual vectors recieved above and handles what to feed into i_forest.py and what to feed to llm_layer.
+- **Description:** Combines the three individual vectors recieved above and handles what to feed into i_forest.py and what to feed to groq_diagnosis.
 - **Input:**
   - `sys_vec, ram_vec, cpu_vec` (pd.DataFrame): Raw process telemetry DataFrame containing compressed or stringified JSON arrays.
 - **Output:**
@@ -155,4 +155,4 @@ This module bridges the gap between transactional database storage and in-memory
 
 Upon anomaly detection, packages both raw (human-readable) and scaled metric payloads into the alerts table for the LLM explanation layer and dashboard.
 
-# `llm_layer.py`
+# `groq_diagnosis.py`
