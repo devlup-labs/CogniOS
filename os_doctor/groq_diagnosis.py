@@ -76,7 +76,6 @@ def init_diagnoses_table(conn: sqlite3.Connection) -> None:
             confidence_json    TEXT,
             root_cause         TEXT,
             explanation        TEXT,
-            recommendations    TEXT,
             top_deviations     TEXT,
             top_procs          TEXT,
             created_at         TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -91,8 +90,8 @@ def write_diagnosis(conn: sqlite3.Connection, alert_id: int, diagnosis: dict) ->
         f"""
         INSERT OR IGNORE INTO {DIAGNOSES_TABLE_NAME}
             (alert_id, workload, issue_key, severity, confidence_json, root_cause,
-             explanation, recommendations, top_deviations, top_procs)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             explanation, top_deviations, top_procs)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             alert_id,
@@ -102,7 +101,6 @@ def write_diagnosis(conn: sqlite3.Connection, alert_id: int, diagnosis: dict) ->
             json.dumps(diagnosis.get("confidence", {}),       separators=(",", ":")),
             diagnosis.get("root_cause", ""),
             diagnosis.get("explanation", ""),
-            json.dumps(diagnosis.get("recommendations", []),  separators=(",", ":")),
             json.dumps(diagnosis.get("top_deviations", []),   separators=(",", ":")),
             json.dumps(diagnosis.get("top_procs", {}),        separators=(",", ":")),
         ),
@@ -151,18 +149,11 @@ def get_baselines() -> dict[int, dict]:
             model  = joblib.load(model_path)
 
             center = dict(zip(ML_FEATURES, scaler.center_.tolist()))
-            scale  = dict(zip(ML_FEATURES, scaler.scale_.tolist()))
-            
-            # Filter out constant features from scaling (IQR < 1e-4) to prevent inf deviation
-            for feat in scale:
-                if scale[feat] < 1e-4:
-                    scale[feat] = float('inf') # Effectively ignores this feature in deviation
 
             _BASELINES_CACHE[wid] = {
                 "name":      cfg["name"],
                 "center":    center,
-                "scale":     scale,
-                "threshold": float(model.threshold_),
+                "threshold": 0.0,
             }
             _LAST_MTIMES[wid] = mtime
             print(f"[diagnosis] Loaded baseline for workload '{cfg['name']}'")
@@ -176,34 +167,31 @@ def get_baselines() -> dict[int, dict]:
 # ---------------------------------------------------------------------------
 
 def compute_deviations(raw: dict, baseline: dict) -> list[dict]:
+    """
+    Calculates the difference between the new feature vector and the baseline
+    of the matching workload for every feature, and sorts by deviation descending.
+    """
     results = []
-    center = baseline["center"]
-    scale  = baseline["scale"]
+    center = baseline.get("center", {})
 
     for feat in ML_FEATURES:
         try:
-            raw_val  = float(raw.get(feat, 0.0) or 0.0)
-            center_v = float(center.get(feat, 0.0))
-            scale_v  = float(scale.get(feat, 1.0))
+            raw_val    = float(raw.get(feat, 0.0) or 0.0)
+            baseline_v = float(center.get(feat, 0.0) or 0.0)
         except (TypeError, ValueError):
             continue
 
-        # If scale_v is inf, it was a constant feature; deviation is 0.
-        if scale_v == float('inf'):
-            dev = 0.0
-        else:
-            dev = abs(raw_val - center_v) / max(scale_v, 1e-9)
-            
-        direction = "above baseline" if raw_val >= center_v else "below baseline"
+        dev = abs(raw_val - baseline_v)
+        direction = "above baseline" if raw_val >= baseline_v else "below baseline"
         cat, label = FEATURE_META.get(feat, ("OTHER", feat))
         
         results.append({
             "feature":   feat,
             "label":     label,
             "category":  cat,
-            "raw_value": round(raw_val,  4),
-            "baseline":  round(center_v, 4),
-            "deviation": round(dev,      4),
+            "raw_value": round(raw_val,    4),
+            "baseline":  round(baseline_v, 4),
+            "deviation": round(dev,        4),
             "direction": direction,
         })
 
@@ -256,10 +244,21 @@ def extract_top_processes(metadata: dict, n: int = 3) -> dict:
     return procs
 
 
-def _severity(max_deviation: float) -> str:
-    if max_deviation >= 5.0:   return "critical"
-    if max_deviation >= 3.0:   return "high"
-    if max_deviation >= 1.5:   return "medium"
+def _severity(anomaly_score: float, threshold: float = 0.0) -> str:
+    """
+    Calculates severity depending on the anomaly score:
+      threshold - score > 0.75 -> very high
+      threshold - score > 0.50 -> high
+      threshold - score > 0.25 -> medium
+      otherwise                -> low
+    """
+    diff = threshold - anomaly_score
+    if diff > 0.75:
+        return "very high"
+    if diff > 0.50:
+        return "high"
+    if diff > 0.25:
+        return "medium"
     return "low"
 
 # ---------------------------------------------------------------------------
@@ -268,13 +267,43 @@ def _severity(max_deviation: float) -> str:
 
 _DIAGNOSIS_CACHE = {} # (workload, severity, primary_feature) -> {diagnosis_dict, last_alert_time}
 
-def _get_cached_diagnosis(issue_key: str) -> dict | None:
+def _get_cached_diagnosis(conn: sqlite3.Connection, issue_key: str) -> tuple[dict, bool] | None:
+    """
+    Checks in-memory cache and persistent database for existing diagnosis.
+    Returns (diagnosis_dict, is_throttled) or None.
+    """
+    # 1. Check in-memory cache
     if issue_key in _DIAGNOSIS_CACHE:
         cached = _DIAGNOSIS_CACHE[issue_key]
-        if time.time() - cached['last_time'] < COOLDOWN_S:
-            # Silently throttle identical alerts within cooldown
-            return "THROTTLED" 
-        return cached['diagnosis']
+        is_throttled = (time.time() - cached['last_time'] < COOLDOWN_S)
+        return (cached['diagnosis'], is_throttled)
+
+    # 2. Check persistent diagnoses table from SQLite
+    try:
+        cursor = conn.execute(
+            f"""
+            SELECT root_cause, explanation
+            FROM {DIAGNOSES_TABLE_NAME}
+            WHERE issue_key = ?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (issue_key,)
+        )
+        row = cursor.fetchone()
+        if row:
+            root_cause, explanation = row
+            diag = {
+                "root_cause": root_cause,
+                "explanation": explanation,
+            }
+            _DIAGNOSIS_CACHE[issue_key] = {
+                'diagnosis': diag,
+                'last_time': time.time()
+            }
+            return (diag, False)
+    except sqlite3.Error:
+        pass
+
     return None
 
 def _cache_diagnosis(issue_key: str, diagnosis: dict) -> None:
@@ -292,18 +321,15 @@ You are OSDoctor, a senior systems reliability engineer.
 The system detected an anomaly. You must explain why the system is slow.
 
 You will receive:
-1. The inferred workload type.
-2. The top deviant metrics (scaled IQR deviation from the normal baseline).
+1. The inferred workload type and anomaly severity.
+2. The top deviant metrics (raw difference from the normal baseline).
 3. The top CPU and RAM consuming processes.
 
 Respond with ONLY a valid JSON object. No markdown. No commentary. Exactly this shape:
 {
   "root_cause": "<one sentence — most likely cause>",
-  "explanation": "<2-3 sentences a non-expert user can understand>",
-  "recommendations": ["<action 1>", "<action 2>", "<action 3>"]
+  "explanation": "<2-3 sentences a non-expert user can understand>"
 }
-
-Focus recommendations on what the user can do right now. Do not invent a confident cause if ambiguous.
 """
 
 def _build_prompt(
@@ -311,6 +337,7 @@ def _build_prompt(
     top_deviations: list[dict],
     top_procs: dict,
     anomaly_score: float,
+    severity: str,
 ) -> str:
     cpu_lines = []
     for p in top_procs["cpu"]:
@@ -320,9 +347,9 @@ def _build_prompt(
     for p in top_procs["ram"]:
         ram_lines.append(f"  {p['name']}  (PID: {p['pid']}, RAM Peak: {p.get('ram_peak_MB', '?')} MB)")
 
-    prompt = f"Workload: {workload_name}\nAnomaly score: {anomaly_score}\n\nTop 5 Deviant Metrics:\n"
+    prompt = f"Workload: {workload_name}\nAnomaly score: {anomaly_score}\nSeverity: {severity}\n\nTop 5 Deviant Metrics:\n"
     for feat in top_deviations[:5]:
-        prompt += f"- {feat['label']} (Category: {feat['category']}): measured {feat['raw_value']}, deviation {feat['deviation']} IQR {feat['direction']}\n"
+        prompt += f"- {feat['label']} (Category: {feat['category']}): measured {feat['raw_value']}, baseline {feat['baseline']}, deviation {feat['deviation']} ({feat['direction']})\n"
 
     prompt += "\nTop CPU Processes:\n" + ("\n".join(cpu_lines) if cpu_lines else "  (no data)")
     prompt += "\nTop RAM Processes:\n" + ("\n".join(ram_lines) if ram_lines else "  (no data)")
@@ -377,7 +404,6 @@ def _fallback_diagnosis(workload: str, top_deviations: list[dict], top_procs: di
     return {
         "root_cause": f"{feat} deviated significantly during {workload}.",
         "explanation": "Groq LLM was unavailable, but telemetry indicates an anomaly driven by this metric.",
-        "recommendations": ["Check Activity Monitor for high resource consumers."],
     }
 
 # ---------------------------------------------------------------------------
@@ -394,15 +420,15 @@ def format_report(alert_id: int, diagnosis: dict) -> str:
         f"  OS Doctor  ·  Alert #{alert_id}  ·  Workload: {wl}  ·  Severity: {sev}",
         f"{'═' * 66}",
         f"  Confidence : {conf.get('combined', '?')}%  "
-        f"(FocusOS: {conf.get('focusos_confidence', '?')}%, deviation: {conf.get('deviation_component', '?')}%)",
-        f"  Top deviation : {conf.get('top_deviation_iqr', '?')} IQR  "
-        f"(cap: {conf.get('deviation_cap_iqr', '?')} IQR = 100%)",
+        f"(FocusOS: {conf.get('focusos_confidence', '?')}%, score signal: {conf.get('score_component', '?')}%)",
+        f"  Anomaly score : {conf.get('anomaly_score', '?')}  "
+        f"(threshold: {conf.get('threshold', 0.0)}, cap: -5.0)",
         f"",
     ]
     
     if diagnosis.get("baseline_corrected"):
         lines += [
-            f"  ⚡ Baseline auto-corrected (Mean deviation {diagnosis.get('baseline_mean_dev_iqr', '?')} IQR)",
+            f"  ⚡ Baseline auto-corrected",
             f"",
         ]
         
@@ -422,23 +448,6 @@ def format_report(alert_id: int, diagnosis: dict) -> str:
         f"  {diagnosis.get('explanation', '')}",
     ]
 
-    # Top 3 deviated features
-    lines += [
-        f"",
-        f"  Top 3 deviated features (vs {wl} baseline)",
-        f"  {'─' * 60}",
-        f"  {'Feature':<44} {'Measured':>10}  {'Baseline':>10}  {'Deviation (IQR)':>15}  Direction",
-        f"  {'─' * 95}",
-    ]
-    for feat in diagnosis.get("top_deviations", [])[:3]:
-        lines.append(
-            f"  [{feat['category']:<13}]  "
-            f"{feat['label']:<44} "
-            f"{str(feat['raw_value']):>10}  "
-            f"{str(feat['baseline']):>10}  "
-            f"{feat['deviation']:>15.4f}  "
-            f"{feat['direction']}"
-        )
 
     # Top CPU processes
     procs = diagnosis.get("top_procs", {})
@@ -469,10 +478,6 @@ def format_report(alert_id: int, diagnosis: dict) -> str:
             )
     else:
         lines.append(f"  (no data)")
-
-    lines += [f"", f"  Recommendations", f"  {'─' * 60}"]
-    for i, rec in enumerate(diagnosis.get("recommendations", []), 1):
-        lines.append(f"  {i}. {rec}")
 
     lines.append(f"{'═' * 66}")
     return "\n".join(lines)
@@ -525,25 +530,23 @@ def process_alert(conn: sqlite3.Connection, alert_id: int, metadata_json: str, d
     if not all_devs:
         return
         
-    top_dev_val = all_devs[0]["deviation"]
     top_feature = all_devs[0]["feature"]
-    severity = _severity(top_dev_val)
+    threshold   = float(target_baseline.get("threshold", 0.0))
+    severity    = _severity(score, threshold=threshold)
     
     # 3. Cache check (Cooldown + Deduplication)
-    issue_key = f"{workload_name}_{top_feature}_{severity}"
-    cached = _get_cached_diagnosis(issue_key)
+    issue_key = f"{workload_name}_{top_feature}_{severity.replace(' ', '_')}"
+    cached_res = _get_cached_diagnosis(conn, issue_key)
     
-    if cached == "THROTTLED":
-        # Skip alerting altogether for this tick to prevent spam
-        return
-        
+    is_throttled = False
     diagnosis = None
-    if cached:
-        diagnosis = cached
+    if cached_res is not None:
+        cached_diag, is_throttled = cached_res
+        diagnosis = dict(cached_diag)
         diagnosis["cached"] = True
     else:
         # 4. LLM Call
-        prompt = _build_prompt(workload_name, all_devs, top_procs, score)
+        prompt = _build_prompt(workload_name, all_devs, top_procs, score, severity)
         parsed = _call_groq(prompt)
         
         if parsed:
@@ -560,24 +563,31 @@ def process_alert(conn: sqlite3.Connection, alert_id: int, metadata_json: str, d
     diagnosis["top_deviations"] = all_devs[:5]
     diagnosis["top_procs"] = top_procs
     
-    dev_conf = min(1.0, max(0.0, top_dev_val / 5.0))
-    combined_conf = round(((focusos_conf * 0.5) + (dev_conf * 0.5)) * 100, 1)
+    diff = max(0.0, threshold - score)
+    # Cap at -5.0 anomaly score (diff = 5.0) and apply min-max scaling [0, 5] -> [0, 1]
+    capped_diff = min(5.0, diff)
+    score_conf = capped_diff / 5.0
+    combined_conf = round(((focusos_conf * 0.5) + (score_conf * 0.5)) * 100, 1)
     diagnosis["confidence"] = {
         "combined": combined_conf,
         "focusos_confidence": round(focusos_conf * 100, 1),
-        "deviation_component": round(dev_conf * 100, 1),
-        "top_deviation_iqr": round(top_dev_val, 4),
-        "deviation_cap_iqr": 5.0
+        "score_component": round(score_conf * 100, 1),
+        "anomaly_score": round(score, 4),
+        "threshold": threshold,
+        "score_cap": 5.0,
     }
     
-    # Update cache
-    _cache_diagnosis(issue_key, diagnosis)
-
-    # 6. Save and output
+    # 6. Save to database so alert is recorded and not re-polled
     write_diagnosis(conn, alert_id, diagnosis)
-    report = format_report(alert_id, diagnosis)
-    print(report)
-    log_report_to_file(report)
+
+    # 7. Output & Logging (throttled to avoid terminal spam)
+    if not is_throttled:
+        _cache_diagnosis(issue_key, diagnosis)
+        report = format_report(alert_id, diagnosis)
+        print(report)
+        log_report_to_file(report)
+    else:
+        print(f"[groq_diagnosis] Alert #{alert_id} logged to table (cached '{issue_key}', terminal display throttled)")
 
 # ---------------------------------------------------------------------------
 # Daemon

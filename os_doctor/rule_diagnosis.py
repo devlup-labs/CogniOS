@@ -572,23 +572,6 @@ def format_report(alert_id: int, diagnosis: dict) -> str:
             f"  ⚠ Secondary cause: {sec.lower().replace('_', ' ')} metrics also deviate.",
         ]
 
-    # Top 3 deviated features
-    lines += [
-        f"",
-        f"  Top 3 deviated features (vs {wl} baseline)",
-        f"  {'─' * 60}",
-        f"  {'Feature':<44} {'Measured':>10}  {'Baseline':>10}  {'Deviation (IQR)':>15}  Direction",
-        f"  {'─' * 95}",
-    ]
-    for feat in diagnosis.get("top_deviations", []):
-        lines.append(
-            f"  [{feat['category']:<13}]  "
-            f"{feat['label']:<44} "
-            f"{str(feat['raw_value']):>10}  "
-            f"{str(feat['baseline']):>10}  "
-            f"{feat['deviation']:>15.4f}  "
-            f"{feat['direction']}"
-        )
 
     # Top 3 CPU processes
     cpu_procs = procs.get("cpu", [])
