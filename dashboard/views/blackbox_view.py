@@ -20,12 +20,15 @@ def _on_scrub_preset(offset_minutes: int):
 
 @st.fragment(run_every=2)
 def render():
+    # Enhanced CSS for better UI
     st.markdown("""
         <style>
+        /* Button styling */
         div[data-testid="stButton"] button[kind="secondary"] {
             background: #101725 !important;
             color: #e2e8f0 !important;
             border: 1px solid #1a2638 !important;
+            transition: all 0.2s ease;
         }
         div[data-testid="stButton"] button[kind="secondary"] * {
             color: inherit !important;
@@ -34,6 +37,176 @@ def render():
             background: #172236 !important;
             color: #00f5c4 !important;
             border-color: #00f5c4 !important;
+            box-shadow: 0 0 12px rgba(0, 245, 196, 0.2);
+        }
+        div[data-testid="stButton"] button[kind="primary"] {
+            background: linear-gradient(135deg, #00f5c4 0%, #00d4aa 100%) !important;
+            color: #05080e !important;
+            border: none !important;
+            font-weight: 700 !important;
+            transition: all 0.2s ease;
+        }
+        div[data-testid="stButton"] button[kind="primary"]:hover {
+            box-shadow: 0 0 20px rgba(0, 245, 196, 0.4) !important;
+            transform: translateY(-1px);
+        }
+
+        /* Text input styling */
+        div[data-testid="stTextInput"] input {
+            background: #0a0f1a !important;
+            border: 1px solid #1a2638 !important;
+            color: #e2e8f0 !important;
+            transition: all 0.2s ease;
+        }
+        div[data-testid="stTextInput"] input:focus {
+            border-color: #00f5c4 !important;
+            box-shadow: 0 0 0 2px rgba(0, 245, 196, 0.15) !important;
+        }
+
+        /* Card hover effects */
+        .cognios-card {
+            transition: all 0.3s ease;
+            border: 1px solid #1a2638;
+        }
+        .cognios-card:hover {
+            border-color: #00f5c4;
+            box-shadow: 0 8px 32px rgba(0, 245, 196, 0.08);
+            transform: translateY(-2px);
+        }
+
+        /* Badge animations */
+        .cognios-badge {
+            transition: all 0.2s ease;
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+        .cognios-badge.critical {
+            animation: pulse-critical 1s ease-in-out infinite;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 5px currentColor; }
+            50% { box-shadow: 0 0 15px currentColor; }
+        }
+        @keyframes pulse-critical {
+            0%, 100% { box-shadow: 0 0 5px #ef4444; background: rgba(239, 68, 68, 0.1); }
+            50% { box-shadow: 0 0 20px #ef4444; background: rgba(239, 68, 68, 0.2); }
+        }
+
+        /* AI response formatting */
+        .ai-response-container h4 {
+            color: #00f5c4 !important;
+            font-size: 12px !important;
+            font-weight: 800 !important;
+            font-family: 'JetBrains Mono', monospace !important;
+            text-transform: uppercase !important;
+            letter-spacing: 1px !important;
+            margin-top: 12px !important;
+            margin-bottom: 6px !important;
+            border-bottom: 1px solid rgba(0, 245, 196, 0.15) !important;
+            padding-bottom: 4px !important;
+        }
+        .ai-response-container ul, .ai-response-container ol {
+            margin: 4px 0 10px 0 !important;
+            padding-left: 18px !important;
+        }
+        .ai-response-container li {
+            margin-bottom: 4px !important;
+            color: #e2e8f0 !important;
+            font-size: 12px !important;
+            line-height: 1.5 !important;
+        }
+        .ai-response-container strong { color: #ffffff !important; }
+        .ai-response-container code {
+            background: rgba(0, 245, 196, 0.1) !important;
+            color: #00f5c4 !important;
+            padding: 2px 6px !important;
+            border-radius: 4px !important;
+            font-family: 'JetBrains Mono', monospace !important;
+            font-size: 11px !important;
+        }
+        .ai-response-container pre {
+            background: #0a0f1a !important;
+            border: 1px solid #1a2638 !important;
+            border-radius: 6px !important;
+            padding: 10px !important;
+            overflow-x: auto !important;
+            margin: 8px 0 !important;
+        }
+        .ai-response-container pre code {
+            background: transparent !important;
+            color: #e2e8f0 !important;
+            padding: 0 !important;
+            font-size: 11px !important;
+        }
+
+        /* Suggestion chips */
+        .suggestion-chip {
+            display: inline-block;
+            padding: 6px 12px;
+            margin: 4px 6px 4px 0;
+            background: rgba(0, 245, 196, 0.08);
+            border: 1px solid rgba(0, 245, 196, 0.2);
+            border-radius: 20px;
+            color: #00f5c4;
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .suggestion-chip:hover {
+            background: rgba(0, 245, 196, 0.2);
+            border-color: #00f5c4;
+            transform: translateY(-1px);
+        }
+
+        /* Loading animation */
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        .loading-skeleton {
+            background: linear-gradient(90deg, #101725 25%, #172236 50%, #101725 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 6px;
+            height: 16px;
+            margin: 8px 0;
+        }
+
+        /* Status indicator pulse */
+        .status-pulse {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: status-blink 1.5s ease-in-out infinite;
+        }
+        .status-pulse.active { background: #00f5c4; }
+        .status-pulse.warning { background: #f59e0b; }
+        .status-pulse.critical { background: #ef4444; }
+        @keyframes status-blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Event chain item hover */
+        .forensic-chain-container > div {
+            transition: all 0.2s ease;
+        }
+        .forensic-chain-container > div:hover {
+            background: #141d2b !important;
+            transform: translateX(4px);
+        }
+
+        /* Query suggestion container */
+        .query-suggestions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+            padding: 8px;
+            background: rgba(0, 245, 196, 0.04);
+            border: 1px solid rgba(0, 245, 196, 0.1);
+            border-radius: 8px;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -96,13 +269,14 @@ def render():
     with c1:
         hb_color = "#ef4444" if is_crash else "#00f5c4"
         hb_label = "CRASH DETECTED" if is_crash else ("CLEAN SHUTDOWN" if hb.get('graceful_shutdown') else "ACTIVE PULSE")
+        badge_class = "critical" if is_crash else ""
         st.markdown(f"""
             <div class="cognios-card" style="margin-bottom: 18px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
                     <span style="color:#94a3b8; font-size:13px; font-weight:600; text-transform:uppercase; font-family:'JetBrains Mono', monospace; letter-spacing:0.5px;">
                         <i class="fa-solid fa-heart-pulse" style="color:{hb_color}; margin-right:6px;"></i> Heartbeat Sentinel
                     </span>
-                    <span class="cognios-badge" style="color:{hb_color}; background:rgba(0,0,0,0.3); border:1px solid {hb_color} !important;">
+                    <span class="cognios-badge {badge_class}" style="color:{hb_color}; background:rgba(0,0,0,0.3); border:1px solid {hb_color} !important;">
                         {hb_label}
                     </span>
                 </div>
@@ -146,13 +320,14 @@ def render():
     with c3:
         inc_count = incident_stat.get('incident_count', 0)
         inc_color = incident_stat.get('status_color', '#00f5c4')
+        badge_class = "critical" if inc_count > 0 else ""
         st.markdown(f"""
             <div class="cognios-card" style="margin-bottom: 18px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
                     <span style="color:#94a3b8; font-size:13px; font-weight:600; text-transform:uppercase; font-family:'JetBrains Mono', monospace; letter-spacing:0.5px;">
                         <i class="fa-solid fa-magnifying-glass-chart" style="color:#a855f7; margin-right:6px;"></i> Replay & Baselines
                     </span>
-                    <span class="cognios-badge" style="color:{inc_color}; background:rgba(0,0,0,0.3); border:1px solid {inc_color} !important;">
+                    <span class="cognios-badge {badge_class}" style="color:{inc_color}; background:rgba(0,0,0,0.3); border:1px solid {inc_color} !important;">
                         {incident_stat.get('status_label', 'ALL CLEAR')}
                     </span>
                 </div>
@@ -202,29 +377,26 @@ def render():
             offset_text = "Live Stream (T-00:00)" if new_scrub == 0 else f"Historical Replay (T{new_scrub}:00 min)"
             st.markdown(f"""
                 <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; font-family:'JetBrains Mono', monospace; margin-top:-4px;">
-                    <span style="color:#64748b;">T-30 min</span>
-                    <span style="color:#00f5c4; font-weight:700; background:rgba(0,245,196,0.1); padding:3px 12px; border-radius:6px; border:1px solid rgba(0,245,196,0.25);">
-                        {offset_text}
-                    </span>
-                    <span style="color:#64748b;">Live (T-00:00)</span>
+                    <span style="color:#64748b;">T-30min ────────────────────── T-00min (NOW)</span>
+                    <span style="color:#00f5c4; font-weight:700;">{offset_text}</span>
                 </div>
             """, unsafe_allow_html=True)
 
         with c_presets:
-            p1, p2 = st.columns(2)
+            p1, p2, p3 = st.columns(3)
             with p1:
-                st.button("🔴 Live", on_click=_on_scrub_preset, args=(0,), use_container_width=True, help="Jump to live stream")
-                st.button("T -15m", on_click=_on_scrub_preset, args=(-15,), use_container_width=True, help="Jump to T-15 minutes")
+                st.button("T-05m", on_click=_on_scrub_preset, args=(-5,), use_container_width=True, help="Jump to 5 minutes ago")
             with p2:
-                st.button("T -5m", on_click=_on_scrub_preset, args=(-5,), use_container_width=True, help="Jump to T-5 minutes")
-                st.button("T -30m", on_click=_on_scrub_preset, args=(-30,), use_container_width=True, help="Jump to T-30 minutes")
+                st.button("T-15m", on_click=_on_scrub_preset, args=(-15,), use_container_width=True, help="Jump to 15 minutes ago")
+            with p3:
+                st.button("T-30m", on_click=_on_scrub_preset, args=(-30,), use_container_width=True, help="Jump to 30 minutes ago (oldest)")
 
     # ---------------------------------------------------------
-    # 5. Middle Row: Statistical Z-Score Chart & Groq AI Synthesis
+    # 5. Main Content Grid: Z-Score Anomaly Detector + Groq AI Synthesis
     # ---------------------------------------------------------
-    col_chart, col_ai = st.columns([3.1, 1.9])
+    col_z, col_ai = st.columns([1.15, 1.0])
 
-    with col_chart:
+    with col_z:
         with st.container(border=True):
             x_vals = z_data.get('timestamps', [])
             y_cpu_z = z_data.get('z_scores', [])
@@ -233,6 +405,8 @@ def render():
             vis_all = [abs(x) for x in (y_cpu_z + y_mem_z)]
             max_dev = round(max(vis_all), 1) if vis_all else 0.0
             dev_color = "#ef4444" if max_dev >= 3.0 else ("#f59e0b" if max_dev >= 2.0 else "#00f5c4")
+            
+            dev_badge = "CRITICAL" if max_dev >= 3.0 else ("WARNING" if max_dev >= 2.0 else "NOMINAL")
             
             st.markdown(f"""
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
@@ -247,6 +421,7 @@ def render():
                             {max_dev}σ
                         </div>
                         <div style="font-size:10px; color:#64748b; font-weight:600; text-transform:uppercase; margin-top:2px;">Peak Deviation</div>
+                        <span class="cognios-badge" style="margin-top:6px; display:inline-block; font-size:9px;">{dev_badge}</span>
                     </div>
                 </div>
             """, unsafe_allow_html=True)
@@ -342,48 +517,46 @@ def render():
             """)
 
             # Initialize AI postmortem on first load only
-            # if "ai_postmortem" not in st.session_state:
-            #     st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(scrub_minutes=scrub_val)
-
             if "ai_postmortem" not in st.session_state:
-                st.session_state["ai_postmortem"] = ""  # empty on first load
+                st.session_state["ai_postmortem"] = ""
 
             if not st.session_state["ai_postmortem"]:
-                st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(scrub_minutes=scrub_val)
+                with st.spinner("Analyzing telemetry..."):
+                    st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(scrub_minutes=scrub_val)
 
             # Always display the current AI response from session state
             formatted_html = dp.format_ai_response_to_html(st.session_state["ai_postmortem"])
             st.html(f"""
-                <div class="ai-response-container" style="min-height:190px; max-height:220px; overflow-y:auto; margin-bottom:14px; font-size:12.5px;">
+                <div class="ai-response-container" style="min-height:190px; max-height:280px; overflow-y:auto; margin-bottom:14px; font-size:12.5px; padding: 4px;">
                     {formatted_html}
                 </div>
             """)
 
             # Helper to run a query and update session state
             def _run_ai_query(query_text):
-                st.session_state["ai_postmortem"] = ""
-                st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(query_text, scrub_minutes=scrub_val)
+                with st.spinner("Querying AI..."):
+                    st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(query_text, scrub_minutes=scrub_val)
 
             # Query input with synthesize button
             p_col1, p_col2 = st.columns([2.7, 1.3], vertical_alignment="center")
             with p_col1:
                 user_query = st.text_input(
                     "Ask AI Forensic Assistant",
-                    placeholder="Ask why system spiked...",
+                    placeholder="e.g., What caused the CPU spike at T-12m?",
                     label_visibility="collapsed",
                     key="bb_ai_query_input"
                 )
             with p_col2:
-                if st.button("Synthesize", icon=":material/psychology:", use_container_width=True):
-                    if user_query and user_query.strip():
-                        with st.spinner("Analyzing timeline..."):
-                            _run_ai_query(user_query.strip())
-                            st.rerun(scope="fragment")
+                if st.button("Synthesize", type="primary", use_container_width=True, icon=":material/psychology:"):
+                    if user_query.strip():
+                        _run_ai_query(user_query.strip())
+                        st.rerun(scope="fragment")
 
-            # Quick Prompt Presets (No emojis, sleek Material icons)
+            # Quick Action Pills
+            st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
             pill1, pill2, pill3 = st.columns(3)
             with pill1:
-                if st.button("Spikes", icon=":material/bolt:", use_container_width=True, help="Analyze CPU & RAM load spikes"):
+                if st.button("Spikes", icon=":material/trending_up:", use_container_width=True, help="Analyze CPU & RAM load spikes"):
                     with st.spinner("Analyzing spikes..."):
                         _run_ai_query("Analyze any CPU or Memory spikes in this timeline.")
                         st.rerun(scope="fragment")
@@ -397,6 +570,22 @@ def render():
                     with st.spinner("Generating post-mortem..."):
                         _run_ai_query("Provide an executive post-mortem of this 30-minute window.")
                         st.rerun(scope="fragment")
+
+            # Query suggestions
+            suggestions = [
+                "What caused the highest CPU spike?",
+                "Any memory leaks detected?",
+                "Explain the event chain",
+                "System stability assessment",
+                "Root cause of anomalies",
+                "Recommended actions"
+            ]
+            suggestion_html = "<div class='query-suggestions'>"
+            for s in suggestions:
+                escaped = s.replace("'", "\\'")
+                suggestion_html += f"<span class='suggestion-chip' onclick=\"document.querySelector('input[aria-label=\\\"Ask AI Forensic Assistant\\\']').value='{escaped}'; document.querySelector('input[aria-label=\\\"Ask AI Forensic Assistant\\\']').dispatchEvent(new Event('input', { bubbles: true }));\">{s}</span>"
+            suggestion_html += "</div>"
+            st.markdown(suggestion_html, unsafe_allow_html=True)
 
     # ---------------------------------------------------------
     # 6. Forensic Event Chain (Chronological Incident Replay)
@@ -430,7 +619,7 @@ def render():
 
             full_chain_markup = "".join(events_html)
             st.html(
-                f'<div class="forensic-chain-container" style="max-height:260px; overflow-y:auto; padding-right:4px;">'
+                f'<div class="forensic-chain-container" style="max-height:320px; overflow-y:auto; padding-right:4px;">'
                 f'{full_chain_markup}'
                 f'</div>'
             )
