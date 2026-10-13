@@ -1,3 +1,41 @@
+# CogniOS - Architecture diagram 
+```mermaid
+graph TD
+    subgraph System Environment
+        proc[/proc Filesystem/]
+        psutil[psutil wrapper]
+    end
+
+    subgraph CogniOS Core
+        DB[(Central SQLite DB)]
+        TC[Module 1: Telemetry Collector\nBackground Daemon]
+        
+        TC -->|Writes real-time data| DB
+        proc --> TC
+        psutil --> TC
+    end
+
+    subgraph Intelligent Modules
+        OD[Module 2: OS Doctor\nIsolation Forest]
+        FO[Module 3: FocusOS\nCNN Classifier]
+        BB[Module 4: BlackBox\nRolling Window / Replay]
+        RE[Module 5: Research Engine\nRL & Simulators]
+    end
+
+    DB <-->|Reads Data / Writes Alerts| OD
+    DB <-->|Reads Heatmap / Writes Configs| FO
+    DB <-->|Reads Trace / Writes Narrative| BB
+    DB <-->|Reads Traces for Simulation| RE
+
+    subgraph User Interface
+        DASH[Streamlit Dashboard\nUnified GUI]
+    end
+
+    OD --> DASH
+    FO --> DASH
+    BB --> DASH
+    RE --> DASH
+```
 # CogniOS
 
 ### Intelligent OS Observability & Adaptive Workload Optimization Platform
@@ -14,48 +52,27 @@ CogniOS bridges this gap by collecting real-time system telemetry, analyzing wor
 
 The project is designed as both:
 
-* A practical system observability platform for Linux
-* A research framework for experimenting with AI-assisted operating system scheduling
+- A practical system observability platform for Linux
+- A research framework for experimenting with AI-assisted operating system scheduling
 
 ---
 
 ## Key Features
 
-* 📊 Real-time Linux system telemetry collection
-* 🩺 Intelligent anomaly detection for performance degradation
-* 🎯 AI-based workload classification and optimization
-* 📦 Rolling telemetry recording for crash replay
-* 🔬 Scheduling algorithm benchmarking and research
-* 📈 Interactive Streamlit dashboard
-* 🗄️ Centralized SQLite telemetry database
-* 🧩 Modular architecture for independent development and testing
+- 📊 Real-time Linux system telemetry collection
+- 🩺 Intelligent anomaly detection for performance degradation
+- 🎯 AI-based workload classification and optimization
+- 📦 Rolling telemetry recording for crash replay
+- 🔬 Scheduling algorithm benchmarking and research
+- 📈 Interactive Streamlit dashboard
+- 🗄️ Centralized SQLite telemetry database
+- 🧩 Modular architecture for independent development and testing
 
 ---
 
 # Architecture
 
-```
-                Linux System
-                     │
-                     ▼
-          Telemetry Collectors
-       (/proc, psutil, process APIs)
-                     │
-                     ▼
-             SQLite Database
-                     │
-     ┌───────────────┼────────────────┐
-     │               │                │
-     ▼               ▼                ▼
- OS Doctor       FocusOS         BlackBox
-     │               │                │
-     └───────────────┼────────────────┘
-                     ▼
-             Research Engine
-                     │
-                     ▼
-          Streamlit Dashboard
-```
+![alt text](./assets/image.png)
 
 ---
 
@@ -67,10 +84,10 @@ OS Doctor continuously monitors the system for abnormal behavior using machine l
 
 ### Objective
 
-* Detect abnormal CPU, memory and I/O behavior
-* Explain possible reasons for system slowdowns
-* Identify unusual workload patterns
-* Provide interpretable diagnostics from live telemetry
+- Detect abnormal CPU, memory and I/O behavior
+- Explain possible reasons for system slowdowns
+- Identify unusual workload patterns
+- Provide interpretable diagnostics from live telemetry
 
 ---
 
@@ -80,10 +97,10 @@ FocusOS is responsible for intelligent workload classification and adaptive syst
 
 ### Objective
 
-* Classify the current workload using machine learning
-* Optimize process priorities
-* Modify Linux scheduling parameters
-* Improve overall system responsiveness
+- Classify the current workload using machine learning
+- Optimize process priorities
+- Modify Linux scheduling parameters
+- Improve overall system responsiveness
 
 Future versions may also support dynamic CPU affinity optimization and workload-aware scheduling.
 
@@ -97,10 +114,10 @@ It continuously stores recent telemetry in a rolling buffer, allowing developers
 
 ### Objective
 
-* Record recent system telemetry
-* Preserve crash history
-* Replay workload traces
-* Assist in post-mortem debugging
+- Record recent system telemetry
+- Preserve crash history
+- Replay workload traces
+- Assist in post-mortem debugging
 
 ---
 
@@ -110,18 +127,18 @@ The Research Engine provides an experimentation platform for scheduling algorith
 
 ### Objective
 
-* Compare classical scheduling algorithms
-* Evaluate AI-based schedulers
-* Replay collected workloads
-* Benchmark scheduling performance
-* Support reinforcement learning experiments
+- Compare classical scheduling algorithms
+- Evaluate AI-based schedulers
+- Replay collected workloads
+- Benchmark scheduling performance
+- Support reinforcement learning experiments
 
 Supported scheduling algorithms include:
 
-* FCFS
-* Shortest Job First
-* Round Robin
-* Priority Scheduling
+- FCFS
+- Shortest Job First
+- Round Robin
+- Priority Scheduling
 
 Future versions may include reinforcement learning schedulers.
 
@@ -133,11 +150,11 @@ The Streamlit dashboard serves as the unified visualization layer of CogniOS.
 
 ### Objective
 
-* Visualize system telemetry
-* Display anomaly alerts
-* Monitor workload classifications
-* Compare scheduling results
-* Provide a centralized monitoring interface
+- Visualize system telemetry
+- Display anomaly alerts
+- Monitor workload classifications
+- Compare scheduling results
+- Provide a centralized monitoring interface
 
 ---
 
@@ -147,12 +164,12 @@ Collectors gather telemetry directly from Linux using lightweight system interfa
 
 ### Objective
 
-* CPU monitoring
-* Memory monitoring
-* Disk monitoring
-* Process monitoring
-* Network statistics
-* I/O statistics
+- CPU monitoring
+- Memory monitoring
+- Disk monitoring
+- Process monitoring
+- Network statistics
+- I/O statistics
 
 These collectors act as the data source for every other module.
 
@@ -164,11 +181,11 @@ The data layer stores all telemetry generated by the collectors.
 
 ### Responsibilities
 
-* Store real-time telemetry
-* Maintain workload traces
-* Persist crash recordings
-* Provide data for ML training
-* Support benchmarking experiments
+- Store real-time telemetry
+- Maintain workload traces
+- Persist crash recordings
+- Provide data for ML training
+- Support benchmarking experiments
 
 SQLite is used as the centralized storage backend.
 
@@ -192,9 +209,12 @@ CogniOS/
 ├── utils/                  # Shared helper utilities used across modules
 │
 ├── cognios_as_daemon.py    # Runs CogniOS as a background monitoring daemon
+├── notifier.py             # Desktop notifications from the background daemon
 ├── config.py               # Global project configuration
 ├── db.py                   # SQLite database interface and helper functions
-├── main.py                 # Main application entry point
+├── main.py                 # UI launcher (Streamlit in browser or Qt desktop window)
+├── install.sh              # Linux system installer
+├── uninstall.sh            # Linux uninstaller
 ├── overhead.py             # Measures runtime overhead introduced by monitoring
 ├── requirements.txt        # Python dependencies
 └── README.md
@@ -226,23 +246,93 @@ git clone https://github.com/<your-org>/CogniOS.git
 cd CogniOS
 ```
 
-## Install Dependencies
+## Install on Linux (Fedora, Debian, Ubuntu)
+
+The Linux installer installs CogniOS into `/opt/cognios`, creates a virtual
+environment, installs required system and Python packages, adds the `cognios`
+command and application-menu entry, and enables the telemetry daemon as a
+systemd **user** service that starts at login.
+
+From a cloned project directory, run:
 
 ```bash
+cd CogniOS
+sudo bash install.sh
+```
+
+Run the installer with `sudo` from your normal user account, not from a root
+login. The installer uses that account as the service and file owner. It will
+ask whether to start the daemon immediately; answer yes to start it without
+logging out and back in.
+
+The app can also be installed from a GitHub-hosted installer script. Replace
+the repository URL if using a fork:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/devlup-labs/CogniOS/main/install.sh \
+  | sudo env COGNIOS_REPO=devlup-labs/CogniOS bash
+```
+
+## Daemon and UI
+
+CogniOS runs as two separate parts:
+
+- **Background daemon:** `cognios_as_daemon.py` collects telemetry, runs the
+  analysis workers, writes BlackBox data, and sends desktop notifications.
+  The Linux installer manages it through `cognios` / systemd.
+- **UI launcher:** `main.py` launches the Streamlit dashboard in a browser or
+  Qt desktop window. It does not start the daemon.
+
+After installation, open the desktop UI from the application menu or run:
+
+```bash
+cognios                  # Open the desktop UI (default)
+cognios --ui desktop     # Open the desktop UI
+cognios --ui browser     # Open the dashboard in a browser
+```
+
+Manage the background daemon and installation with:
+
+```bash
+cognios start            # Start the daemon now
+cognios stop             # Stop the daemon until the next login
+cognios restart          # Restart the daemon
+cognios status           # Show daemon status
+cognios logs             # Follow daemon logs
+cognios update           # Download the latest main branch, update, and restart
+cognios upgrade          # Alias for update
+cognios uninstall        # Uninstall and back up databases and .env
+cognios uninstall --purge  # Uninstall and remove application data
+```
+
+The service is enabled globally for user sessions. To disable automatic
+startup at login while keeping the installation:
+
+```bash
+systemctl --global disable cognios.service
+```
+
+## Run from a clone (development)
+
+`main.py` launches only the UI. The following setup runs the daemon in the
+foreground separately from the dashboard:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-```
 
-## Launch CogniOS
-
-```bash
-python main.py
-```
-
-To run CogniOS as a background service:
-
-```bash
+# Terminal 1: background telemetry and analysis workers
 python cognios_as_daemon.py
+
+# Terminal 2: UI (desktop by default)
+python main.py
+# Or choose browser mode
+python main.py --ui browser
 ```
+
+The `start.sh` and `start.bat` scripts set up the Python environment and launch
+the UI only; they do not install or start the background daemon.
 
 ---
 
@@ -252,26 +342,26 @@ Each major subsystem is designed as an independent module with its own documenta
 
 Every module contains its own dedicated `README.md` describing:
 
-* Module architecture
-* Directory structure
-* Components
-* APIs
-* Data flow
-* Usage
-* Future work
+- Module architecture
+- Directory structure
+- Components
+- APIs
+- Data flow
+- Usage
+- Future work
 
 ---
 
 # Roadmap
 
-* Real-time Linux telemetry collection
-* Intelligent anomaly detection
-* AI-assisted workload optimization
-* Crash replay and forensic analysis
-* Scheduling benchmark suite
-* Reinforcement learning scheduler
-* GPU telemetry support
-* Windows and macOS support
+- Real-time Linux telemetry collection
+- Intelligent anomaly detection
+- AI-assisted workload optimization
+- Crash replay and forensic analysis
+- Scheduling benchmark suite
+- Reinforcement learning scheduler
+- GPU telemetry support
+- Windows and macOS support
 
 ---
 
@@ -279,12 +369,12 @@ Every module contains its own dedicated `README.md` describing:
 
 We welcome contributions from developers interested in:
 
-* Operating Systems
-* Machine Learning
-* Systems Programming
-* Linux Internals
-* Performance Engineering
-* Data Engineering
+- Operating Systems
+- Machine Learning
+- Systems Programming
+- Linux Internals
+- Performance Engineering
+- Data Engineering
 
 Before contributing, please read the documentation for the module you wish to work on.
 
