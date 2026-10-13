@@ -44,6 +44,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
 BLACKBOX_DB_PATH = "blackbox/blackbox.db"
 BLACKBOX_WINDOW_SEC = 1800  # 30 minutes
+BLACKBOX_PRUNE_INTERVAL_SEC = 60 # Run database cleanup once every 60 seconds
 BLACKBOX_CRASH_GAP_SEC = 30   # SIGKILL-only fallback, not the primary check
 
 # Alert / Telemetry thresholds
