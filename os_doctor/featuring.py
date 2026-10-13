@@ -28,11 +28,12 @@ def extract_and_engineer_sys(db_path, window_size=120):
         LIMIT ?
     """
 
-    with sqlite3.connect(db_path) as conn:
-
+    conn = sqlite3.connect(db_path)
+    try:
         conn.execute("PRAGMA journal_mode=WAL")
-
         df_sys = pd.read_sql_query(query, conn, params=(window_size,))
+    finally:
+        conn.close()
 
     # Data comes back newest-first (DESC); flip to chronological order so
     # diff()/rolling() see the correct time direction and .iloc[-1] is "now".
@@ -119,11 +120,12 @@ def extract_and_engineer_processes(db_path, window_size=24):
             LIMIT ?
         """
     
-    with sqlite3.connect(db_path) as conn:
-
+    conn = sqlite3.connect(db_path)
+    try:
         conn.execute("PRAGMA journal_mode=WAL")
-
         df_raw = pd.read_sql_query(query, conn, params=(window_size,))
+    finally:
+        conn.close()
 
     df_raw = df_raw.iloc[::-1].reset_index(drop=True)
 
@@ -284,14 +286,15 @@ def get_inference_payload_predict(db_path, scaler=None):
     (ml_features_raw_df, ml_features_scaled_df, metadata)
         ml_features_scaled_df is None if no scaler was provided.
     """
+    conn = None
     try:
-        with sqlite3.connect(db_path) as conn:
-            conn.execute("PRAGMA journal_mode=WAL;")
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM layer2_proc;")
-            row_count_layer2 = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM layer1_sys;")
-            row_count_layer1 = cursor.fetchone()[0]
+        conn = sqlite3.connect(db_path)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM layer2_proc;")
+        row_count_layer2 = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM layer1_sys;")
+        row_count_layer1 = cursor.fetchone()[0]
  
         if row_count_layer1 < 120 or row_count_layer2 < 24:
             print(f"Pipeline Warm-up Phase: {row_count_layer1}/120 records collected. Skipping tick.")
@@ -301,6 +304,9 @@ def get_inference_payload_predict(db_path, scaler=None):
     except sqlite3.Error as e:
         print(f"Database error during warm-up check: {e}")
         return None, None, None
+    finally:
+        if conn is not None:
+            conn.close()
  
     try:
         sys_vec = extract_and_engineer_sys(db_path)
@@ -327,18 +333,17 @@ def get_inference_payload_predict(db_path, scaler=None):
 def get_inference_payload_train(db_path, scaler=None):
     # Run safety check to ensure database has enough historical data
     # We need a minimum of 120 rows (120 seconds) of system metrics to build our vectors
+    conn = None
     try:
-        with sqlite3.connect(db_path) as conn:
-            conn.execute("PRAGMA journal_mode=WAL;")
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM layer2_proc;")
-            row_count_layer2 = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM layer1_sys;")
-            row_count_layer1 = cursor.fetchone()[0]
-            
+        conn = sqlite3.connect(db_path)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM layer2_proc;")
+        row_count_layer2 = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM layer1_sys;")
+        row_count_layer1 = cursor.fetchone()[0]
         
         if row_count_layer1 < 120 or row_count_layer2 < 24:
-           
             print(f"Pipeline Warm-up Phase: {row_count_layer1}/120 records collected. Skipping tick.")
             print(f"Pipeline Warm-up Phase: {row_count_layer2}/24 records collected. Skipping tick.")
             return None, None
@@ -346,6 +351,9 @@ def get_inference_payload_train(db_path, scaler=None):
     except sqlite3.Error as e:
         print(f"Database error during warm-up check: {e}")
         return None, None
+    finally:
+        if conn is not None:
+            conn.close()
 
     # Sequential execution 
     try:

@@ -209,9 +209,12 @@ CogniOS/
 ├── utils/                  # Shared helper utilities used across modules
 │
 ├── cognios_as_daemon.py    # Runs CogniOS as a background monitoring daemon
+├── notifier.py             # Desktop notifications from the background daemon
 ├── config.py               # Global project configuration
 ├── db.py                   # SQLite database interface and helper functions
-├── main.py                 # Main application entry point
+├── main.py                 # UI launcher (Streamlit in browser or Qt desktop window)
+├── install.sh              # Linux system installer
+├── uninstall.sh            # Linux uninstaller
 ├── overhead.py             # Measures runtime overhead introduced by monitoring
 ├── requirements.txt        # Python dependencies
 └── README.md
@@ -243,46 +246,93 @@ git clone https://github.com/<your-org>/CogniOS.git
 cd CogniOS
 ```
 
-## Quick Start (Recommended)
+## Install on Linux (Fedora, Debian, Ubuntu)
 
-Run the automated launcher (creates `.venv`, installs dependencies if missing, and launches both the telemetry daemon and Streamlit dashboard):
+The Linux installer installs CogniOS into `/opt/cognios`, creates a virtual
+environment, installs required system and Python packages, adds the `cognios`
+command and application-menu entry, and enables the telemetry daemon as a
+systemd **user** service that starts at login.
 
-**Linux / macOS:**
-```bash
-./start.sh
-```
-
-**Windows:**
-```cmd
-start.bat
-```
-
-Or run directly with Python (auto-detects and uses `.venv`):
-```bash
-python main.py
-```
-
-## Manual Setup (Optional)
-
-If you prefer to configure your environment manually:
+From a cloned project directory, run:
 
 ```bash
-# 1. Create and activate a virtual environment
+cd CogniOS
+sudo bash install.sh
+```
+
+Run the installer with `sudo` from your normal user account, not from a root
+login. The installer uses that account as the service and file owner. It will
+ask whether to start the daemon immediately; answer yes to start it without
+logging out and back in.
+
+The app can also be installed from a GitHub-hosted installer script. Replace
+the repository URL if using a fork:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/devlup-labs/CogniOS/main/install.sh \
+  | sudo env COGNIOS_REPO=devlup-labs/CogniOS bash
+```
+
+## Daemon and UI
+
+CogniOS runs as two separate parts:
+
+- **Background daemon:** `cognios_as_daemon.py` collects telemetry, runs the
+  analysis workers, writes BlackBox data, and sends desktop notifications.
+  The Linux installer manages it through `cognios` / systemd.
+- **UI launcher:** `main.py` launches the Streamlit dashboard in a browser or
+  Qt desktop window. It does not start the daemon.
+
+After installation, open the desktop UI from the application menu or run:
+
+```bash
+cognios                  # Open the desktop UI (default)
+cognios --ui desktop     # Open the desktop UI
+cognios --ui browser     # Open the dashboard in a browser
+```
+
+Manage the background daemon and installation with:
+
+```bash
+cognios start            # Start the daemon now
+cognios stop             # Stop the daemon until the next login
+cognios restart          # Restart the daemon
+cognios status           # Show daemon status
+cognios logs             # Follow daemon logs
+cognios update           # Download the latest main branch, update, and restart
+cognios upgrade          # Alias for update
+cognios uninstall        # Uninstall and back up databases and .env
+cognios uninstall --purge  # Uninstall and remove application data
+```
+
+The service is enabled globally for user sessions. To disable automatic
+startup at login while keeping the installation:
+
+```bash
+systemctl --global disable cognios.service
+```
+
+## Run from a clone (development)
+
+`main.py` launches only the UI. The following setup runs the daemon in the
+foreground separately from the dashboard:
+
+```bash
 python3 -m venv .venv
-source .venv/bin/activate    # On Windows: .venv\Scripts\activate
-
-# 2. Install dependencies
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# 3. Launch CogniOS
-python main.py
-```
-
-To run only the telemetry collector daemon as a background service:
-
-```bash
+# Terminal 1: background telemetry and analysis workers
 python cognios_as_daemon.py
+
+# Terminal 2: UI (desktop by default)
+python main.py
+# Or choose browser mode
+python main.py --ui browser
 ```
+
+The `start.sh` and `start.bat` scripts set up the Python environment and launch
+the UI only; they do not install or start the background daemon.
 
 ---
 

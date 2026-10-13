@@ -254,6 +254,15 @@ st.markdown("""
         overflow-y: auto !important;
         box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5) !important;
         margin-bottom: 18px !important;
+        scrollbar-width: thin !important;
+        scrollbar-color: #1f2d42 rgba(14, 21, 34, 0.5) !important;
+        resize: none !important;
+    }
+
+    .forensic-chain-container {
+        scrollbar-width: thin !important;
+        scrollbar-color: #1f2d42 rgba(14, 21, 34, 0.5) !important;
+        resize: none !important;
     }
 
     .ai-response-container h1, 
@@ -381,6 +390,53 @@ st.markdown("""
         border-color: #00f5c4 !important;
         box-shadow: 0 0 12px rgba(0, 245, 196, 0.3) !important;
     }
+
+    /* Streamlit Bordered Container Styling to match CogniOS Cards */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background: #0d121c !important;
+        border: 1px solid #162336 !important;
+        border-radius: 14px !important;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35) !important;
+        padding: 20px 22px !important;
+        margin-bottom: 18px !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        border-color: #1f334d !important;
+    }
+
+    /* Slider track & thumb styling */
+    div[data-baseweb="slider"] {
+        margin: 6px 0 !important;
+    }
+    div[data-baseweb="slider"] div[role="slider"] {
+        background-color: #00f5c4 !important;
+        border: 2px solid #070a11 !important;
+        box-shadow: 0 0 12px rgba(0, 245, 196, 0.6) !important;
+    }
+    div[data-baseweb="slider"] > div > div {
+        background: #151e2d !important;
+    }
+    div[data-baseweb="slider"] > div > div > div {
+        background: #00f5c4 !important;
+    }
+
+    /* Clean button styling with sleek hover effect */
+    .stButton > button {
+        background-color: #0f1624 !important;
+        color: #e2e8f0 !important;
+        border: 1px solid #1c2a3d !important;
+        border-radius: 8px !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        transition: all 0.2s ease-in-out !important;
+    }
+    .stButton > button:hover {
+        border-color: #00f5c4 !important;
+        color: #00f5c4 !important;
+        background-color: rgba(0, 245, 196, 0.08) !important;
+        box-shadow: 0 0 12px rgba(0, 245, 196, 0.2) !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -478,6 +534,14 @@ def main():
     with t2:
         st.markdown('<div class="emergency-btn-box">', unsafe_allow_html=True)
         if st.button("Emergency Stop", key="emergency_stop", use_container_width=True):
+            # Rollback any modified process priorities before killing daemons
+            restored_count = 0
+            try:
+                from focusos.process_state import restore_all
+                restored_count = restore_all()
+            except Exception:
+                pass
+
             killed_count = 0
             current_pid = os.getpid()
             for proc in psutil.process_iter():
@@ -502,7 +566,8 @@ def main():
             except Exception:
                 pass
 
-            st.success(f"🚨 EMERGENCY STOP ACTIVATED: Successfully terminated all active background telemetry & OS Doctor daemons.")
+            restore_msg = f" and restored {restored_count} process priorities" if restored_count > 0 else ""
+            st.success(f"🚨 EMERGENCY STOP ACTIVATED: Successfully terminated all active background telemetry & OS Doctor daemons{restore_msg}.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Main Page Routing ---
@@ -520,11 +585,17 @@ def main():
         research_view.render()
 
     # --- Non-blocking Auto Refresh (browser-side timer) ---
-    if HAS_AUTOREFRESH:
-        refresh_interval_ms = int(getattr(config, 'AUTO_REFRESH', 2) * 1000)
-        st_autorefresh(interval=refresh_interval_ms, key="dashboard_autorefresh")
-    else:
-        st.sidebar.warning("⚠️ `streamlit-autorefresh` missing. Run `pip install streamlit-autorefresh` for live updates.")
+    # Only fire a full-page rerun for views that do NOT have @st.fragment(run_every=N).
+    # Fragment-based views (overview, focusos, blackbox) self-refresh internally —
+    # adding st_autorefresh on top causes a second, uncoordinated full-page rerun that
+    # produces the visible "blink" effect every 2 seconds.
+    FRAGMENT_VIEWS = {"overview", "focusos", "blackbox"}
+    if curr not in FRAGMENT_VIEWS:
+        if HAS_AUTOREFRESH:
+            refresh_interval_ms = int(getattr(config, 'AUTO_REFRESH', 2) * 1000)
+            st_autorefresh(interval=refresh_interval_ms, key="dashboard_autorefresh")
+        else:
+            st.sidebar.warning("⚠️ `streamlit-autorefresh` missing. Run `pip install streamlit-autorefresh` for live updates.")
 
 
 if __name__ == "__main__":
