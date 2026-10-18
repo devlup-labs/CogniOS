@@ -301,12 +301,61 @@ st.markdown("""
     section[data-testid="stSidebar"] {
         background: #05080e !important;
         border-right: none !important;
+        height: 100vh !important;
+        overflow: hidden !important;
     }
-    
-    section[data-testid="stSidebar"] > div:first-child {
-        padding-top: 1.2rem;
-        padding-left: 1.1rem;
-        padding-right: 1.1rem;
+
+    section[data-testid="stSidebar"] > div:first-child,
+    div[data-testid="stSidebarContent"] {
+        padding-top: 0.6rem !important;
+        padding-left: 1.1rem !important;
+        padding-right: 1.1rem !important;
+        padding-bottom: 1.1rem !important;
+        height: 100vh !important;
+        max-height: 100vh !important;
+        overflow: hidden !important;
+        scrollbar-width: none !important;
+        -ms-overflow-style: none !important;
+        display: flex !important;
+        flex-direction: column !important;
+        box-sizing: border-box !important;
+    }
+    div[data-testid="stSidebarContent"]::-webkit-scrollbar,
+    section[data-testid="stSidebar"] *::-webkit-scrollbar {
+        display: none !important;
+        width: 0 !important;
+        height: 0 !important;
+    }
+
+    div[data-testid="stSidebarHeader"] {
+        margin-bottom: 0.25rem !important;
+        height: 2rem !important;
+        min-height: 2rem !important;
+        flex-shrink: 0 !important;
+    }
+
+    div[data-testid="stSidebarUserContent"] {
+        flex: 1 1 auto !important;
+        display: flex !important;
+        flex-direction: column !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        min-height: 0 !important;
+        overflow: hidden !important;
+    }
+
+    div[data-testid="stSidebarUserContent"] > div,
+    div[data-testid="stSidebarUserContent"] > div > div[data-testid="stVerticalBlock"] {
+        flex: 1 1 auto !important;
+        display: flex !important;
+        flex-direction: column !important;
+        min-height: 0 !important;
+    }
+
+    /* Push the last element in sidebar (Daemon status card) to the bottom */
+    div[data-testid="stSidebarUserContent"] > div > div[data-testid="stVerticalBlock"] > div:last-child {
+        margin-top: auto !important;
+        padding-top: 16px !important;
     }
 
     /* --- Brand Header Card --- */
@@ -314,8 +363,8 @@ st.markdown("""
         background: linear-gradient(135deg, rgba(0, 245, 196, 0.12) 0%, rgba(15, 23, 42, 0.9) 100%);
         border: 1px solid rgba(0, 245, 196, 0.25) !important;
         border-radius: 14px;
-        padding: 18px;
-        margin-bottom: 24px;
+        padding: 16px 18px;
+        margin-bottom: 12px;
         display: flex;
         align-items: center;
         gap: 14px;
@@ -378,25 +427,44 @@ st.markdown("""
         font-family: 'JetBrains Mono', monospace;
         letter-spacing: 2px;
         text-transform: uppercase;
-        margin: 20px 0 10px 6px;
+        margin: 10px 0 6px 6px;
+    }
+
+    /* Compact vertical spacing inside sidebar */
+    section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {
+        gap: 0.45rem !important;
     }
 
     /* --- Sidebar Navigation Buttons --- */
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"],
+    section[data-testid="stSidebar"] div.stButton {
+        width: 100% !important;
+    }
+
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"] button,
     section[data-testid="stSidebar"] div.stButton > button {
         background: linear-gradient(180deg, #0e1524 0%, #080c14 100%) !important;
         color: #cbd5e1 !important;
-        border: 1px solid rgba(255, 255, 255, 0.12) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
         border-radius: 10px !important;
-        padding: 12px 16px !important;
+        padding: 11px 16px !important;
         font-size: 13.5px !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
         font-weight: 600 !important;
         text-align: left !important;
         width: 100% !important;
-        margin-bottom: 8px !important;
+        min-height: 44px !important;
+        max-height: 48px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        gap: 10px !important;
+        margin-bottom: 2px !important;
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        box-shadow: 0 4px 14px rgba(0,0,0,0.3) !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3) !important;
     }
 
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"] button:hover,
     section[data-testid="stSidebar"] div.stButton > button:hover {
         background: #141f32 !important;
         color: #ffffff !important;
@@ -405,9 +473,10 @@ st.markdown("""
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4), 0 0 14px rgba(0, 245, 196, 0.2) !important;
     }
 
-    /* Active Nav Item Highlighting */
-    .nav-active div.stButton > button {
-        background: linear-gradient(90deg, rgba(0, 245, 196, 0.16) 0%, rgba(0, 245, 196, 0.02) 100%) !important;
+    /* Active Nav Item Highlighting (Primary button in sidebar nav) */
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"] button[kind="primary"],
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"] button[data-testid="stBaseButton-primary"] {
+        background: linear-gradient(90deg, rgba(0, 245, 196, 0.18) 0%, rgba(0, 245, 196, 0.03) 100%) !important;
         color: #00f5c4 !important;
         border: 1px solid rgba(0, 245, 196, 0.55) !important;
         border-left: 4px solid #00f5c4 !important;
@@ -415,8 +484,11 @@ st.markdown("""
         font-weight: 700 !important;
     }
 
-    .nav-active div.stButton > button span {
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"] button[kind="primary"] *,
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"] button[data-testid="stBaseButton-primary"] * {
         color: #00f5c4 !important;
+        fill: #00f5c4 !important;
+        font-weight: 700 !important;
     }
 
     /* --- GLOBAL STREAMLIT MAIN CONTENT BUTTONS STYLING --- */
@@ -574,12 +646,13 @@ st.markdown("""
     }
 
     /* Status Card Footer */
-    div[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] {
+    section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] {
         background: linear-gradient(180deg, #0e1524 0%, #080c14 100%) !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
         border-radius: 14px !important;
         padding: 14px !important;
-        margin-top: 18px !important;
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
     }
 
@@ -771,9 +844,9 @@ st.markdown("""
     }
 
     /* Daemon status button styling in sidebar */
-    div.st-key-btn_daemon_toggle button {
+    section[data-testid="stSidebar"] div.st-key-btn_daemon_toggle button {
         background: rgba(0, 245, 196, 0.12) !important;
-        border: 1px solid rgba(0, 245, 196, 0.3) !important;
+        border: 1px solid rgba(0, 245, 196, 0.35) !important;
         color: #00f5c4 !important;
         font-family: 'JetBrains Mono', monospace !important;
         font-size: 11.5px !important;
@@ -781,16 +854,22 @@ st.markdown("""
         letter-spacing: 0.5px !important;
         padding: 8px 12px !important;
         border-radius: 8px !important;
-        box-shadow: 0 0 10px rgba(0, 245, 196, 0.15) !important;
+        justify-content: center !important;
+        text-align: center !important;
+        box-shadow: 0 0 12px rgba(0, 245, 196, 0.15) !important;
     }
-    div.st-key-btn_daemon_toggle button:hover {
+    section[data-testid="stSidebar"] div.st-key-btn_daemon_toggle button * {
+        color: #00f5c4 !important;
+        font-weight: 800 !important;
+    }
+    section[data-testid="stSidebar"] div.st-key-btn_daemon_toggle button:hover {
         background: rgba(0, 245, 196, 0.22) !important;
         border-color: #00f5c4 !important;
         box-shadow: 0 0 16px rgba(0, 245, 196, 0.4) !important;
-        transform: scale(1.02) !important;
+        transform: scale(1.01) !important;
     }
 
-    div.st-key-btn_daemon_toggle_idle button {
+    section[data-testid="stSidebar"] div.st-key-btn_daemon_toggle_idle button {
         background: rgba(100, 116, 139, 0.15) !important;
         border: 1px solid rgba(100, 116, 139, 0.35) !important;
         color: #cbd5e1 !important;
@@ -800,32 +879,82 @@ st.markdown("""
         letter-spacing: 0.5px !important;
         padding: 8px 12px !important;
         border-radius: 8px !important;
+        justify-content: center !important;
+        text-align: center !important;
     }
-    div.st-key-btn_daemon_toggle_idle button:hover {
+    section[data-testid="stSidebar"] div.st-key-btn_daemon_toggle_idle button:hover {
         background: rgba(0, 245, 196, 0.15) !important;
         border-color: #00f5c4 !important;
         color: #00f5c4 !important;
     }
 
-    div.st-key-btn_open_config button, div.st-key-btn_open_help button {
+    section[data-testid="stSidebar"] div.st-key-btn_open_config button,
+    section[data-testid="stSidebar"] div.st-key-btn_open_help button {
         background: #141c2b !important;
         border: 1px solid #1f2d42 !important;
         color: #cbd5e1 !important;
         font-family: 'JetBrains Mono', monospace !important;
-        font-size: 11px !important;
+        font-size: 11.5px !important;
         font-weight: 600 !important;
-        padding: 6px 10px !important;
-        border-radius: 6px !important;
+        padding: 7px 10px !important;
+        min-height: 36px !important;
+        border-radius: 8px !important;
+        justify-content: center !important;
+        text-align: center !important;
     }
-    div.st-key-btn_open_config button:hover {
+    section[data-testid="stSidebar"] div.st-key-btn_open_config button:hover {
         border-color: #00f5c4 !important;
         color: #00f5c4 !important;
         background: #1a2538 !important;
+        transform: translateY(-1px) !important;
     }
-    div.st-key-btn_open_help button:hover {
+    section[data-testid="stSidebar"] div.st-key-btn_open_help button:hover {
         border-color: #38bdf8 !important;
         color: #38bdf8 !important;
         background: #1a2538 !important;
+        transform: translateY(-1px) !important;
+    }
+
+    /* Sidebar Navigation Buttons (override global .stButton rules) */
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"] button {
+        background: linear-gradient(180deg, #0e1524 0%, #080c14 100%) !important;
+        color: #cbd5e1 !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 10px !important;
+        padding: 11px 16px !important;
+        font-size: 13.5px !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-weight: 600 !important;
+        width: 100% !important;
+        min-height: 44px !important;
+        max-height: 48px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+        gap: 10px !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3) !important;
+    }
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"] button:hover {
+        background: #141f32 !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(0, 245, 196, 0.5) !important;
+        transform: translateX(3px) !important;
+    }
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"] button[kind="primary"],
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"] button[data-testid="stBaseButton-primary"] {
+        background: linear-gradient(90deg, rgba(0, 245, 196, 0.18) 0%, rgba(0, 245, 196, 0.03) 100%) !important;
+        color: #00f5c4 !important;
+        border: 1px solid rgba(0, 245, 196, 0.55) !important;
+        border-left: 4px solid #00f5c4 !important;
+        box-shadow: 0 0 20px rgba(0, 245, 196, 0.22) !important;
+        font-weight: 700 !important;
+    }
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"] button[kind="primary"] *,
+    section[data-testid="stSidebar"] div[class*="st-key-nav_"] button[data-testid="stBaseButton-primary"] * {
+        color: #00f5c4 !important;
+        fill: #00f5c4 !important;
+        font-weight: 700 !important;
     }
 
     /* ==========================================================================
@@ -1239,14 +1368,15 @@ def main():
 
         for p_id, p_title, p_icon in obs_pages:
             is_active = (st.session_state["current_page"] == p_id)
-            btn_class = "nav-active" if is_active else ""
-            st.markdown(f'<div class="{btn_class}">', unsafe_allow_html=True)
-            if st.button(p_title, icon=p_icon, key=f"nav_{p_id}"):
+            if st.button(
+                p_title,
+                icon=p_icon,
+                key=f"nav_{p_id}",
+                type="primary" if is_active else "secondary",
+                use_container_width=True,
+            ):
                 st.session_state["current_page"] = p_id
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
 
         # Bottom System Status Card
         with st.container(border=True):
