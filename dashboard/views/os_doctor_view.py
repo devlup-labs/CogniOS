@@ -33,17 +33,17 @@ def render():
     # 1. Header Banner
     # ---------------------------------------------------------
     st.html(f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px;">
+        <div class="cognios-header-banner">
             <div>
-                <h1 style="margin:0; font-size: 26px; font-weight: 800; color: #ffffff; display: flex; align-items: center; gap: 10px; letter-spacing: -0.5px;">
+                <h1 class="cognios-header-title">
                     <span style="color:#00f5c4;"><i class="fa-solid fa-stethoscope"></i></span> OS Doctor AI Diagnostics
                 </h1>
-                <p style="margin: 4px 0 0 0; color: #64748b; font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                <p class="cognios-header-sub">
                     ISOLATION FOREST ANOMALY SENTINEL // OLLAMA & GROQ REASONING ENGINE
                 </p>
             </div>
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="background: {score_bg}; color: {score_color}; border: 1px solid {score_color}; border-radius: 8px; padding: 6px 14px; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 0 16px {score_bg};">
+            <div class="cognios-header-badges">
+                <span class="cognios-badge-pill" style="background:{score_bg}; color:{score_color}; border-color:{score_color}; box-shadow:0 0 16px {score_bg};">
                     <span class="pulse-green" style="background-color:{score_color};"></span> {score_status}
                 </span>
             </div>
@@ -88,7 +88,7 @@ def render():
             height=190,
             margin=dict(l=15, r=15, t=15, b=5)
         )
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'responsive': True})
 
         st.html(f"""
                     </div>
@@ -101,7 +101,32 @@ def render():
         """)
 
     with col_heatmap:
-        st.html("""
+        hogs_rows_html = ""
+        for hog in hogs[:6]:
+            impact = hog.get('impact', 0.0)
+            if impact > 30:
+                h_bg, h_fg, h_lbl = "rgba(239, 68, 68, 0.18)", "#ef4444", "CRITICAL"
+            elif impact > 15:
+                h_bg, h_fg, h_lbl = "rgba(245, 158, 11, 0.18)", "#f59e0b", "ELEVATED"
+            else:
+                h_bg, h_fg, h_lbl = "rgba(0, 245, 196, 0.12)", "#00f5c4", "NORMAL"
+
+            p_name = hog.get('name', 'unknown')
+            disp_name = (p_name[:12] + "..") if len(p_name) > 14 else p_name
+
+            hogs_rows_html += f"""
+                <div style="display:grid; grid-template-columns: 2.2fr 0.9fr 0.9fr 0.9fr 1.1fr; font-size:11.5px; font-family:'JetBrains Mono'; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.04); align-items:center;">
+                    <span style="color:#ffffff; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{p_name}">{disp_name}</span>
+                    <span style="color:#38bdf8;">{hog['pid']}</span>
+                    <span style="text-align:right; color:#ffffff; font-weight:600;">{hog['cpu']}%</span>
+                    <span style="text-align:right; color:#94a3b8;">{hog['ram']}%</span>
+                    <span style="text-align:right;">
+                        <span style="background:{h_bg}; color:{h_fg}; border-radius:4px; padding:2px 8px; font-size:10px; font-weight:800;">{h_lbl}</span>
+                    </span>
+                </div>
+            """
+
+        st.html(f"""
             <div class="cognios-card" style="height:100%;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                     <div style="display:flex; align-items:center; gap:8px;">
@@ -114,40 +139,20 @@ def render():
                         <span style="color:#ef4444;">■ CRITICAL</span>
                     </div>
                 </div>
-                <div style="display:grid; grid-template-columns: 2.5fr 1fr 1fr 1fr 1.2fr; font-size:10.5px; font-weight:700; color:#64748b; font-family:'JetBrains Mono'; padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.08); margin-bottom:6px;">
-                    <span>PROCESS</span>
-                    <span>PID</span>
-                    <span style="text-align:right;">CPU %</span>
-                    <span style="text-align:right;">RAM %</span>
-                    <span style="text-align:right;">RISK LEVEL</span>
+                <div class="cognios-table-container">
+                    <div style="min-width: 300px;">
+                        <div style="display:grid; grid-template-columns: 2.2fr 0.9fr 0.9fr 0.9fr 1.1fr; font-size:10px; font-weight:700; color:#64748b; font-family:'JetBrains Mono'; padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.08); margin-bottom:6px;">
+                            <span>PROCESS</span>
+                            <span>PID</span>
+                            <span style="text-align:right;">CPU %</span>
+                            <span style="text-align:right;">RAM %</span>
+                            <span style="text-align:right;">RISK</span>
+                        </div>
+                        {hogs_rows_html}
+                    </div>
                 </div>
+            </div>
         """)
-
-        for hog in hogs[:6]:
-            impact = hog.get('impact', 0.0)
-            if impact > 30:
-                h_bg, h_fg, h_lbl = "rgba(239, 68, 68, 0.18)", "#ef4444", "CRITICAL"
-            elif impact > 15:
-                h_bg, h_fg, h_lbl = "rgba(245, 158, 11, 0.18)", "#f59e0b", "ELEVATED"
-            else:
-                h_bg, h_fg, h_lbl = "rgba(0, 245, 196, 0.12)", "#00f5c4", "NORMAL"
-
-            p_name = hog.get('name', 'unknown')
-            disp_name = (p_name[:16] + "..") if len(p_name) > 18 else p_name
-
-            st.html(f"""
-                <div style="display:grid; grid-template-columns: 2.5fr 1fr 1fr 1fr 1.2fr; font-size:12px; font-family:'JetBrains Mono'; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.04); align-items:center;">
-                    <span style="color:#ffffff; font-weight:600;" title="{p_name}">{disp_name}</span>
-                    <span style="color:#38bdf8;">{hog['pid']}</span>
-                    <span style="text-align:right; color:#ffffff; font-weight:600;">{hog['cpu']}%</span>
-                    <span style="text-align:right; color:#94a3b8;">{hog['ram']}%</span>
-                    <span style="text-align:right;">
-                        <span style="background:{h_bg}; color:{h_fg}; border-radius:4px; padding:2px 8px; font-size:10px; font-weight:800;">{h_lbl}</span>
-                    </span>
-                </div>
-            """)
-
-        st.html("</div>")
 
     # ---------------------------------------------------------
     # 3. KPI Summary Deck

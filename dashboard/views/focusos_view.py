@@ -88,15 +88,15 @@ def render():
 
     # Header with Workload State Badge
     st.html(f"""
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+    <div class="cognios-header-banner">
         <div>
-            <h1 style="margin:0; font-size: 28px; font-weight: 800; color: #ffffff; display:flex; align-items:center; gap:10px;">
+            <h1 class="cognios-header-title">
                 <span style="color:#00f5c4;"><i class="fa-solid fa-scale-balanced"></i></span>
                 FocusOS Resource Attribution Engine
             </h1>
-            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 14px;">Workload classification, process scheduling governance, and core topology management.</p>
+            <p class="cognios-header-sub">Workload classification, process scheduling governance, and core topology management.</p>
         </div>
-        <div style="display:flex; align-items:center; gap:12px;">
+        <div class="cognios-header-badges">
             {mode_badge_html}
             <div style="background: rgba(0,0,0,0.3); color:{state_badge_color};
                         border:1px solid {state_badge_color}; border-radius:6px;
@@ -107,7 +107,7 @@ def render():
     </div>
     """)
 
-    col_target, col_opts = st.columns([2, 1], gap="medium")
+    col_target, col_opts = st.columns([1.3, 1.1], gap="medium")
 
     with col_target:
         # Format Evidence items gracefully with rich categorised cards
@@ -257,7 +257,7 @@ def render():
             </div>
 
             <!-- Attribution Metrics Grid -->
-            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-bottom:20px;">
+            <div class="cognios-metrics-quad" style="margin-bottom:20px;">
                 <div style="background:#101725; border:1px solid #162030; border-radius:10px; padding:16px; border-top:3px solid #00f5c4;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                         <span style="font-size:10px; color:#94a3b8; text-transform:uppercase; font-family:'JetBrains Mono'; font-weight:600; letter-spacing:0.5px;">CPU Attribution</span>
@@ -395,10 +395,10 @@ def render():
         # Live Top Processes table
         top_procs_html = f"""
         <div style='display:flex; justify-content:space-between; font-size:9px; font-weight:700; color:#64748b; text-transform:uppercase; border-bottom:1px solid #1e293b; padding-bottom:4px; margin-bottom:4px;'>
-            <span style='width:35%;'>Process (PID)</span>
-            <span style='width:15%; text-align:right;'>State</span>
-            <span style='width:15%; text-align:right;'>Nice</span>
-            <span style='width:15%; text-align:right;'>CPU</span>
+            <span style='width:38%;'>Process (PID)</span>
+            <span style='width:12%; text-align:right;'>State</span>
+            <span style='width:12%; text-align:right;'>Nice</span>
+            <span style='width:18%; text-align:right;'>CPU</span>
             <span style='width:20%; text-align:right;'>RAM</span>
         </div>
         """
@@ -417,12 +417,12 @@ def render():
                 nice_color = "#f59e0b" if nice > 0 else ("#00f5c4" if nice < 0 else "#64748b")
                 
                 top_procs_html += (
-                    f"<div style='display:flex; justify-content:space-between; font-size:11px; "
+                    f"<div style='display:flex; justify-content:space-between; align-items:center; font-size:11px; "
                     f"color:#cbd5e1; padding:6px 0; border-bottom:1px solid #101725;'>"
-                    f"<span style='font-family:JetBrains Mono; color:#e2e8f0; width:35%; overflow:hidden; text-overflow:ellipsis;'>{p_name} <span style='color:#64748b; font-size:9px;'>{pid}</span></span>"
-                    f"<span style='color:#94a3b8; font-family:JetBrains Mono; font-size:10px; width:15%; text-align:right;'>{status}</span>"
-                    f"<span style='color:{nice_color}; font-family:JetBrains Mono; width:15%; text-align:right;'>{nice}</span>"
-                    f"<span style='color:#00f5c4; font-family:JetBrains Mono; width:15%; text-align:right;'>{cpu_p:.1f}%</span>"
+                    f"<span style='font-family:JetBrains Mono; color:#e2e8f0; width:38%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'>{p_name} <span style='color:#64748b; font-size:9px;'>{pid}</span></span>"
+                    f"<span style='color:#94a3b8; font-family:JetBrains Mono; font-size:10px; width:12%; text-align:right;'>{status}</span>"
+                    f"<span style='color:{nice_color}; font-family:JetBrains Mono; width:12%; text-align:right;'>{nice}</span>"
+                    f"<span style='color:#00f5c4; font-family:JetBrains Mono; width:18%; text-align:right;'>{cpu_p:.1f}%</span>"
                     f"<span style='color:#38bdf8; font-family:JetBrains Mono; width:20%; text-align:right;'>{rss_str}</span></div>"
                 )
         except Exception:
@@ -500,25 +500,28 @@ def render():
             </div>
 
             <!-- Core Allocation Summary -->
-            <div style="display:flex; gap:10px; margin-bottom:16px;">
+            <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
                 {summary_cards_html}
             </div>
 
             <!-- Per-Core Live Grid -->
             <div style="margin-bottom:18px;">
                 <div style="font-size:10px; color:#64748b; font-family:'JetBrains Mono'; text-transform:uppercase; margin-bottom:6px;">Live Core Load Distribution</div>
-                <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:6px;">
+                <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap:6px;">
                     {core_tiles_html}
                 </div>
             </div>
 
             <!-- Live Top Processes -->
             <div style="background:#131b28; border-radius:8px; padding:14px;">
-                <div style="font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase;
-                            font-family:'JetBrains Mono'; margin-bottom:8px; display:flex; justify-content:space-between;">
-                    <span style="width:45%;">PROCESS</span><span style="width:25%; text-align:right;">CPU (1C=100%)</span><span style="width:30%; text-align:right;">RAM (RSS)</span>
+                <div style="font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase; font-family:'JetBrains Mono'; margin-bottom:8px;">
+                    Live Process Schedule &amp; Priority
                 </div>
-                {top_procs_html}
+                <div class="cognios-table-container">
+                    <div style="min-width:280px;">
+                        {top_procs_html}
+                    </div>
+                </div>
             </div>
         </div>
         """)
@@ -573,7 +576,7 @@ def render():
         row_bg = 'rgba(255,255,255,0.015)' if shown % 2 == 0 else 'transparent'
 
         event_rows_html += f"""
-        <div style="display:grid; grid-template-columns: 85px 190px 140px 190px 1fr; align-items:center; gap:12px; padding:9px 14px;
+        <div style="display:grid; grid-template-columns: 75px 1.4fr 1fr 1.2fr 2fr; align-items:center; gap:12px; padding:9px 14px;
                     border-bottom:1px solid #141d2b; font-family:'JetBrains Mono'; font-size:12px; background:{row_bg}; border-radius:4px;">
             <span style="color:#64748b; font-size:11px;">{ts}</span>
             <div style="display:flex; align-items:center; overflow:hidden;">
@@ -605,17 +608,21 @@ def render():
         </div>
         """
     else:
-        # Wrap with column header and scrollable container
+        # Wrap with column header and single scrollable container
         event_rows_html = f"""
-        <div style="display:grid; grid-template-columns: 85px 190px 140px 190px 1fr; gap:12px; padding:8px 14px; background:#101725; border-radius:6px; margin-bottom:8px; font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase; font-family:'JetBrains Mono'; letter-spacing:0.5px;">
-            <span>Time</span>
-            <span>Target Process</span>
-            <span>Workload</span>
-            <span>Policy Action</span>
-            <span>Rationale / Outcome</span>
-        </div>
-        <div style="max-height: 420px; overflow-y: auto; padding-right: 2px;">
-            {event_rows_html}
+        <div class="cognios-table-container" style="max-height: 420px; overflow-y: auto;">
+            <div style="min-width: 620px;">
+                <div style="display:grid; grid-template-columns: 75px 1.4fr 1fr 1.2fr 2fr; gap:12px; padding:8px 14px; position:sticky; top:0; z-index:2; background:#101725; border-radius:6px; margin-bottom:8px; font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase; font-family:'JetBrains Mono'; letter-spacing:0.5px;">
+                    <span>Time</span>
+                    <span>Target Process</span>
+                    <span>Workload</span>
+                    <span>Policy Action</span>
+                    <span>Rationale / Outcome</span>
+                </div>
+                <div>
+                    {event_rows_html}
+                </div>
+            </div>
         </div>
         """
 

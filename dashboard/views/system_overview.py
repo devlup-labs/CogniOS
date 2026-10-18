@@ -46,17 +46,17 @@ def render():
     # 1. Header Banner
     # ---------------------------------------------------------
     st.html(f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px;">
+        <div class="cognios-header-banner">
             <div>
-                <h1 style="margin:0; font-size: 26px; font-weight: 800; color: #ffffff; display: flex; align-items: center; gap: 10px; letter-spacing: -0.5px;">
+                <h1 class="cognios-header-title">
                     <span style="color:#00f5c4;"><i class="fa-solid fa-satellite-dish"></i></span> Live Telemetry
                 </h1>
-                <p style="margin: 4px 0 0 0; color: #64748b; font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                <p class="cognios-header-sub">
                     HOST TELEMETRY PIPELINE // 1.0s SAMPLING // {cores_count} LOGICAL CORES
                 </p>
             </div>
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="background: rgba(0, 245, 196, 0.1); color: #00f5c4; border: 1px solid rgba(0, 245, 196, 0.25); border-radius: 8px; padding: 6px 14px; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 0 16px rgba(0, 245, 196, 0.15);">
+            <div class="cognios-header-badges">
+                <span class="cognios-badge-pill">
                     <span class="pulse-green"></span> REAL-TIME KERNEL POLLING
                 </span>
             </div>
@@ -227,29 +227,12 @@ def render():
                 tickfont=dict(color='#64748b', size=10, family='JetBrains Mono')
             )
         )
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'responsive': True})
         st.html("</div>")
 
     with col_right:
-        st.html(f"""
-            <div style="background:linear-gradient(180deg, #0e1524 0%, #080c14 100%); border:1px solid rgba(255,255,255,0.06); border-radius:14px; padding:18px 20px; margin-bottom:18px; box-shadow:0 8px 28px rgba(0,0,0,0.45);">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <span style="color:#38bdf8; font-size:16px;"><i class="fa-solid fa-list-check"></i></span>
-                        <h3 style="margin:0; font-size:16px; font-weight:700; color:#ffffff; letter-spacing:-0.3px;">Process Monitor</h3>
-                    </div>
-                    <span style="color:#64748b; font-size:11px; font-family:'JetBrains Mono'; font-weight:600;">{total_procs} TASKS</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; font-size:10.5px; font-weight:700; color:#64748b; text-transform:uppercase; padding:6px 4px; border-bottom:1px solid rgba(255,255,255,0.08); font-family:'JetBrains Mono';">
-                    <span style="width:55px;">PID</span>
-                    <span style="flex:1;">PROCESS NAME</span>
-                    <span style="width:60px; text-align:right;">CPU %</span>
-                    <span style="width:55px; text-align:right;">RAM %</span>
-                </div>
-        """)
-
         procs = dp.get_top_processes_list(6)
-
+        rows_html = ""
         for p in procs:
             p_cpu = float(p.get('cpu', 0.0))
             p_ram = float(p.get('ram', 0.0))
@@ -264,19 +247,41 @@ def render():
                 c_bg, c_fg = "transparent", "#94a3b8"
 
             p_name = p.get('name', 'unknown')
-            # Shorten very long process names
-            disp_name = (p_name[:16] + "..") if len(p_name) > 18 else p_name
+            disp_name = (p_name[:14] + "..") if len(p_name) > 16 else p_name
 
-            st.html(f"""
-                <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; padding:7px 4px; border-bottom:1px solid rgba(255,255,255,0.04); font-family:'JetBrains Mono';">
+            rows_html += f"""
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:11.5px; padding:7px 4px; border-bottom:1px solid rgba(255,255,255,0.04); font-family:'JetBrains Mono';">
                     <span style="width:55px; color:#64748b;">{p['pid']}</span>
-                    <span style="flex:1; color:#e2e8f0; font-weight:500;" title="{p_name}">{disp_name}</span>
-                    <span style="width:60px; text-align:right;">
+                    <span style="flex:1; color:#e2e8f0; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{p_name}">{disp_name}</span>
+                    <span style="width:58px; text-align:right;">
                         <span style="background:{c_bg}; color:{c_fg}; border-radius:4px; padding:1px 6px; font-weight:700;">{p_cpu:.1f}%</span>
                     </span>
-                    <span style="width:55px; text-align:right; color:#94a3b8;">{p_ram:.1f}%</span>
+                    <span style="width:52px; text-align:right; color:#94a3b8;">{p_ram:.1f}%</span>
                 </div>
-            """)
+            """
+
+        st.html(f"""
+            <div style="background:linear-gradient(180deg, #0e1524 0%, #080c14 100%); border:1px solid rgba(255,255,255,0.06); border-radius:14px; padding:18px 20px; margin-bottom:18px; box-shadow:0 8px 28px rgba(0,0,0,0.45);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="color:#38bdf8; font-size:16px;"><i class="fa-solid fa-list-check"></i></span>
+                        <h3 style="margin:0; font-size:16px; font-weight:700; color:#ffffff; letter-spacing:-0.3px;">Process Monitor</h3>
+                    </div>
+                    <span style="color:#64748b; font-size:11px; font-family:'JetBrains Mono'; font-weight:600;">{total_procs} TASKS</span>
+                </div>
+                <div class="cognios-table-container">
+                    <div style="min-width:260px;">
+                        <div style="display:flex; justify-content:space-between; font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase; padding:6px 4px; border-bottom:1px solid rgba(255,255,255,0.08); font-family:'JetBrains Mono';">
+                            <span style="width:55px;">PID</span>
+                            <span style="flex:1;">PROCESS NAME</span>
+                            <span style="width:58px; text-align:right;">CPU %</span>
+                            <span style="width:52px; text-align:right;">RAM %</span>
+                        </div>
+                        {rows_html}
+                    </div>
+                </div>
+            </div>
+        """)
 
         with st.expander("🔍 View Extended Process Table (Top 20)", expanded=False):
             all_procs = dp.get_top_processes_list(20)

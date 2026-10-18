@@ -176,35 +176,87 @@ st.markdown("""
         color: #e2e8f0;
     }
 
-    header[data-testid="stHeader"] {
+    header[data-testid="stHeader"],
+    .stAppHeader {
         background: transparent !important;
-        z-index: 100 !important;
+        z-index: 1000 !important;
+        pointer-events: none !important;
     }
 
-    /* --- Collapsed Sidebar Toggle Button Styling --- */
+    div[data-testid="stToolbar"],
+    .stAppToolbar {
+        background: transparent !important;
+        display: flex !important;
+        visibility: visible !important;
+        pointer-events: none !important;
+    }
+
+    /* Hide ONLY Deploy button, three-dots menu & toolbar actions on the right */
+    .stAppDeployButton,
+    div[data-testid="stAppDeployButton"],
+    button[data-testid="stAppDeployButton"],
+    div[data-testid="stDecoration"],
+    div[data-testid="stHeaderActionElements"],
+    header[data-testid="stHeader"] .stAppDeployButton,
+    header[data-testid="stHeader"] [data-testid="stAppDeployButton"],
+    header[data-testid="stHeader"] [data-testid="stToolbarActions"],
+    header[data-testid="stHeader"] [data-testid="stStatusWidget"],
+    header[data-testid="stHeader"] [data-testid="stActionMenu"],
+    header[data-testid="stHeader"] #MainMenu,
+    header[data-testid="stHeader"] [data-testid="manage-app-button"],
+    header[data-testid="stHeader"] button[aria-label*="menu" i],
+    header[data-testid="stHeader"] button[title*="menu" i],
+    header[data-testid="stHeader"] button[title*="Deploy" i],
+    header[data-testid="stHeader"] a[href*="streamlit.io" i],
+    div[class*="e1yxiy6j6"],
+    #MainMenu,
+    footer {
+        display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
+        width: 0 !important;
+        overflow: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+    }
+
+    /* --- Collapsed Sidebar Toggle (Expand Sidebar Button) --- */
+    button[data-testid="stExpandSidebarButton"],
+    [data-testid="stExpandSidebarButton"],
     div[data-testid="stSidebarCollapsedControl"],
     button[data-testid="stSidebarCollapsedControl"],
     [data-testid="collapsedControl"] {
-        background: linear-gradient(135deg, rgba(0, 245, 196, 0.15) 0%, rgba(14, 21, 34, 0.95) 100%) !important;
-        border: 1px solid rgba(0, 245, 196, 0.45) !important;
+        display: inline-flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        position: fixed !important;
+        top: 12px !important;
+        left: 14px !important;
+        background: linear-gradient(135deg, rgba(0, 245, 196, 0.2) 0%, rgba(14, 21, 34, 0.95) 100%) !important;
+        border: 1px solid rgba(0, 245, 196, 0.6) !important;
         border-radius: 10px !important;
         color: #00f5c4 !important;
-        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6), 0 0 14px rgba(0, 245, 196, 0.25) !important;
-        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.7), 0 0 16px rgba(0, 245, 196, 0.35) !important;
         padding: 6px 12px !important;
-        margin-left: 12px !important;
-        margin-top: 8px !important;
+        cursor: pointer !important;
+        z-index: 999999 !important;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
     }
 
+    button[data-testid="stExpandSidebarButton"]:hover,
+    [data-testid="stExpandSidebarButton"]:hover,
     div[data-testid="stSidebarCollapsedControl"]:hover,
     button[data-testid="stSidebarCollapsedControl"]:hover,
     [data-testid="collapsedControl"]:hover {
-        background: rgba(0, 245, 196, 0.25) !important;
+        background: rgba(0, 245, 196, 0.3) !important;
         border-color: #00f5c4 !important;
-        box-shadow: 0 0 20px rgba(0, 245, 196, 0.5) !important;
-        transform: scale(1.05) !important;
+        box-shadow: 0 0 24px rgba(0, 245, 196, 0.6) !important;
+        transform: scale(1.08) !important;
     }
 
+    button[data-testid="stExpandSidebarButton"] svg,
+    button[data-testid="stExpandSidebarButton"] span,
     div[data-testid="stSidebarCollapsedControl"] svg,
     button[data-testid="stSidebarCollapsedControl"] svg,
     [data-testid="collapsedControl"] svg {
@@ -640,6 +692,76 @@ st.markdown("""
         font-size: 12px !important;
         font-weight: 600 !important;
         transition: all 0.2s ease-in-out !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        padding: 6px 12px !important;
+        height: auto !important;
+        min-height: 36px !important;
+        max-height: 42px !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    .stButton > button p,
+    .stButton > button span {
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        margin: 0 !important;
+    }
+    /* Primary & Form Submit Buttons (e.g. Synthesize button) */
+    .stButton > button[kind="primary"],
+    .stButton > button[data-testid="stBaseButton-primary"],
+    button[data-testid="stBaseButton-primaryFormSubmit"],
+    div[data-testid="stFormSubmitButton"] > button,
+    div[data-testid="stFormSubmitButton"] button {
+        background: #00f5c4 !important;
+        border: 1px solid #00f5c4 !important;
+        color: #070a11 !important;
+        font-weight: 800 !important;
+        box-shadow: 0 0 18px rgba(0, 245, 196, 0.4) !important;
+        height: auto !important;
+        min-height: 38px !important;
+        max-height: 42px !important;
+    }
+    .stButton > button[kind="primary"]:hover,
+    .stButton > button[data-testid="stBaseButton-primary"]:hover,
+    button[data-testid="stBaseButton-primaryFormSubmit"]:hover,
+    div[data-testid="stFormSubmitButton"] > button:hover,
+    div[data-testid="stFormSubmitButton"] button:hover {
+        background: #00dfb2 !important;
+        border-color: #00dfb2 !important;
+        color: #000000 !important;
+        box-shadow: 0 0 24px rgba(0, 245, 196, 0.65) !important;
+    }
+    .stButton > button[kind="primary"] *,
+    .stButton > button[data-testid="stBaseButton-primary"] *,
+    button[data-testid="stBaseButton-primaryFormSubmit"] *,
+    div[data-testid="stFormSubmitButton"] button *,
+    div[data-testid="stFormSubmitButton"] button p,
+    div[data-testid="stFormSubmitButton"] button span {
+        color: #070a11 !important;
+        fill: #070a11 !important;
+        font-weight: 800 !important;
+    }
+    .stButton > button[kind="primary"]:hover *,
+    .stButton > button[data-testid="stBaseButton-primary"]:hover *,
+    button[data-testid="stBaseButton-primaryFormSubmit"]:hover *,
+    div[data-testid="stFormSubmitButton"] button:hover *,
+    div[data-testid="stFormSubmitButton"] button:hover p,
+    div[data-testid="stFormSubmitButton"] button:hover span {
+        color: #000000 !important;
+        fill: #000000 !important;
+    }
+    .stButton > button[kind="primary"]:focus *,
+    .stButton > button[kind="primary"]:active *,
+    button[data-testid="stBaseButton-primaryFormSubmit"]:focus *,
+    button[data-testid="stBaseButton-primaryFormSubmit"]:active *,
+    div[data-testid="stFormSubmitButton"] button:focus *,
+    div[data-testid="stFormSubmitButton"] button:active * {
+        color: #000000 !important;
+        fill: #000000 !important;
     }
     .stButton > button:hover {
         border-color: #00f5c4 !important;
@@ -704,6 +826,371 @@ st.markdown("""
         border-color: #38bdf8 !important;
         color: #38bdf8 !important;
         background: #1a2538 !important;
+    }
+
+    /* ==========================================================================
+       RESPONSIVE DESIGN & MEDIA QUERIES (Mobile, Tablet, Desktop)
+       ========================================================================== */
+
+    /* --- Responsive Header Banner System --- */
+    .cognios-header-banner {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 22px;
+        gap: 14px;
+        flex-wrap: wrap;
+    }
+    .cognios-header-title {
+        margin: 0 !important;
+        font-size: 26px !important;
+        font-weight: 800 !important;
+        color: #ffffff !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 10px !important;
+        letter-spacing: -0.5px !important;
+    }
+    .cognios-header-sub {
+        margin: 4px 0 0 0 !important;
+        color: #64748b !important;
+        font-size: 13px !important;
+        font-family: 'JetBrains Mono', monospace !important;
+    }
+    .cognios-header-badges {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .cognios-badge-pill {
+        background: rgba(0, 245, 196, 0.1);
+        color: #00f5c4;
+        border: 1px solid rgba(0, 245, 196, 0.25);
+        border-radius: 8px;
+        padding: 6px 14px;
+        font-size: 11.5px;
+        font-family: 'JetBrains Mono', monospace;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        box-shadow: 0 0 16px rgba(0, 245, 196, 0.15);
+    }
+
+    /* --- Responsive Horizontal Scroll Table Container --- */
+    .cognios-table-container {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        scrollbar-color: #1a273b rgba(10, 15, 25, 0.5);
+        margin: 4px 0;
+    }
+    .cognios-table-container::-webkit-scrollbar {
+        height: 6px;
+    }
+    .cognios-table-container::-webkit-scrollbar-track {
+        background: rgba(10, 15, 25, 0.5);
+        border-radius: 3px;
+    }
+    .cognios-table-container::-webkit-scrollbar-thumb {
+        background: #1a273b;
+        border-radius: 3px;
+    }
+    .cognios-table-container::-webkit-scrollbar-thumb:hover {
+        background: #00f5c4;
+    }
+
+    /* --- Responsive Plotly Charts --- */
+    div.js-plotly-plot, div.plot-container {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+
+    /* --- Card inner flex rows wrap instead of overflowing (value + badge, label rows) --- */
+    .cognios-card > div {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    /* All Streamlit columns can shrink below intrinsic content size */
+    div[data-testid="stColumn"] {
+        min-width: 0 !important;
+    }
+
+    /* Plotly charts fit container width dynamically */
+    div.js-plotly-plot,
+    div.plot-container,
+    .plotly,
+    svg.main-svg {
+        max-width: 100% !important;
+        width: 100% !important;
+    }
+
+    /* FocusOS & Metrics 4-quad grid */
+    .cognios-metrics-quad {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+    }
+
+    /* ==========================================================================
+       CONTAINER QUERIES on main content block (reacts to sidebar open/close)
+       ========================================================================== */
+    div[data-testid="stMainBlockContainer"] {
+        container-type: inline-size;
+        container-name: cogmain;
+    }
+
+    /* At medium container width (< 980px): wrap 2-column, 3-column and 4-column blocks */
+    @container cogmain (max-width: 980px) {
+        /* 2-column major dashboard splits wrap onto stacked rows */
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(2):last-child) {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            gap: 16px !important;
+        }
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(2):last-child) > div[data-testid="stColumn"] {
+            width: 100% !important;
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+
+        /* 3-column decks wrap into 2 + 1 */
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3):last-child) {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            gap: 12px !important;
+        }
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3):last-child) > div[data-testid="stColumn"] {
+            width: calc(50% - 8px) !important;
+            min-width: calc(50% - 8px) !important;
+            flex: 1 1 calc(50% - 8px) !important;
+        }
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3):last-child) > div[data-testid="stColumn"]:last-child {
+            width: 100% !important;
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+
+        /* 4-column KPI decks -> 2x2 grid */
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(4)) {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            gap: 12px !important;
+        }
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(4)) > div[data-testid="stColumn"] {
+            width: calc(50% - 8px) !important;
+            min-width: calc(50% - 8px) !important;
+            flex: 1 1 calc(50% - 8px) !important;
+        }
+
+        /* Keep nested horizontal blocks inside columns/forms/cards on a single row */
+        div[data-testid="stColumn"] div[data-testid="stHorizontalBlock"],
+        div[data-testid="stForm"] div[data-testid="stHorizontalBlock"],
+        div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stHorizontalBlock"] {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            align-items: center !important;
+            gap: 8px !important;
+        }
+        div[data-testid="stColumn"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+        div[data-testid="stForm"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+        div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            width: auto !important;
+            min-width: 0 !important;
+            flex: 1 1 0% !important;
+        }
+
+        .cognios-metrics-quad {
+            grid-template-columns: repeat(2, 1fr) !important;
+        }
+    }
+
+    /* Narrow container width (< 680px): all top-level columns stack 100% */
+    @container cogmain (max-width: 680px) {
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"] {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            gap: 12px !important;
+        }
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            width: 100% !important;
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+        div[data-testid="stColumn"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+        div[data-testid="stForm"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+        div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            width: auto !important;
+            min-width: 0 !important;
+            flex: 1 1 0% !important;
+        }
+        .cognios-metric-val { font-size: 24px !important; }
+        .cognios-card { padding: 12px !important; }
+    }
+
+    /* ==========================================================================
+       VIEWPORT MEDIA QUERIES (Window-Level Fallbacks & Global Typography)
+       ========================================================================== */
+    @media screen and (max-width: 1180px) {
+        /* Fallback for 2-column major dashboard cards */
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(2):last-child) {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            gap: 16px !important;
+        }
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(2):last-child) > div[data-testid="stColumn"] {
+            width: 100% !important;
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+
+        /* Fallback for 4-column KPI cards -> 2x2 */
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(4)) {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            gap: 12px !important;
+        }
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(4)) > div[data-testid="stColumn"] {
+            width: calc(50% - 8px) !important;
+            min-width: calc(50% - 8px) !important;
+            flex: 1 1 calc(50% - 8px) !important;
+        }
+
+        /* Fallback for 3-column subsystem cards */
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3):last-child) {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            gap: 12px !important;
+        }
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3):last-child) > div[data-testid="stColumn"] {
+            width: calc(50% - 8px) !important;
+            min-width: calc(50% - 8px) !important;
+            flex: 1 1 calc(50% - 8px) !important;
+        }
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3):last-child) > div[data-testid="stColumn"]:last-child {
+            width: 100% !important;
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+
+        /* Keep nested horizontal blocks inside columns/forms/cards on a single row */
+        div[data-testid="stColumn"] div[data-testid="stHorizontalBlock"],
+        div[data-testid="stForm"] div[data-testid="stHorizontalBlock"],
+        div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stHorizontalBlock"] {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            align-items: center !important;
+            gap: 8px !important;
+        }
+        div[data-testid="stColumn"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+        div[data-testid="stForm"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+        div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            width: auto !important;
+            min-width: 0 !important;
+            flex: 1 1 0% !important;
+        }
+
+        .cognios-metrics-quad {
+            grid-template-columns: repeat(2, 1fr) !important;
+        }
+    }
+
+    @media screen and (max-width: 1024px) {
+        div.block-container,
+        div[data-testid="stMainBlockContainer"] {
+            padding-left: 1.4rem !important;
+            padding-right: 1.4rem !important;
+        }
+        .cognios-metric-val {
+            font-size: 30px !important;
+        }
+    }
+
+    @media screen and (max-width: 768px) {
+        div.block-container,
+        div[data-testid="stMainBlockContainer"] {
+            padding-top: 3.8rem !important;
+            padding-left: 0.8rem !important;
+            padding-right: 0.8rem !important;
+            padding-bottom: 2rem !important;
+        }
+
+        .cognios-header-banner {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 10px !important;
+            margin-bottom: 16px !important;
+        }
+        .cognios-header-title {
+            font-size: 20px !important;
+        }
+        .cognios-header-sub {
+            font-size: 11.5px !important;
+        }
+        .cognios-header-badges {
+            width: 100% !important;
+            justify-content: flex-start !important;
+        }
+
+        .cognios-card {
+            padding: 14px !important;
+            margin-bottom: 10px !important;
+        }
+        .cognios-metric-val {
+            font-size: 26px !important;
+        }
+
+        .ai-response-container {
+            padding: 14px !important;
+            font-size: 12.5px !important;
+            max-height: 240px !important;
+        }
+
+        .forensic-chain-container > div {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 4px !important;
+            padding: 10px 12px !important;
+        }
+
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"] {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            gap: 12px !important;
+        }
+        div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            width: 100% !important;
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+        div[data-testid="stColumn"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+        div[data-testid="stForm"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+        div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            width: auto !important;
+            min-width: 0 !important;
+            flex: 1 1 0% !important;
+        }
+    }
+
+    @media screen and (max-width: 480px) {
+        div.block-container,
+        div[data-testid="stMainBlockContainer"] {
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+            padding-top: 3.5rem !important;
+        }
+        .cognios-header-title {
+            font-size: 18px !important;
+        }
+        .cognios-metric-val {
+            font-size: 22px !important;
+        }
+        .cognios-metrics-quad {
+            grid-template-columns: 1fr !important;
+        }
     }
 </style>
 """, unsafe_allow_html=True)

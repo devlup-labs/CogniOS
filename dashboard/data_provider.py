@@ -1250,53 +1250,70 @@ def get_blackbox_zscore_series(scrub_minutes=0):
         if os.path.exists(target_db):
             table_name = "blackbox_telemetry" if os.path.exists(BLACKBOX_DB_PATH) else "layer1_sys"
             conn = sqlite3.connect(target_db, timeout=2.0)
-            
+
             now = time.time()
             end_time = now + (scrub_minutes * 60)
-            
-            df = pd.read_sql(
-                f"SELECT timestamp, cpu_percent, memory_percent FROM {table_name} "
-                f"WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 30",
+
+            # Compute dynamic baseline across the full 30-minute rolling buffer
+            base_df = pd.read_sql(
+                f"SELECT cpu_usage_percent, memory_percent FROM {table_name} "
+                f"ORDER BY id DESC LIMIT 1200",
                 conn,
-                params=(end_time,)
             )
+
+            if table_name == "blackbox_telemetry":
+                df = pd.read_sql(
+                    f"SELECT timestamp, cpu_usage_percent, memory_percent FROM {table_name} "
+                    f"WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 60",
+                    conn,
+                    params=(end_time,),
+                )
+                # When scrubbed to the oldest edge (-30m), show earliest available window
+                if len(df) < 5:
+                    df = pd.read_sql(
+                        f"SELECT timestamp, cpu_usage_percent, memory_percent FROM {table_name} "
+                        f"ORDER BY timestamp ASC LIMIT 60",
+                        conn,
+                    )
+                else:
+                    df = df.iloc[::-1].reset_index(drop=True)
+            else:
+                df = pd.read_sql(
+                    f"SELECT timestamp, cpu_usage_percent, memory_percent FROM {table_name} "
+                    f"ORDER BY id DESC LIMIT 60",
+                    conn,
+                ).iloc[::-1].reset_index(drop=True)
+
             conn.close()
-            
+
             if not df.empty and len(df) >= 3:
-                df = df.iloc[::-1].reset_index(drop=True)
-                timestamps = [_parse_timestamp(t) for t in df['timestamp']]
-                raw_cpu = [round(float(c), 1) for c in df['cpu_percent']]
-                raw_mem = [round(float(m), 1) for m in df['memory_percent']]
-                
-                cpu_mean = df['cpu_percent'].mean()
-                cpu_std = df['cpu_percent'].std()
-                mem_mean = df['memory_percent'].mean()
-                mem_std = df['memory_percent'].std()
-                
-                z_scores = []
-                for val in df['cpu_percent']:
-                    z = (val - cpu_mean) / cpu_std if cpu_std > 0.001 else 0.0
-                    z_scores.append(round(float(z), 2))
-                    
-                mem_z_scores = []
-                for val in df['memory_percent']:
-                    z = (val - mem_mean) / mem_std if mem_std > 0.001 else 0.0
-                    mem_z_scores.append(round(float(z), 2))
-                    
+                ref_df = base_df if (not base_df.empty and len(base_df) >= 5) else df
+                timestamps = [_parse_timestamp(t) for t in df["timestamp"]]
+                raw_cpu = [round(float(c or 0.0), 1) for c in df["cpu_usage_percent"]]
+                raw_mem = [round(float(m or 0.0), 1) for m in df["memory_percent"]]
+
+                cpu_mean = float(ref_df["cpu_usage_percent"].mean())
+                cpu_std = max(float(ref_df["cpu_usage_percent"].std() or 0.0), 0.5)
+                mem_mean = float(ref_df["memory_percent"].mean())
+                mem_std = max(float(ref_df["memory_percent"].std() or 0.0), 0.2)
+
+                z_scores = [round((val - cpu_mean) / cpu_std, 2) for val in raw_cpu]
+                mem_z_scores = [round((val - mem_mean) / mem_std, 2) for val in raw_mem]
+
                 return {
                     "timestamps": timestamps,
                     "z_scores": z_scores,
                     "mem_z_scores": mem_z_scores,
                     "raw_cpu": raw_cpu,
                     "raw_mem": raw_mem,
-                    "max_z": max(z_scores) if z_scores else 0.0,
+                    "max_z": max((abs(z) for z in z_scores + mem_z_scores), default=0.0),
                     "cpu_baseline": round(cpu_mean, 1),
-                    "mem_baseline": round(mem_mean, 1)
+                    "mem_baseline": round(mem_mean, 1),
                 }
     except Exception:
         pass
 
-    now = time.time()
+    now = time.time() + (scrub_minutes * 60)
     dummy_ts = [time.strftime("%H:%M:%S", time.localtime(now - (30 - i) * 60)) for i in range(30)]
     return {
         "timestamps": dummy_ts,

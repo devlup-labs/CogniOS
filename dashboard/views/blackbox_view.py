@@ -247,17 +247,19 @@ def render():
     # 2. Header Banner
     # ---------------------------------------------------------
     st.markdown(f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px;">
+        <div class="cognios-header-banner">
             <div>
-                <h1 style="margin:0; font-size: 28px; font-weight: 800; color: #ffffff; display:flex; align-items:center; gap:12px;">
+                <h1 class="cognios-header-title">
                     <span style="color:#00f5c4; text-shadow: 0 0 16px rgba(0, 245, 196, 0.4);"><i class="fa-solid fa-box-archive"></i></span> BlackBox Flight Recorder
                 </h1>
-                <p style="margin: 4px 0 0 0; color: #64748b; font-size: 14px; font-family: 'JetBrains Mono', monospace;">
+                <p class="cognios-header-sub">
                     POST-INCIDENT FORENSICS // 30-MINUTE ROLLING ROBUST TELEMETRY
                 </p>
             </div>
-            <div style="background: {status_bg}; color:{status_color}; border: 1px solid {status_color}; border-radius:6px; padding:6px 16px; font-size:12px; font-weight:700; font-family:'JetBrains Mono', monospace; box-shadow: 0 0 15px {status_bg};">
-                {status_badge_text}
+            <div class="cognios-header-badges">
+                <span class="cognios-badge-pill" style="background:{status_bg}; color:{status_color}; border-color:{status_color}; box-shadow:0 0 15px {status_bg};">
+                    {status_badge_text}
+                </span>
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -364,34 +366,31 @@ def render():
             </div>
         """, unsafe_allow_html=True)
 
-        c_slider, c_presets = st.columns([3.8, 1.4])
+        new_scrub = st.slider(
+            "Timeline Navigation Slider",
+            min_value=-30,
+            max_value=0,
+            step=1,
+            label_visibility="collapsed",
+            key="bb_scrub_val"
+        )
 
-        with c_slider:
-            new_scrub = st.slider(
-                "Timeline Navigation Slider",
-                min_value=-30,
-                max_value=0,
-                step=1,
-                label_visibility="collapsed",
-                key="bb_scrub_val"
-            )
-
-            offset_text = "Live Stream (T-00:00)" if new_scrub == 0 else f"Historical Replay (T{new_scrub}:00 min)"
+        offset_text = "Live Stream (T-00:00)" if new_scrub == 0 else f"Historical Replay (T{new_scrub}:00 min)"
+        c_lbl, c_b1, c_b2, c_b3 = st.columns([3, 0.7, 0.7, 0.7], vertical_alignment="center")
+        with c_lbl:
             st.markdown(f"""
-                <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; font-family:'JetBrains Mono', monospace; margin-top:-4px;">
-                    <span style="color:#64748b;">T-30min ────────────────────── T-00min (NOW)</span>
+                <div style="font-size:12px; font-family:'JetBrains Mono', monospace;">
+                    <span style="color:#64748b;">T-30m ── T-0m (NOW)</span> &nbsp;|&nbsp; 
                     <span style="color:#00f5c4; font-weight:700;">{offset_text}</span>
                 </div>
             """, unsafe_allow_html=True)
 
-        with c_presets:
-            p1, p2, p3 = st.columns(3)
-            with p1:
-                st.button("T-05m", on_click=_on_scrub_preset, args=(-5,), use_container_width=True, help="Jump to 5 minutes ago")
-            with p2:
-                st.button("T-15m", on_click=_on_scrub_preset, args=(-15,), use_container_width=True, help="Jump to 15 minutes ago")
-            with p3:
-                st.button("T-30m", on_click=_on_scrub_preset, args=(-30,), use_container_width=True, help="Jump to 30 minutes ago (oldest)")
+        with c_b1:
+            st.button("-5m", on_click=_on_scrub_preset, args=(-5,), use_container_width=True, help="Jump to 5 minutes ago")
+        with c_b2:
+            st.button("-15m", on_click=_on_scrub_preset, args=(-15,), use_container_width=True, help="Jump to 15 minutes ago")
+        with c_b3:
+            st.button("-30m", on_click=_on_scrub_preset, args=(-30,), use_container_width=True, help="Jump to 30 minutes ago (oldest)")
 
     # ---------------------------------------------------------
     # 5. Main Content Grid: Z-Score Anomaly Detector + Groq AI Synthesis
@@ -493,7 +492,7 @@ def render():
                         tickfont=dict(color='#64748b', size=10, family="JetBrains Mono")
                     )
                 )
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'responsive': True})
             else:
                 df_chart = pd.DataFrame({
                     "CPU Z-Score": y_cpu_z,
@@ -540,54 +539,19 @@ def render():
                     st.session_state["ai_postmortem"] = dp.get_ai_post_mortem(query_text, scrub_minutes=scrub_val)
 
             # Query input with synthesize button
-            p_col1, p_col2 = st.columns([2.7, 1.3], vertical_alignment="center")
-            with p_col1:
-                user_query = st.text_input(
-                    "Ask AI Forensic Assistant",
-                    placeholder="e.g., What caused the CPU spike at T-12m?",
-                    label_visibility="collapsed",
-                    key="bb_ai_query_input"
-                )
-            with p_col2:
-                if st.button("Synthesize", type="primary", use_container_width=True, icon=":material/psychology:"):
-                    if user_query.strip():
+            with st.form("bb_ai_query_form", border=False):
+                p_col1, p_col2 = st.columns([2.8, 1.2], vertical_alignment="center")
+                with p_col1:
+                    user_query = st.text_input(
+                        "Ask AI Forensic Assistant",
+                        placeholder="e.g., What caused the CPU spike at T-12m?",
+                        label_visibility="collapsed",
+                        key="bb_ai_query_input"
+                    )
+                with p_col2:
+                    submitted = st.form_submit_button("Synthesize", type="primary", use_container_width=True, icon=":material/psychology:")
+                    if submitted and user_query.strip():
                         _run_ai_query(user_query.strip())
-                        st.rerun(scope="fragment")
-
-            # Quick Action Pills
-            st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
-            pill1, pill2, pill3 = st.columns(3)
-            with pill1:
-                if st.button("Spikes", icon=":material/trending_up:", use_container_width=True, help="Analyze CPU & RAM load spikes"):
-                    with st.spinner("Analyzing spikes..."):
-                        _run_ai_query("Analyze any CPU or Memory spikes in this timeline.")
-                        st.rerun(scope="fragment")
-            with pill2:
-                if st.button("Leaks", icon=":material/water_drop:", use_container_width=True, help="Check memory leak indicators"):
-                    with st.spinner("Checking memory leaks..."):
-                        _run_ai_query("Check if there are signs of memory leaks or monotonic memory drift.")
-                        st.rerun(scope="fragment")
-            with pill3:
-                if st.button("Summary", icon=":material/description:", use_container_width=True, help="Executive post-mortem summary"):
-                    with st.spinner("Generating post-mortem..."):
-                        _run_ai_query("Provide an executive post-mortem of this 30-minute window.")
-                        st.rerun(scope="fragment")
-
-            # Query suggestions
-            suggestions = [
-                "What caused the highest CPU spike?",
-                "Any memory leaks detected?",
-                "Explain the event chain",
-                "System stability assessment",
-                "Root cause of anomalies",
-                "Recommended actions"
-            ]
-            st.markdown("<p style='font-size:11px; color:#64748b; margin:10px 0 4px 0; font-family:JetBrains Mono;'>💡 Quick Prompts:</p>", unsafe_allow_html=True)
-            scols = st.columns(2)
-            for i, s in enumerate(suggestions):
-                with scols[i % 2]:
-                    if st.button(s, key=f"bb_sug_{i}", use_container_width=True):
-                        _run_ai_query(s)
                         st.rerun(scope="fragment")
 
     # ---------------------------------------------------------
