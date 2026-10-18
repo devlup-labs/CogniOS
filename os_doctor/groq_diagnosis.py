@@ -107,6 +107,28 @@ def write_diagnosis(conn: sqlite3.Connection, alert_id: int, diagnosis: dict) ->
     )
     conn.commit()
 
+    try:
+        from notifier import notify_critical
+        severity = str(diagnosis.get("severity") or "Normal").capitalize()
+        if severity not in ("Critical", "High"):
+            return
+
+        now = time.monotonic()
+        global _last_groq_notif_time
+        if "last_groq_notif_time" not in globals():
+            _last_groq_notif_time = 0.0
+        cooldown = 60 if severity == "Critical" else 300
+        if now - _last_groq_notif_time < cooldown:
+            return
+
+        _last_groq_notif_time = now
+        issue = diagnosis.get("issue_key") or "Anomaly Diagnosed"
+        cause = diagnosis.get("root_cause") or diagnosis.get("explanation") or ""
+        msg = f"{issue}: {cause}" if cause else issue
+        notify_critical(f"OS Doctor [{severity}] {msg}")
+    except Exception:
+        pass
+
 
 def fetch_undiagnosed_alerts(conn: sqlite3.Connection) -> list:
     cursor = conn.execute(f"""

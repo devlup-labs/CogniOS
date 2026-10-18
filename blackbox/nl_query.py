@@ -248,6 +248,44 @@ def query_telemetry(
             conn.close()
 
 
+def _groq_chat_completion(client, model, messages, stream, max_tokens, temperature):
+    models_to_try = [model]
+    for fb in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
+        if fb not in models_to_try:
+            models_to_try.append(fb)
+
+    last_exc = None
+    for m in models_to_try:
+        kwargs = {
+            "model": m,
+            "messages": messages,
+            "temperature": temperature,
+            "max_completion_tokens": max_tokens,
+            "top_p": 1,
+            "stream": stream,
+            "stop": None,
+        }
+        if "deepseek" in m.lower() or "r1" in m.lower():
+            kwargs["reasoning_format"] = "hidden"
+        try:
+            return client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            err_msg = str(exc).lower()
+            if "reasoning_format" in err_msg:
+                kwargs.pop("reasoning_format", None)
+                try:
+                    return client.chat.completions.create(**kwargs)
+                except Exception as inner_exc:
+                    last_exc = inner_exc
+                    continue
+            last_exc = exc
+            if "not found" in err_msg or "does not exist" in err_msg or "decommissioned" in err_msg:
+                continue
+            raise exc
+    if last_exc:
+        raise last_exc
+
+
 def ask_groq(
     user_content: str,
     system_prompt: str = SYSTEM_PROMPT,
@@ -274,15 +312,13 @@ def ask_groq(
         messages.append({"role": "user", "content": user_content})
 
     if stream:
-        completion = client.chat.completions.create(
+        completion = _groq_chat_completion(
+            client=client,
             model=model,
             messages=messages,
-            temperature=0.3,
-            max_completion_tokens=3000,
-            top_p=1,
             stream=True,
-            stop=None,
-            reasoning_format="hidden",
+            max_tokens=3000,
+            temperature=0.3,
         )
 
         full_response = []
@@ -293,15 +329,13 @@ def ask_groq(
         print()  # Newline after streaming finishes
         return "".join(full_response)
     else:
-        completion = client.chat.completions.create(
+        completion = _groq_chat_completion(
+            client=client,
             model=model,
             messages=messages,
-            temperature=1,
-            max_completion_tokens=1500,
-            top_p=1,
             stream=False,
-            stop=None,
-            reasoning_format="hidden",
+            max_tokens=1500,
+            temperature=1.0,
         )
         response_text = completion.choices[0].message.content or ""
         return response_text
