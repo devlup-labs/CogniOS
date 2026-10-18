@@ -352,6 +352,11 @@ def render():
                     conn.close()
                     if actions:
                         st.success(f"Applied FocusOS optimization policy for {current_workload} to {len(actions)} process(es)!")
+                        try:
+                            from notifier import notify
+                            notify("FocusOS Optimized", f"Applied manual optimization policy for {current_workload} ({len(actions)} processes tuned).")
+                        except Exception:
+                            pass
                     else:
                         st.info(f"Policy evaluated for {current_workload}: No non-protected active processes required adjustments.")
                 except Exception as e:
@@ -366,6 +371,11 @@ def render():
                     conn.close()
                     if restored > 0:
                         st.success(f"Restored {restored} process(es) to default scheduling priorities!")
+                        try:
+                            from notifier import notify
+                            notify("FocusOS Restored", f"Restored {restored} processes to default priorities.", urgency="low")
+                        except Exception:
+                            pass
                     else:
                         st.info("All processes are currently at default priority states.")
                 except Exception as e:

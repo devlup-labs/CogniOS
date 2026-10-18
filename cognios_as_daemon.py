@@ -301,6 +301,7 @@ def run_rule_engine_loop(stop_event):
                         state_manager.mark_optimized()
                         if actions:
                             logger.info(f"Applied optimization policy for {state['workload']}: {len(actions)} actions executed.")
+                            notify("FocusOS Optimized", f"Prioritized {state['workload']} ({len(actions)} process adjustments applied).")
                     else:
                         logger.info(f"Workload CONFIRMED ({state['workload']}) but CPU contention below threshold ({sys_cpu:.1f}% < {contention_threshold}%), skipping optimization.")
 
@@ -308,6 +309,7 @@ def run_rule_engine_loop(stop_event):
                     restored = restore_workload_state(conn)
                     if restored > 0:
                         logger.info(f"Restored {restored} processes to original scheduling priorities.")
+                        notify("FocusOS Restored", f"Restored {restored} processes to default priorities.", urgency="low")
 
             except Exception as e:
                 logger.error(f"Error in Rule Engine loop: {e}")
