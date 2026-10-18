@@ -37,6 +37,10 @@ data/traces/*
 !data/models/.gitkeep
 simulation_state.json
 ui-overhead-results/
+hist.md
+.cognios_daemon.pid
+
+config_overrides.json
 
 # Logs
 logs/

@@ -99,3 +99,46 @@ COLLECT_INTERVAL_SEC = 30
 ROWS_PER_VECTOR = 120  # ~2 min of telemetry per feature vector
 ANOMALY_CHECK_INTERVAL_SEC = 120  # Isolation Forest check cadence
 
+# User-editable configuration overrides from dashboard UI
+CONFIG_OVERRIDES_PATH = os.path.join(BASE_DIR, "config_overrides.json")
+
+def load_config_overrides():
+    if os.path.exists(CONFIG_OVERRIDES_PATH):
+        try:
+            import json
+            with open(CONFIG_OVERRIDES_PATH, "r") as f:
+                overrides = json.load(f)
+            for k, v in overrides.items():
+                globals()[k] = v
+        except Exception:
+            pass
+
+def save_config_overrides(updates: dict):
+    """Saves user config changes from UI to config_overrides.json and updates current module globals."""
+    import json
+    existing = {}
+    if os.path.exists(CONFIG_OVERRIDES_PATH):
+        try:
+            with open(CONFIG_OVERRIDES_PATH, "r") as f:
+                existing = json.load(f)
+        except Exception:
+            pass
+    existing.update(updates)
+    with open(CONFIG_OVERRIDES_PATH, "w") as f:
+        json.dump(existing, f, indent=2)
+
+    # Update in-memory globals
+    import config
+    for k, v in updates.items():
+        setattr(config, k, v)
+        globals()[k] = v
+
+    if "GROQ_API_KEY" in updates:
+        os.environ["GROQ_API_KEY"] = str(updates["GROQ_API_KEY"])
+    if "GROQ_MODEL" in updates:
+        os.environ["GROQ_MODEL"] = str(updates["GROQ_MODEL"])
+
+# Load overrides on initial module import
+load_config_overrides()
+
+
