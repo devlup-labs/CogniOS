@@ -199,10 +199,10 @@ def create_connection(db_path):
     ''')
 
     # CREATE TABLE IF NOT EXISTS does nothing on an existing DB, so add any
-    # missing columns here (num_threads + the OS Doctor columns).
+    # missing columns here (num_threads + the OS Doctor columns + udp_tcp_ratio).
     cursor.execute("PRAGMA table_info(layer1_sys)")
     columns = [row[1] for row in cursor.fetchall()]
-    needed = {"num_threads": "INTEGER", **LAYER1_NEW_COLUMNS}
+    needed = {"num_threads": "INTEGER", "udp_tcp_ratio": "REAL", **LAYER1_NEW_COLUMNS}
     for col, col_type in needed.items():
         if col not in columns:
             cursor.execute(f"ALTER TABLE layer1_sys ADD COLUMN {col} {col_type}")
@@ -213,9 +213,10 @@ def create_connection(db_path):
 # Function to write the collected metrics into the database
 
 def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, process_data, num_threads, **new_columns):
-    # new_columns: the OS Doctor values, passed by name (see LAYER1_NEW_COLUMNS).
+    # new_columns: the OS Doctor values + udp_tcp_ratio, passed by name.
     # Missing ones are stored as NULL. An unknown name is a typo, so fail loudly.
-    unknown = set(new_columns) - set(LAYER1_NEW_COLUMNS)
+    _all_extra_columns = {**LAYER1_NEW_COLUMNS, "udp_tcp_ratio": "REAL"}
+    unknown = set(new_columns) - set(_all_extra_columns)
     if unknown:
         raise ValueError(f"write_layer1: unknown column(s) {sorted(unknown)}")
 
@@ -229,9 +230,9 @@ def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cp
         "max_temp", "battery_percent", "net_rate_mb_s", "net_bytes_sent", "net_bytes_recv",
         "net_packets_sent", "net_packets_recv", "net_errs", "net_drops", "process_data",
         "num_threads",
-    ] + list(LAYER1_NEW_COLUMNS)
+    ] + list(_all_extra_columns)
 
-    values = (timestamp, 
+    values = (timestamp,
           cpu_usage_percent, 
           cpu_freq, cpu_user_time, 
           cpu_system_time, 
@@ -270,7 +271,7 @@ def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cp
           net_errs,
           net_drops,
           process_data,
-          num_threads) + tuple(new_columns.get(col) for col in LAYER1_NEW_COLUMNS)
+          num_threads) + tuple(new_columns.get(col) for col in _all_extra_columns)
 
     placeholders = ", ".join("?" for _ in column_names)
     cursor = conn.cursor()
@@ -279,3 +280,84 @@ def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cp
         values,
     )
     conn.commit()
+
+
+# Rule Engine database functions
+
+def init_workload_events_table(conn):
+    """Initializes the workload_events table for deterministic rule engine telemetry."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS workload_events (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp        REAL    NOT NULL,
+            workload         TEXT    NOT NULL,
+            state            TEXT    NOT NULL,
+            cpu_attribution  REAL,
+            ram_attribution  REAL,
+            workload_score   REAL,
+            system_cpu       REAL,
+            system_memory    REAL,
+            top_process      TEXT,
+            evidence_json    TEXT,
+            persistence      INTEGER,
+            ml_confidence    REAL,
+            ml_workload      TEXT,
+            ml_probabilities TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_workload_events_ts ON workload_events (timestamp)")
+
+    # Ensure backwards compatibility for existing databases by safely adding new columns
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(workload_events)")
+    existing_cols = {c[1] for c in cursor.fetchall()}
+    for col, col_type in [("ml_confidence", "REAL"), ("ml_workload", "TEXT"), ("ml_probabilities", "TEXT")]:
+        if col not in existing_cols:
+            try:
+                conn.execute(f"ALTER TABLE workload_events ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
+    conn.commit()
+
+
+def write_workload_event(conn, timestamp, workload, state, cpu_attribution, ram_attribution, workload_score, system_cpu, system_memory, top_process, evidence_json, persistence, ml_confidence=0.0, ml_workload="IDLE", ml_probabilities="{}"):
+    """Writes a workload evaluation snapshot to workload_events."""
+    conn.execute("""
+        INSERT INTO workload_events (
+            timestamp, workload, state, cpu_attribution, ram_attribution,
+            workload_score, system_cpu, system_memory, top_process, evidence_json, persistence,
+            ml_confidence, ml_workload, ml_probabilities
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (timestamp, workload, state, cpu_attribution, ram_attribution, workload_score, system_cpu, system_memory, top_process, evidence_json, persistence, ml_confidence, ml_workload, ml_probabilities))
+    conn.commit()
+
+
+def init_optimization_events_table(conn):
+    """Initializes the optimization_events table for safe resource attribution actions."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS optimization_events (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp        REAL    NOT NULL,
+            pid              INTEGER,
+            process_name     TEXT,
+            workload         TEXT,
+            action           TEXT,
+            old_value        TEXT,
+            new_value        TEXT,
+            reason           TEXT,
+            success          INTEGER
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_opt_events_ts ON optimization_events (timestamp)")
+    conn.commit()
+
+
+def write_optimization_event(conn, timestamp, pid, process_name, workload, action, old_value, new_value, reason, success):
+    """Writes an optimization action log to optimization_events."""
+    conn.execute("""
+        INSERT INTO optimization_events (
+            timestamp, pid, process_name, workload, action, old_value, new_value, reason, success
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (timestamp, pid, process_name, workload, action, old_value, new_value, reason, int(success)))
+    conn.commit()
+

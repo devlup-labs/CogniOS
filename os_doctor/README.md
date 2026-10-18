@@ -6,16 +6,20 @@
 
 ## 1. Introduction
 
-OSDoctor is an intelligent observability system that continuously monitors operating system telemetry, detects abnormal system behavior using machine learning, identifies the likely root cause, and explains the issue in natural language. Its objective is to answer the question: “Why is my laptop slow right now?”
+OSDoctor is an intelligent observability system that continuously monitors operating system telemetry, detects abnormal system behavior using machine learning (Isolation Forest), identifies the likely root cause using a local LLM engine (Ollama Gemma 2b), and explains issues in clear natural language. Its objective is to answer the question: *"Why is my laptop slow right now?"*
+
+---
 
 ## 2. Objectives
 
-- Monitor real-time system telemetry.
-- Detect system anomalies automatically.
-- Identify causes of performance issues.
-- Detect CPU, memory, disk, and process-related faults.
-- Explain issues in simple, human-readable language.
-- Provide actionable alerts and recommendations.
+- Monitor real-time system and process telemetry.
+- Detect system anomalies automatically using Isolation Forest ML with an explicit decision threshold (`score <= -0.1`).
+- Identify root causes of system performance degradation (CPU spikes, memory leaks, high swap, disk I/O bottlenecks).
+- Explain technical system faults in simple, human-readable language.
+- Provide dynamic AI confidence ratings (50% – 99%) and actionable remediation steps.
+- Present live metrics and diagnostic feeds in a Streamlit dashboard.
+
+---
 
 ## 3. System Architecture
 
@@ -23,36 +27,36 @@ OSDoctor is an intelligent observability system that continuously monitors opera
 CogniOS Telemetry Collector
         │
         ▼
-OSDoctor (Data Extraction)
+OSDoctor Data Extraction (featuring.py)
         │
         ▼
-System Metrics + Process Metrics
+Feature Vector (System + Process Metrics)
         │
         ▼
-SQLite Database
+Isolation Forest Predictor (i_forest_predict.py)
         │
-        ▼
-Feature Engineering
-        │
-        ▼
-Isolation Forest
-        │
-        ├── No Anomaly
+        ├── Score > -0.1 (Normal System State)
         │      │
         │      ▼
         │   Continue Monitoring
         │
-        └── Anomaly Detected
+        └── Score <= -0.1 (Anomaly Detected)
                │
                ▼
-         Alerts Table
+         alerts.db (alerts table)
                │
                ▼
-        LLM Explanation Layer
+        LLM Explanation Layer (llm_layer.py)
+        [Tier 1: Ollama gemma2:2b | Tier 2: Gemini API]
                │
                ▼
-        Streamlit Dashboard
+         alerts.db (diagnoses table)
+               │
+               ▼
+      Streamlit Dashboard (os_doctor_view.py)
 ```
+
+---
 
 ## 4. File Structure
 
@@ -68,30 +72,27 @@ os_doctor/
 
 # `featuring.py`
 
-This module bridges the gap between transactional database storage and in-memory multi-dimensional math. It queries the running SQLite database in WAL mode, extracts the latest historical sliding window, standardizes missing rows, and computes derived statistical features for the anomaly detection pipeline.
+This module bridges transactional database storage and in-memory multi-dimensional feature calculations. It queries the running SQLite telemetry database in WAL mode, extracts historical sliding windows, standardizes missing rows, and computes derived statistical features for anomaly detection.
 
 ---
 
 ### 1. `extract_and_engineer_system`
 
-- **Description:** Queries the running SQLite database safely in WAL mode to extract the latest rolling historical sliding window of process telemetry rows.
+- **Description:** Queries the SQLite database safely in WAL mode to extract the latest rolling historical sliding window of system telemetry rows.
 - **Input:**
   - `DB_PATH` (str): Absolute path to the centralized SQLite database.
   - `window_size` (int): Number of historical rows to fetch (default: 120 samples / 2 minutes).
-- **Output:**
-  - `sys_vec`: One single-rowed vector containing feature-engineered data of rolling 2-min window with gradients and rolling averages of system telemetry collection.
+- **Output:** `sys_vec` (pd.DataFrame): Single-row vector containing rolling averages, gradients, and scaled system telemetry metrics.
 
-  ---
-
+---
 
 ### 2. `extract_and_engineer_processes`
 
-- **Description:** Queries the running SQLite database safely in WAL mode to extract the latest rolling historical sliding window of process telemetry rows.
+- **Description:** Queries process telemetry to extract historical sliding windows of top process CPU and RAM metrics.
 - **Input:**
-  - `DB_PATH` (str): Absolute path to the centralized SQLite database.
-  - `window_size` (int): Number of historical rows to fetch (default: 24 samples / 2 minutes).
-- **Output:**
-  - `cpu_vec and ram_vec`: Two single-rowed vectors containing feature-engineered data of rolling 2-min window with gradients and rolling averages.
+  - `DB_PATH` (str): Absolute path to centralized SQLite database.
+  - `window_size` (int): Number of historical process samples to fetch (default: 24 samples).
+- **Output:** `cpu_vec, ram_vec` (pd.DataFrame): Process feature vectors with rolling averages and consumption rates.
 
 ---
 
@@ -101,8 +102,9 @@ This module bridges the gap between transactional database storage and in-memory
 - **Input:**
   - `sys_vec, ram_vec, cpu_vec` (pd.DataFrame): Raw process telemetry DataFrame containing compressed or stringified JSON arrays.
 - **Output:**
-  - `i_forest_features_df, metadata_payload`: i_forest_features_df is the pd DataFrame that goes into the i_forest model
-  metadata_payload is the metadata of processes such as 'pid', 'name', 'ppid' etc
+  - `i_forest_features_df` (pd.DataFrame): Formatted DataFrame passed into Isolation Forest predictor.
+  - `metadata_payload` (dict): Process metadata (`pid`, `name`, `ppid`, `user`).
+
 ---
 
 ### 4. `get_inference_payload`

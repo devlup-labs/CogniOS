@@ -1,3 +1,4 @@
+"This file contains the code related to appending to 'Alerts' Database, if Anomaly is detected"
 import sqlite3
 import json 
 import time
@@ -7,6 +8,8 @@ from config import ALERTS_DB_PATH, ALERTS_TABLE_NAME, DB_PATH
 def _harden_connection(conn):
     """Best-effort per-connection pragmas. journal_mode is a one-time, whole-file
     switch — see ensure_wal_mode() for the race-free way to enable it up front."""
+    """Best-effort per-connection pragmas. journal_mode is a one-time, whole-file
+    switch — see ensure_wal_mode() for the race-free way to enable it up front."""
     conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -14,6 +17,10 @@ def _harden_connection(conn):
 
 
 def ensure_wal_mode(db_path=ALERTS_DB_PATH):
+    """Switch the DB file to WAL mode once, via a single connection, before any
+    concurrent writers open their own connections. Doing this per-connection from
+    multiple threads/processes at once races on the initial (non-WAL -> WAL) file
+    header rewrite and can raise 'database is locked' even with busy_timeout set."""
     """Switch the DB file to WAL mode once, via a single connection, before any
     concurrent writers open their own connections. Doing this per-connection from
     multiple threads/processes at once races on the initial (non-WAL -> WAL) file

@@ -63,7 +63,7 @@ def get_foreground_app():
         
 # #returns 2 list[dict], one for top cpu and one for top memory
 def get_top_processes(n = 5):
-    top_cpu, top_mem, _ = layer2_process.collect_process_telemetry()
+    top_cpu, top_mem, _ = layer2_process.collect_layer2_metrics()
     
     top_cpu_filtered = []
     top_mem_filtered = []
