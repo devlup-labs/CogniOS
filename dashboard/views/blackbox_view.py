@@ -25,29 +25,31 @@ def render():
         <style>
         /* Button styling */
         div[data-testid="stButton"] button[kind="secondary"] {
-            background: #101725 !important;
+            background: linear-gradient(180deg, #101726 0%, #0a0f19 100%) !important;
             color: #e2e8f0 !important;
-            border: 1px solid #1a2638 !important;
+            border: 1px solid rgba(255, 255, 255, 0.14) !important;
+            border-radius: 8px !important;
             transition: all 0.2s ease;
         }
         div[data-testid="stButton"] button[kind="secondary"] * {
             color: inherit !important;
         }
         div[data-testid="stButton"] button[kind="secondary"]:hover {
-            background: #172236 !important;
+            background: #17243a !important;
             color: #00f5c4 !important;
             border-color: #00f5c4 !important;
-            box-shadow: 0 0 12px rgba(0, 245, 196, 0.2);
+            box-shadow: 0 0 16px rgba(0, 245, 196, 0.35) !important;
         }
         div[data-testid="stButton"] button[kind="primary"] {
             background: linear-gradient(135deg, #00f5c4 0%, #00d4aa 100%) !important;
             color: #05080e !important;
-            border: none !important;
+            border: 1px solid rgba(0, 245, 196, 0.6) !important;
+            border-radius: 8px !important;
             font-weight: 700 !important;
             transition: all 0.2s ease;
         }
         div[data-testid="stButton"] button[kind="primary"]:hover {
-            box-shadow: 0 0 20px rgba(0, 245, 196, 0.4) !important;
+            box-shadow: 0 0 20px rgba(0, 245, 196, 0.5) !important;
             transform: translateY(-1px);
         }
 
@@ -580,12 +582,13 @@ def render():
                 "Root cause of anomalies",
                 "Recommended actions"
             ]
-            suggestion_html = "<div class='query-suggestions'>"
-            for s in suggestions:
-                escaped = s.replace("'", "\\'")
-                suggestion_html += f"<span class='suggestion-chip' onclick=\"document.querySelector('input[aria-label=\\\"Ask AI Forensic Assistant\\\']').value='{escaped}'; document.querySelector('input[aria-label=\\\"Ask AI Forensic Assistant\\\']').dispatchEvent(new Event('input', { bubbles: true }));\">{s}</span>"
-            suggestion_html += "</div>"
-            st.markdown(suggestion_html, unsafe_allow_html=True)
+            st.markdown("<p style='font-size:11px; color:#64748b; margin:10px 0 4px 0; font-family:JetBrains Mono;'>💡 Quick Prompts:</p>", unsafe_allow_html=True)
+            scols = st.columns(2)
+            for i, s in enumerate(suggestions):
+                with scols[i % 2]:
+                    if st.button(s, key=f"bb_sug_{i}", use_container_width=True):
+                        _run_ai_query(s)
+                        st.rerun(scope="fragment")
 
     # ---------------------------------------------------------
     # 6. Forensic Event Chain (Chronological Incident Replay)
