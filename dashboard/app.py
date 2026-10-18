@@ -37,9 +37,129 @@ except ImportError:
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+import time
 import dashboard.data_provider as dp
-from dashboard.views import system_overview, focusos_view, blackbox_view, os_doctor_view, research_view
+from dashboard.views import system_overview, focusos_view, blackbox_view, os_doctor_view
 import config
+
+def _close_dialog():
+    st.session_state["active_dialog"] = None
+
+
+@st.dialog("CogniOS Configuration & Thresholds", width="large", on_dismiss=_close_dialog)
+def render_config_dialog():
+    st.markdown("Customize live operational thresholds and engine parameters. Changes are saved and applied immediately.")
+    
+    tab1, tab2, tab3 = st.tabs(["FocusOS Parameters", "BlackBox Alerts", "AI & LLM Settings"])
+    
+    with tab1:
+        st.subheader("FocusOS Optimization & Attribution")
+        c1, c2 = st.columns(2)
+        with c1:
+            contention = st.slider("CPU Contention Threshold (%)", min_value=15.0, max_value=85.0, value=float(getattr(config, "RULE_SYSTEM_CPU_CONTENTION", 35.0)), step=1.0, help="System CPU% before priority optimization kicks in")
+            cpu_thresh = st.number_input("Process Active CPU Threshold (%)", min_value=0.5, max_value=20.0, value=float(getattr(config, "RULE_CPU_ACTIVE_THRESHOLD", 2.0)), step=0.5)
+            ram_thresh = st.number_input("Process Active RAM Threshold (MB)", min_value=50.0, max_value=2000.0, value=float(getattr(config, "RULE_RAM_ACTIVE_THRESHOLD", 150.0)), step=25.0)
+        with c2:
+            persistence = st.number_input("Persistence Cycle Gate", min_value=1, max_value=10, value=int(getattr(config, "RULE_PERSISTENCE_COUNT", 3)), step=1, help="Consecutive evaluation cycles required before confirming a workload")
+            cooldown = st.number_input("Policy Cooldown (seconds)", min_value=10, max_value=300, value=int(getattr(config, "RULE_COOLDOWN_SEC", 45)), step=5, help="Minimum seconds between automated scheduling priority adjustments")
+            attribution_thresh = st.slider("Workload Attribution Threshold", min_value=0.10, max_value=0.90, value=float(getattr(config, "RULE_ATTRIBUTION_THRESHOLD", 0.40)), step=0.05)
+
+    with tab2:
+        st.subheader("BlackBox Critical Thresholds & Buffer")
+        b1, b2 = st.columns(2)
+        with b1:
+            cpu_crit = st.slider("Critical CPU Alert Threshold (%)", min_value=50.0, max_value=99.0, value=float(getattr(config, "BLACKBOX_CPU_CRITICAL", 90.0)), step=1.0)
+            mem_crit = st.slider("Critical Memory Alert Threshold (%)", min_value=50.0, max_value=99.0, value=float(getattr(config, "BLACKBOX_MEM_CRITICAL", 90.0)), step=1.0)
+            temp_crit = st.slider("Critical Temperature Threshold (°C)", min_value=60.0, max_value=105.0, value=float(getattr(config, "BLACKBOX_TEMP_CRITICAL", 85.0)), step=1.0)
+        with b2:
+            zombie_lim = st.number_input("Zombie Process Limit", min_value=1, max_value=50, value=int(getattr(config, "BLACKBOX_ZOMBIE_LIMIT", 10)), step=1)
+            cur_win = getattr(config, "BLACKBOX_WINDOW_SEC", 1800)
+            win_opts = [900, 1800, 3600]
+            win_idx = win_opts.index(cur_win) if cur_win in win_opts else 1
+            window_sec = st.selectbox("Rolling Buffer Duration", options=win_opts, index=win_idx, format_func=lambda x: f"{x // 60} Minutes")
+            cur_ref = getattr(config, "AUTO_REFRESH", 2)
+            ref_opts = [1, 2, 5, 10]
+            ref_idx = ref_opts.index(cur_ref) if cur_ref in ref_opts else 1
+            refresh_rate = st.selectbox("Dashboard Auto-Refresh Rate", options=ref_opts, index=ref_idx, format_func=lambda x: f"{x} Seconds")
+
+    with tab3:
+        st.subheader("AI Explainability & Groq LLM API")
+        model_name = st.text_input("Groq LLM Model", value=str(getattr(config, "GROQ_MODEL", "qwen/qwen3.8-27b")), help="e.g. qwen/qwen3.8-27b, llama-3.3-70b-versatile, mixtral-8x7b-32768")
+        api_key = st.text_input("Groq API Key", value=str(getattr(config, "GROQ_API_KEY", "")), type="password", help="Enter your Groq API key (starts with gsk_...)")
+
+    st.markdown("<hr style='border-color:#1e293b; margin:16px 0;'>", unsafe_allow_html=True)
+    c_save, c_cancel = st.columns(2)
+    with c_save:
+        if st.button("Save Changes", type="primary", use_container_width=True):
+            updates = {
+                "RULE_SYSTEM_CPU_CONTENTION": float(contention),
+                "RULE_CPU_ACTIVE_THRESHOLD": float(cpu_thresh),
+                "RULE_RAM_ACTIVE_THRESHOLD": float(ram_thresh),
+                "RULE_PERSISTENCE_COUNT": int(persistence),
+                "RULE_COOLDOWN_SEC": int(cooldown),
+                "RULE_ATTRIBUTION_THRESHOLD": float(attribution_thresh),
+                "BLACKBOX_CPU_CRITICAL": float(cpu_crit),
+                "BLACKBOX_MEM_CRITICAL": float(mem_crit),
+                "BLACKBOX_TEMP_CRITICAL": float(temp_crit),
+                "BLACKBOX_ZOMBIE_LIMIT": int(zombie_lim),
+                "BLACKBOX_WINDOW_SEC": int(window_sec),
+                "AUTO_REFRESH": int(refresh_rate),
+                "GROQ_MODEL": model_name.strip(),
+                "GROQ_API_KEY": api_key.strip(),
+            }
+            config.save_config_overrides(updates)
+            st.session_state["active_dialog"] = None
+            st.toast("Configuration saved successfully!", icon="✅")
+            st.rerun()
+    with c_cancel:
+        if st.button("Close", use_container_width=True):
+            st.session_state["active_dialog"] = None
+            st.rerun()
+
+
+@st.dialog("CogniOS — System Guide & Help", width="large", on_dismiss=_close_dialog)
+def render_help_dialog():
+    st.markdown("""
+    ### 🧭 CogniOS Intelligent Observability Platform
+    CogniOS operates directly in Linux user space without kernel patches, orchestrating telemetry gathering, anomaly detection, dynamic prioritization, and flight-recorder crash forensics.
+    
+    ---
+    
+    #### 📦 Observability Matrix
+    - **System Overview**: 1-second system telemetry (CPU / RAM / Disk / Net / Temp) via `/proc` and `psutil`.
+    - **OS Doctor AI**: Workload-specific Isolation Forest models detecting anomalous performance deviations with automated root-cause diagnosis.
+    - **FocusOS Engine**: Deterministic rule engine and XGBoost ML workload classifier. When high CPU contention occurs, it boosts priority (`nice -10` to `-5`) of active toolchains and throttles background tasks (`nice +7`), with full automatic state rollback.
+    - **BlackBox Recorder**: 30-minute circular rolling buffer in SQLite WAL mode. Automatically tracks daemon heartbeats and constructs causal event chains (CPU spikes, memory leaks, I/O storms) with Groq AI synthesis.
+    
+    ---
+    
+    #### ⚙️ CLI Quick Commands
+    ```bash
+    # Start all background telemetry, FocusOS & OS Doctor engines:
+    python cognios_as_daemon.py
+
+    # Launch Unified Dashboard in your browser:
+    python main.py --ui browser
+
+    # Launch native desktop Qt shell:
+    python main.py --ui desktop
+    ```
+
+    ---
+    
+    #### 📊 Status Indicators
+    - **● DAEMON RUNNING**: Indicates background collector loops are actively gathering data. Click to stop.
+    - **● SYSTEM IDLE**: Indicates background daemon is stopped. Click to launch.
+    - **PID**: The active operating system process ID of `cognios_as_daemon.py`.
+    - **MODE (WAL)**: SQLite Write-Ahead Logging active for non-blocking concurrent transactions.
+    - **Uptime**: Elapsed runtime of the active daemon session.
+    - **Latency**: Real-time SQLite storage transaction latency.
+    """)
+    st.markdown("<hr style='border-color:#1e293b; margin:16px 0;'>", unsafe_allow_html=True)
+    if st.button("Close Guide", type="primary", use_container_width=True):
+        st.session_state["active_dialog"] = None
+        st.rerun()
+
 
 # Inject Font Awesome, Google Fonts and Custom Dark Cyberpunk Button/Card CSS
 st.markdown("""
@@ -58,6 +178,65 @@ st.markdown("""
 
     header[data-testid="stHeader"] {
         background: transparent !important;
+        z-index: 100 !important;
+    }
+
+    /* --- Collapsed Sidebar Toggle Button Styling --- */
+    div[data-testid="stSidebarCollapsedControl"],
+    button[data-testid="stSidebarCollapsedControl"],
+    [data-testid="collapsedControl"] {
+        background: linear-gradient(135deg, rgba(0, 245, 196, 0.15) 0%, rgba(14, 21, 34, 0.95) 100%) !important;
+        border: 1px solid rgba(0, 245, 196, 0.45) !important;
+        border-radius: 10px !important;
+        color: #00f5c4 !important;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6), 0 0 14px rgba(0, 245, 196, 0.25) !important;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        padding: 6px 12px !important;
+        margin-left: 12px !important;
+        margin-top: 8px !important;
+    }
+
+    div[data-testid="stSidebarCollapsedControl"]:hover,
+    button[data-testid="stSidebarCollapsedControl"]:hover,
+    [data-testid="collapsedControl"]:hover {
+        background: rgba(0, 245, 196, 0.25) !important;
+        border-color: #00f5c4 !important;
+        box-shadow: 0 0 20px rgba(0, 245, 196, 0.5) !important;
+        transform: scale(1.05) !important;
+    }
+
+    div[data-testid="stSidebarCollapsedControl"] svg,
+    button[data-testid="stSidebarCollapsedControl"] svg,
+    [data-testid="collapsedControl"] svg {
+        fill: #00f5c4 !important;
+        color: #00f5c4 !important;
+    }
+
+    /* Inside-sidebar collapse toggle */
+    [data-testid="stSidebarCollapseButton"] button {
+        background: rgba(255, 255, 255, 0.04) !important;
+        color: #94a3b8 !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 8px !important;
+        transition: all 0.2s ease !important;
+    }
+    [data-testid="stSidebarCollapseButton"] button:hover {
+        background: rgba(0, 245, 196, 0.15) !important;
+        color: #00f5c4 !important;
+        border-color: rgba(0, 245, 196, 0.4) !important;
+    }
+    [data-testid="stSidebarCollapseButton"] button svg {
+        fill: #00f5c4 !important;
+    }
+
+    /* Main Viewport & Block Container Spacing */
+    div.block-container,
+    div[data-testid="stMainBlockContainer"] {
+        padding-top: 2rem !important;
+        padding-bottom: 2.5rem !important;
+        padding-left: 2.2rem !important;
+        padding-right: 2.2rem !important;
+        max-width: 100% !important;
     }
 
     /* Headings & Typography */
@@ -81,7 +260,7 @@ st.markdown("""
     /* --- Brand Header Card --- */
     .sidebar-brand-card {
         background: linear-gradient(135deg, rgba(0, 245, 196, 0.12) 0%, rgba(15, 23, 42, 0.9) 100%);
-        border: none !important;
+        border: 1px solid rgba(0, 245, 196, 0.25) !important;
         border-radius: 14px;
         padding: 18px;
         margin-bottom: 24px;
@@ -152,35 +331,35 @@ st.markdown("""
 
     /* --- Sidebar Navigation Buttons --- */
     section[data-testid="stSidebar"] div.stButton > button {
-        background: #0d121c !important;
-        color: #94a3b8 !important;
-        border: none !important;
+        background: linear-gradient(180deg, #0e1524 0%, #080c14 100%) !important;
+        color: #cbd5e1 !important;
+        border: 1px solid rgba(255, 255, 255, 0.12) !important;
         border-radius: 10px !important;
         padding: 12px 16px !important;
-        font-size: 14px !important;
+        font-size: 13.5px !important;
         font-weight: 600 !important;
         text-align: left !important;
         width: 100% !important;
-        margin-bottom: 6px !important;
-        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        box-shadow: 0 4px 14px rgba(0,0,0,0.2) !important;
+        margin-bottom: 8px !important;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.3) !important;
     }
 
     section[data-testid="stSidebar"] div.stButton > button:hover {
-        background: #141c2b !important;
+        background: #141f32 !important;
         color: #ffffff !important;
-        border: none !important;
-        transform: translateX(4px) !important;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35) !important;
+        border: 1px solid rgba(0, 245, 196, 0.5) !important;
+        transform: translateX(3px) !important;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4), 0 0 14px rgba(0, 245, 196, 0.2) !important;
     }
 
     /* Active Nav Item Highlighting */
     .nav-active div.stButton > button {
-        background: linear-gradient(90deg, rgba(0, 245, 196, 0.18) 0%, rgba(0, 245, 196, 0.02) 100%) !important;
+        background: linear-gradient(90deg, rgba(0, 245, 196, 0.16) 0%, rgba(0, 245, 196, 0.02) 100%) !important;
         color: #00f5c4 !important;
-        border: none !important;
+        border: 1px solid rgba(0, 245, 196, 0.55) !important;
         border-left: 4px solid #00f5c4 !important;
-        box-shadow: 0 0 20px rgba(0, 245, 196, 0.2) !important;
+        box-shadow: 0 0 20px rgba(0, 245, 196, 0.22) !important;
         font-weight: 700 !important;
     }
 
@@ -190,24 +369,41 @@ st.markdown("""
 
     /* --- GLOBAL STREAMLIT MAIN CONTENT BUTTONS STYLING --- */
     div.stButton > button {
-        background: #101725 !important;
+        background: linear-gradient(180deg, #101726 0%, #0a0f19 100%) !important;
         color: #e2e8f0 !important;
-        border: 1px solid #1a2638 !important;
+        border: 1px solid rgba(255, 255, 255, 0.14) !important;
         border-radius: 8px !important;
         padding: 8px 16px !important;
         font-family: 'JetBrains Mono', monospace !important;
         font-size: 13px !important;
         font-weight: 600 !important;
         transition: all 0.2s ease-in-out !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
     }
 
     div.stButton > button:hover {
-        background: #172236 !important;
+        background: #17243a !important;
         color: #00f5c4 !important;
-        border-color: #00f5c4 !important;
+        border: 1px solid rgba(0, 245, 196, 0.5) !important;
         box-shadow: 0 0 16px rgba(0, 245, 196, 0.35) !important;
         transform: translateY(-1px) !important;
+    }
+
+    /* Primary Action Buttons */
+    button[kind="primary"],
+    div.stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, rgba(0, 245, 196, 0.22) 0%, rgba(14, 165, 233, 0.18) 100%) !important;
+        color: #00f5c4 !important;
+        border: 1px solid rgba(0, 245, 196, 0.5) !important;
+        box-shadow: 0 4px 18px rgba(0, 245, 196, 0.15) !important;
+        font-weight: 700 !important;
+    }
+    button[kind="primary"]:hover,
+    div.stButton > button[kind="primary"]:hover {
+        background: linear-gradient(135deg, rgba(0, 245, 196, 0.35) 0%, rgba(14, 165, 233, 0.28) 100%) !important;
+        color: #ffffff !important;
+        border-color: #00f5c4 !important;
+        box-shadow: 0 0 22px rgba(0, 245, 196, 0.45) !important;
     }
 
     /* Emergency Stop Button Wrapper */
@@ -326,35 +522,49 @@ st.markdown("""
     }
 
     /* Status Card Footer */
-    .sidebar-status-card {
-        background: #0d121c;
-        border: none !important;
-        border-radius: 12px;
-        padding: 16px;
-        margin-top: 24px;
-        box-shadow: 0 6px 24px rgba(0,0,0,0.3);
+    div[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] {
+        background: linear-gradient(180deg, #0e1524 0%, #080c14 100%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 14px !important;
+        padding: 14px !important;
+        margin-top: 18px !important;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
     }
 
     .top-status-pill {
-        background: #0d121c;
-        border: none !important;
+        background: linear-gradient(180deg, #0e1524 0%, #080c14 100%);
+        border: 1px solid rgba(255, 255, 255, 0.07) !important;
         border-radius: 8px;
-        padding: 7px 16px;
-        font-size: 12px;
+        padding: 6px 14px;
+        font-size: 11.5px;
         font-family: 'JetBrains Mono', monospace;
         color: #cbd5e1;
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+        box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+        transition: all 0.2s ease;
+    }
+    .top-status-pill:hover {
+        border-color: rgba(0, 245, 196, 0.3) !important;
+        color: #f8fafc;
     }
 
     .cognios-card {
-        background: #0d121c;
-        border: none !important;
+        background: linear-gradient(180deg, #0e1524 0%, #080c14 100%);
+        border: 1px solid rgba(255, 255, 255, 0.06) !important;
+        border-top: 1px solid rgba(0, 245, 196, 0.25) !important;
         border-radius: 14px;
-        padding: 22px;
-        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+        padding: 18px 20px;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+        transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        position: relative;
+        overflow: hidden;
+    }
+    .cognios-card:hover {
+        transform: translateY(-2px);
+        border-color: rgba(0, 245, 196, 0.35) !important;
+        box-shadow: 0 12px 35px rgba(0, 245, 196, 0.08), 0 8px 24px rgba(0, 0, 0, 0.5);
     }
     .cognios-metric-val {
         font-size: 40px;
@@ -437,12 +647,79 @@ st.markdown("""
         background-color: rgba(0, 245, 196, 0.08) !important;
         box-shadow: 0 0 12px rgba(0, 245, 196, 0.2) !important;
     }
+
+    /* Daemon status button styling in sidebar */
+    div.st-key-btn_daemon_toggle button {
+        background: rgba(0, 245, 196, 0.12) !important;
+        border: 1px solid rgba(0, 245, 196, 0.3) !important;
+        color: #00f5c4 !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 11.5px !important;
+        font-weight: 800 !important;
+        letter-spacing: 0.5px !important;
+        padding: 8px 12px !important;
+        border-radius: 8px !important;
+        box-shadow: 0 0 10px rgba(0, 245, 196, 0.15) !important;
+    }
+    div.st-key-btn_daemon_toggle button:hover {
+        background: rgba(0, 245, 196, 0.22) !important;
+        border-color: #00f5c4 !important;
+        box-shadow: 0 0 16px rgba(0, 245, 196, 0.4) !important;
+        transform: scale(1.02) !important;
+    }
+
+    div.st-key-btn_daemon_toggle_idle button {
+        background: rgba(100, 116, 139, 0.15) !important;
+        border: 1px solid rgba(100, 116, 139, 0.35) !important;
+        color: #cbd5e1 !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 11.5px !important;
+        font-weight: 800 !important;
+        letter-spacing: 0.5px !important;
+        padding: 8px 12px !important;
+        border-radius: 8px !important;
+    }
+    div.st-key-btn_daemon_toggle_idle button:hover {
+        background: rgba(0, 245, 196, 0.15) !important;
+        border-color: #00f5c4 !important;
+        color: #00f5c4 !important;
+    }
+
+    div.st-key-btn_open_config button, div.st-key-btn_open_help button {
+        background: #141c2b !important;
+        border: 1px solid #1f2d42 !important;
+        color: #cbd5e1 !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 11px !important;
+        font-weight: 600 !important;
+        padding: 6px 10px !important;
+        border-radius: 6px !important;
+    }
+    div.st-key-btn_open_config button:hover {
+        border-color: #00f5c4 !important;
+        color: #00f5c4 !important;
+        background: #1a2538 !important;
+    }
+    div.st-key-btn_open_help button:hover {
+        border-color: #38bdf8 !important;
+        color: #38bdf8 !important;
+        background: #1a2538 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 
 def main():
     daemon_status = dp.get_daemon_status()
+
+    if "active_dialog" not in st.session_state:
+        st.session_state["active_dialog"] = None
+
+    # Render active modal dialog if requested
+    if st.session_state.get("active_dialog") == "config":
+        render_config_dialog()
+    elif st.session_state.get("active_dialog") == "help":
+        render_help_dialog()
 
     # --- Sidebar Navigation ---
     with st.sidebar:
@@ -468,9 +745,9 @@ def main():
 
         obs_pages = [
             ("overview", "System Overview", ":material/dashboard:"),
+            ("os_doctor", "OS Doctor AI", ":material/medical_services:"),
             ("focusos", "FocusOS Engine", ":material/visibility:"),
-            ("blackbox", "BlackBox Recorder", ":material/inventory_2:"),
-            ("os_doctor", "OS Doctor AI", ":material/medical_services:")
+            ("blackbox", "BlackBox Recorder", ":material/inventory_2:")
         ]
 
         for p_id, p_title, p_icon in obs_pages:
@@ -482,42 +759,41 @@ def main():
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # Section 2: Research
-        st.html('<div class="sidebar-category-header" style="margin-top:22px;">EXPERIMENTATION</div>')
-        is_active = (st.session_state["current_page"] == "research")
-        btn_class = "nav-active" if is_active else ""
-        st.markdown(f'<div class="{btn_class}">', unsafe_allow_html=True)
-        if st.button("Research Engine", icon=":material/science:", key="nav_research"):
-            st.session_state["current_page"] = "research"
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
         st.markdown("<br>", unsafe_allow_html=True)
 
         # Bottom System Status Card
-        status_bg = "rgba(0, 245, 196, 0.12)" if daemon_status["is_running"] else "rgba(100, 116, 139, 0.15)"
-        status_fg = "#00f5c4" if daemon_status["is_running"] else "#cbd5e1"
-        status_txt = "● DAEMON RUNNING" if daemon_status["is_running"] else "● SYSTEM IDLE"
+        with st.container(border=True):
+            if daemon_status["is_running"]:
+                if st.button("● DAEMON RUNNING", key="btn_daemon_toggle", use_container_width=True, help="Daemon is actively running. Click to terminate."):
+                    ok, msg = dp.stop_daemon_process()
+                    if ok:
+                        st.toast(msg, icon="🛑")
+                    time.sleep(0.5)
+                    st.rerun()
+            else:
+                if st.button("● SYSTEM IDLE (Click to Start)", key="btn_daemon_toggle_idle", use_container_width=True, help="Daemon is stopped. Click to launch background telemetry."):
+                    ok, msg = dp.start_daemon_process()
+                    if ok:
+                        st.toast(msg, icon="🚀")
+                    time.sleep(0.5)
+                    st.rerun()
 
-        st.html(f"""
-            <div class="sidebar-status-card">
-                <div style="background:{status_bg}; color:{status_fg}; padding:8px 12px; border-radius:8px; text-align:center; font-weight:800; font-size:12px; font-family:'JetBrains Mono'; margin-bottom:12px; letter-spacing:0.5px;">
-                    {status_txt}
-                </div>
-                <div style="display:flex; justify-content:space-between; font-size:11px; color:#64748b; font-family:'JetBrains Mono'; margin-bottom:14px; padding:0 4px;">
+            st.html(f"""
+                <div style="display:flex; justify-content:space-between; font-size:11px; color:#64748b; font-family:'JetBrains Mono'; margin: 10px 0 12px 0; padding:0 4px;">
                     <span>PID: <strong style="color:#e2e8f0;">{daemon_status['pid'] or 'N/A'}</strong></span>
                     <span>MODE: <strong style="color:#00f5c4;">{daemon_status['db_mode']}</strong></span>
                 </div>
-                <div style="display:flex; gap:8px;">
-                    <button style="flex:1; background:#141c2b; border:none; color:#cbd5e1; border-radius:6px; padding:7px; font-size:11px; font-weight:600; font-family:'JetBrains Mono'; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px;">
-                        <i class="fa-solid fa-sliders" style="color:#00f5c4;"></i> Config
-                    </button>
-                    <button style="flex:1; background:#141c2b; border:none; color:#cbd5e1; border-radius:6px; padding:7px; font-size:11px; font-weight:600; font-family:'JetBrains Mono'; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px;">
-                        <i class="fa-solid fa-headset" style="color:#38bdf8;"></i> Help
-                    </button>
-                </div>
-            </div>
-        """)
+            """)
+
+            col_cfg, col_hlp = st.columns(2)
+            with col_cfg:
+                if st.button("Config", icon=":material/tune:", key="btn_open_config", use_container_width=True):
+                    st.session_state["active_dialog"] = "config"
+                    st.rerun()
+            with col_hlp:
+                if st.button("Help", icon=":material/help:", key="btn_open_help", use_container_width=True):
+                    st.session_state["active_dialog"] = "help"
+                    st.rerun()
 
     # --- Top Navigation Bar ---
     t1, t2 = st.columns([3, 1])
@@ -575,22 +851,20 @@ def main():
 
     if curr == "overview":
         system_overview.render()
+    elif curr == "os_doctor":
+        os_doctor_view.render()
     elif curr == "focusos":
         focusos_view.render()
     elif curr == "blackbox":
         blackbox_view.render()
-    elif curr == "os_doctor":
-        os_doctor_view.render()
-    elif curr == "research":
-        research_view.render()
 
     # --- Non-blocking Auto Refresh (browser-side timer) ---
     # Only fire a full-page rerun for views that do NOT have @st.fragment(run_every=N).
     # Fragment-based views (overview, focusos, blackbox) self-refresh internally —
     # adding st_autorefresh on top causes a second, uncoordinated full-page rerun that
     # produces the visible "blink" effect every 2 seconds.
-    FRAGMENT_VIEWS = {"overview", "focusos", "blackbox"}
-    if curr not in FRAGMENT_VIEWS:
+    FRAGMENT_VIEWS = {"overview", "os_doctor", "focusos", "blackbox"}
+    if curr not in FRAGMENT_VIEWS and not st.session_state.get("active_dialog"):
         if HAS_AUTOREFRESH:
             refresh_interval_ms = int(getattr(config, 'AUTO_REFRESH', 2) * 1000)
             st_autorefresh(interval=refresh_interval_ms, key="dashboard_autorefresh")
