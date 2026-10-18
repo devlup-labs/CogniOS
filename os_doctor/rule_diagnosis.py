@@ -770,7 +770,8 @@ def run_diagnosis_daemon(poll_interval: int = POLL_INTERVAL_S) -> None:
     init_alerts_db(conn)
     init_diagnoses_table(conn)
 
-    print("[diagnosis] Listening for alerts (baseline-deviation engine)...")
+    print
+    ("[diagnosis] Listening for alerts (baseline-deviation engine)...")
     try:
         while True:
             try:

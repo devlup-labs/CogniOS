@@ -21,7 +21,7 @@ from os_doctor.alerts_db import (
     init_alerts_db,
 )
 from os_doctor.featuring import ML_FEATURES
-from config import ALERTS_DB_PATH, ALERTS_TABLE_NAME, GROQ_AK, GROQ_MODEL, WORKLOADS
+from config import ALERTS_DB_PATH, ALERTS_TABLE_NAME, GROQ_API_KEY, GROQ_MODEL, WORKLOADS
 
 DIAGNOSES_TABLE_NAME = "diagnoses"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -358,12 +358,12 @@ def _build_prompt(
 
 
 def _call_groq(prompt: str) -> dict | None:
-    if not GROQ_AK:
-        print("[groq_diagnosis] GROQ_AK is not set. Check .env file.")
+    if not GROQ_API_KEY:
+        print("[groq_diagnosis] GROQ_API_KEY is not set. Check .env file.")
         return None
 
     headers = {
-        "Authorization": f"Bearer {GROQ_AK}",
+        "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type":  "application/json",
     }
     payload = {

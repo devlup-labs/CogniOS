@@ -1,8 +1,4 @@
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "cognios_telemetry.db")
 SLIDING_WIND_N = 120
@@ -10,7 +6,6 @@ SLIDING_WIND_N = 120
 # OS Doctor Config
 # All paths are absolute (built from BASE_DIR) so they do not depend on the
 # folder you run a script from.
-GROQ_AK = os.getenv("GROQ_AK", "")
 OS_DOCTOR_DB_PATH = os.path.join(BASE_DIR, "os_doctor.db")
 OS_DOCTOR_TRAIN_TABLE = "os_doctor_train_v2"
 ALERTS_DB_PATH = os.path.join(BASE_DIR, "os_doctor", "alerts.db")
@@ -56,6 +51,10 @@ CALLS = ["zoom", "teams", "slack", "discord", "skype", "webex"]
 IDES = ["code", "code-insiders", "sublime", "vim", "nvim"]
 
 # Blackbox config
+from dotenv import load_dotenv
+
+load_dotenv()
+
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
