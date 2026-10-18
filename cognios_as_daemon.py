@@ -45,6 +45,11 @@ from focusos.optimisation import apply_policy, restore_workload_state
 from focusos.llm_explainer import generate_explanation
 from focusos.models.classifier import predict_live_workload
 
+_current_doctor_workload = {"id": 2, "confidence": 0.85}
+
+def _get_workload_for_doctor():
+    return _current_doctor_workload["id"], _current_doctor_workload["confidence"]
+
 
 def _humanize_duration(seconds):
     parts = []
@@ -253,6 +258,14 @@ def run_rule_engine_loop(stop_event):
                 scores = evaluate(active_processes, sys_metrics_norm)
                 state = state_manager.update(scores, sys_metrics_norm, ml_inference=ml_result)
 
+                # Dynamically sync FocusOS detected workload to OS Doctor anomaly baseline
+                wl_map = {
+                    "IDLE": 0, "BROWSING": 1, "CODING": 2, "COMPILATION": 2,
+                    "MEDIA_PROCESSING": 2, "GAMING": 3, "VIDEO_CALL": 1,
+                }
+                _current_doctor_workload["id"] = wl_map.get(state.get("workload", "").upper(), 2)
+                _current_doctor_workload["confidence"] = float(state.get("ml_confidence", 0.85) or 0.85)
+
                 # Persist telemetry event snapshot
                 db.write_workload_event(
                     conn,
@@ -318,6 +331,13 @@ def run_daemon():
 
     ensure_wal_mode(DB_PATH)
 
+    pid_file = os.path.join(BASE_DIR, ".cognios_daemon.pid")
+    try:
+        with open(pid_file, "w") as f:
+            json.dump({"pid": os.getpid(), "start_time": time.time()}, f)
+    except Exception:
+        pass
+
     stop_event = threading.Event()
 
     def _request_shutdown(signum, frame):
@@ -334,7 +354,7 @@ def run_daemon():
     t1 = threading.Thread(target=run_layer1_loop, args=(stop_event,), daemon=True)
     t2 = threading.Thread(target=run_layer2_loop, args=(stop_event,), daemon=True)
     t3 = threading.Thread(target=run_rule_engine_loop, args=(stop_event,), daemon=True)
-    t4 = threading.Thread(target=flag_anomaly, daemon=True)
+    t4 = threading.Thread(target=flag_anomaly, args=(_get_workload_for_doctor,), daemon=True)
     t5 = threading.Thread(target=run_llm_daemon, daemon=True)
     t6 = threading.Thread(target=run_notifier, args=(stop_event,), daemon=True)
     
@@ -353,6 +373,12 @@ def run_daemon():
         t1.join(timeout=2)
         t2.join(timeout=2)
         t3.join(timeout=2)
+    finally:
+        if os.path.exists(pid_file):
+            try:
+                os.remove(pid_file)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

@@ -23,6 +23,17 @@ def ensure_wal_mode(db_path=DB_PATH):
     conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    try:
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(layer1_sys)")
+        columns = [row[1] for row in cursor.fetchall()]
+        needed = {"num_threads": "INTEGER", "udp_tcp_ratio": "REAL", **LAYER1_NEW_COLUMNS}
+        for col, col_type in needed.items():
+            if col not in columns:
+                cursor.execute(f"ALTER TABLE layer1_sys ADD COLUMN {col} {col_type}")
+        conn.commit()
+    except Exception:
+        pass
     conn.close()
 
 # layer 2 db code starts here
@@ -205,7 +216,10 @@ def create_connection(db_path):
     needed = {"num_threads": "INTEGER", "udp_tcp_ratio": "REAL", **LAYER1_NEW_COLUMNS}
     for col, col_type in needed.items():
         if col not in columns:
-            cursor.execute(f"ALTER TABLE layer1_sys ADD COLUMN {col} {col_type}")
+            try:
+                cursor.execute(f"ALTER TABLE layer1_sys ADD COLUMN {col} {col_type}")
+            except sqlite3.OperationalError:
+                pass
 
     conn.commit()
     return conn

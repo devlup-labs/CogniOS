@@ -63,13 +63,29 @@ def _daemon_running():
             pass
 
     try:
-        return subprocess.run(
+        if subprocess.run(
             ["pgrep", "-f", "cognios_as_daemon.py"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-        ).returncode == 0
+        ).returncode == 0:
+            return True
     except OSError:
-        return False
+        pass
+
+    # Fallback: check if BlackBox heartbeat is actively updating (< 8s old)
+    try:
+        from config import BLACKBOX_DB_PATH
+        if os.path.exists(BLACKBOX_DB_PATH):
+            import sqlite3
+            hb_conn = sqlite3.connect(BLACKBOX_DB_PATH, timeout=0.5)
+            hb_row = hb_conn.execute("SELECT last_beat FROM blackbox_heartbeat WHERE id = 1").fetchone()
+            hb_conn.close()
+            if hb_row and hb_row[0] and (time.time() - float(hb_row[0])) < 8.0:
+                return True
+    except Exception:
+        pass
+
+    return False
 
 
 def main(ui_mode="desktop"):
