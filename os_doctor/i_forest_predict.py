@@ -51,17 +51,42 @@ def _load_workload_assets(workload_id):
     return model, scaler, name
 
 
-def flag_anomaly(get_workload_id):
+def _get_default_workload_id():
+    """Default callback fetching latest workload from workload_events table or fallback."""
+    try:
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH, timeout=2.0)
+        cursor = conn.cursor()
+        cursor.execute("SELECT workload, ml_confidence FROM workload_events ORDER BY id DESC LIMIT 1")
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            wl_str = (row[0] or "").lower()
+            conf = float(row[1] or 0.85)
+            wl_map = {
+                "idle": 0, "browsing": 1, "coding": 2, "compilation": 2,
+                "media_processing": 2, "gaming": 3, "video_call": 1
+            }
+            return wl_map.get(wl_str, 2), conf
+    except Exception:
+        pass
+    return 2, 0.85
+
+
+def flag_anomaly(get_workload_id=None):
     """
     Continuously predict anomalies using the workload-specific baseline.
 
     Parameters
     ----------
-    get_workload_id : callable
+    get_workload_id : callable, optional
         A function that returns the current workload integer (0-3).
         Called every tick so the baseline can switch dynamically when
-        FocusOS detects a workload change.
+        FocusOS detects a workload change. If None, reads from workload_events.
     """
+    if get_workload_id is None:
+        get_workload_id = _get_default_workload_id
+
     # Pre-load all available workload models so switching is instant.
     models = {}
     for wid in WORKLOADS:
@@ -93,9 +118,9 @@ def flag_anomaly(get_workload_id):
                     focusos_confidence = 0.85
 
                 if workload_id not in models:
-                    print(f"[predict] No model for workload {workload_id}. Skipping tick.")
-                    time.sleep(5)
-                    continue
+                    # Fallback to an available model (e.g. coding or first loaded)
+                    fallback_id = 2 if 2 in models else next(iter(models.keys()))
+                    workload_id = fallback_id
 
                 assets = models[workload_id]
                 model = assets["model"]

@@ -360,6 +360,17 @@ def init_diagnoses_table(conn):
             FOREIGN KEY (alert_id) REFERENCES {ALERTS_TABLE_NAME}(id)
         )
     ''')
+    cursor = conn.cursor()
+    cursor.execute(f"PRAGMA table_info({DIAGNOSES_TABLE_NAME})")
+    cols = {row[1] for row in cursor.fetchall()}
+    for col, col_type in [("issue", "TEXT"), ("cause", "TEXT"), ("severity", "TEXT"),
+                          ("suggested_action", "TEXT"), ("confidence", "REAL"),
+                          ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP")]:
+        if col not in cols:
+            try:
+                conn.execute(f"ALTER TABLE {DIAGNOSES_TABLE_NAME} ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
     conn.commit()
 
 

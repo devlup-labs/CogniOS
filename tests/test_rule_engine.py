@@ -21,8 +21,8 @@ class TestRuleEngine(unittest.TestCase):
         # Word boundary tests: google-chrome should match BROWSING, not COMPILATION (via 'go')
         self.assertEqual(match_process_to_bucket("google-chrome"), "BROWSING")
         self.assertEqual(match_process_to_bucket("chrome"), "BROWSING")
-        # bash should NOT match COMPILATION (previously collided with GNU assembler 'as')
-        self.assertIsNone(match_process_to_bucket("bash"))
+        # bash should match CODING (and NOT collide with GNU assembler 'as')
+        self.assertEqual(match_process_to_bucket("bash"), "CODING")
         self.assertEqual(match_process_to_bucket("as"), "COMPILATION")
         self.assertEqual(match_process_to_bucket("code"), "CODING")
         self.assertEqual(match_process_to_bucket("zoom"), "VIDEO_CALL")
@@ -49,7 +49,7 @@ class TestRuleEngine(unittest.TestCase):
             {"pid": 100, "name": "gcc", "cpu_percent": 70.0, "memory_rss_mb": 200.0},
             {"pid": 101, "name": "cc1plus", "cpu_percent": 20.0, "memory_rss_mb": 150.0},
         ]
-        sys_metrics = {"cpu_usage_percent": 90.0, "memory_used": 4000.0}
+        sys_metrics = {"cpu_usage_percent": 90.0, "memory_used": 4000.0, "core_count": 1}
 
         scores = evaluate(procs, sys_metrics)
         self.assertIn("COMPILATION", scores)

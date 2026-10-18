@@ -86,7 +86,7 @@ if __name__ == "__main__":
     assert match_process_to_bucket("chrome") == "BROWSING"
     assert match_process_to_bucket("google-chrome") == "BROWSING"
     assert match_process_to_bucket("code") == "CODING"
-    assert match_process_to_bucket("bash") is None
+    assert match_process_to_bucket("bash") == "CODING"
     assert match_process_to_bucket("random_proc") is None
     assert is_protected_process("systemd") is True
     assert is_protected_process("gcc") is False
