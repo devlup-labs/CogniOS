@@ -1,12 +1,23 @@
 """Data provider for CogniOS Streamlit Dashboard.
 Connects real telemetry DBs, ML inference engines, and live OS metrics.
+Organized by functional subsystem:
+  - Section 1: Daemon Lifecycle & Process Management
+  - Section 2: System Telemetry & Process Observability (System Overview)
+  - Section 3: OS Doctor AI Anomaly Diagnostics (OS Doctor AI)
+  - Section 4: FocusOS Engine & Workload Attribution (FocusOS)
+  - Section 5: BlackBox Flight Recorder & AI Forensics (BlackBox)
 """
 
 import os
 import sys
 import time
 import json
+import math
+import random
+import re
+import signal
 import sqlite3
+import subprocess
 from datetime import datetime
 import pandas as pd
 import psutil
@@ -16,7 +27,20 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+import config
 from config import DB_PATH, BLACKBOX_DB_PATH, ALERTS_DB_PATH
+
+# Ensure database paths are always absolute regardless of current working directory
+if not os.path.isabs(BLACKBOX_DB_PATH):
+    BLACKBOX_DB_PATH = os.path.join(BASE_DIR, BLACKBOX_DB_PATH)
+if not os.path.isabs(DB_PATH):
+    DB_PATH = os.path.join(BASE_DIR, DB_PATH)
+if not os.path.isabs(ALERTS_DB_PATH):
+    ALERTS_DB_PATH = os.path.join(BASE_DIR, ALERTS_DB_PATH)
+
+SIMULATION_STATE_PATH = os.path.join(BASE_DIR, "simulation_state.json")
+
+# Subsystem Imports with Safe Fallbacks
 from blackbox.recorder import get_blackbox_conn, get_window_rows
 try:
     from blackbox.replay import replay, build_llm_context
@@ -35,31 +59,28 @@ except ImportError:
     except Exception:
         def replay(conn, *args, **kwargs): return {}
         def build_llm_context(conn, *args, **kwargs): return "BlackBox context unavailable."
+
 from blackbox.nl_query import ask_groq, query_telemetry
 
-# Ensure database paths are always absolute regardless of current working directory
-if not os.path.isabs(BLACKBOX_DB_PATH):
-    BLACKBOX_DB_PATH = os.path.join(BASE_DIR, BLACKBOX_DB_PATH)
-if not os.path.isabs(DB_PATH):
-    DB_PATH = os.path.join(BASE_DIR, DB_PATH)
-
-# FocusOS imports
 try:
     from focusos.optimisation import get_cores, get_active_network_interface
     HAS_FOCUSOS = True
-except Exception as e:
+except Exception:
     HAS_FOCUSOS = False
 
 from collectors.system_cpu import sample_system_cpu, get_cpu_monitor
 from collectors.process_monitor import sample_top_processes, get_process_monitor
 
 
+# =====================================================================
+# COMMON UTILITIES & CACHE
+# =====================================================================
+
 def _parse_timestamp(raw_ts):
     """Converts ISO, epoch float/int, or raw timestamp string into local HH:MM:SS format."""
     if not raw_ts:
         return time.strftime("%H:%M:%S")
     
-    # Handle direct numeric float / int epoch timestamp
     if isinstance(raw_ts, (int, float)):
         try:
             return time.strftime("%H:%M:%S", time.localtime(float(raw_ts)))
@@ -67,8 +88,6 @@ def _parse_timestamp(raw_ts):
             pass
 
     ts_str = str(raw_ts).strip()
-    
-    # Check if ts_str is numeric epoch string
     try:
         f_ts = float(ts_str)
         if f_ts > 100000000:
@@ -95,24 +114,62 @@ _last_io_counters = {
     "net_out": 0
 }
 
-# --- Global Observability Data Methods ---
+_sim_last_state_hash = None
+_sim_dynamic_history = []
+_last_sim_live_cpu = 20.0
+_telemetry_history_buffer = []
+
+
+# =====================================================================
+# SECTION 1: DAEMON LIFECYCLE & PROCESS MANAGEMENT
+# =====================================================================
 
 def get_daemon_status():
-    """Checks if background cognios_as_daemon process is running."""
+    """Checks if background cognios_as_daemon process is running and retrieves live metrics."""
     daemon_pid = None
     is_running = False
+    start_time = None
 
-    daemon_proc = None
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
+    # 1. Check .cognios_daemon.pid file
+    pid_file = os.path.join(BASE_DIR, ".cognios_daemon.pid")
+    if os.path.exists(pid_file):
         try:
-            cmdline = proc.info.get('cmdline') or []
-            cmd_str = " ".join(cmdline)
-            if "cognios_as_daemon.py" in cmd_str:
-                daemon_pid = proc.info['pid']
-                daemon_proc = proc
+            with open(pid_file, "r") as f:
+                pdata = json.load(f)
+                target_pid = pdata.get("pid")
+                if target_pid and psutil.pid_exists(target_pid):
+                    daemon_pid = target_pid
+                    is_running = True
+                    start_time = pdata.get("start_time")
+        except Exception:
+            pass
+
+    # 2. Process table inspection if not found via pid file
+    if not is_running:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
+            try:
+                name = proc.info.get('name') or ''
+                cmdline = proc.info.get('cmdline') or []
+                cmd_str = " ".join(cmdline)
+                if "cognios_as_daemon.py" in cmd_str or name == "cognios-daemon":
+                    daemon_pid = proc.info['pid']
+                    is_running = True
+                    start_time = proc.info.get('create_time')
+                    break
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+    # 3. Fallback: check if BlackBox heartbeat was updated within the last 8 seconds
+    if not is_running and os.path.exists(BLACKBOX_DB_PATH):
+        try:
+            hb_conn = sqlite3.connect(BLACKBOX_DB_PATH, timeout=0.5)
+            hb_row = hb_conn.execute("SELECT last_beat FROM blackbox_heartbeat WHERE id = 1").fetchone()
+            hb_conn.close()
+            if hb_row and hb_row[0] and (time.time() - float(hb_row[0])) < 8.0:
                 is_running = True
-                break
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                if not start_time:
+                    start_time = float(hb_row[0])
+        except Exception:
             pass
 
     wal_mode = False
@@ -125,30 +182,30 @@ def get_daemon_status():
             res = conn.execute("PRAGMA journal_mode;").fetchone()
             end_t = time.perf_counter()
             
-            latency_ms = int((end_t - start_t) * 1000)
-            if latency_ms == 0: latency_ms = 1
-            
+            latency_ms = max(1, int(round((end_t - start_t) * 1000)))
             if res and str(res[0]).lower() == "wal":
                 wal_mode = True
             conn.close()
         except Exception:
-            latency_ms = -1
-            pass
+            latency_ms = 0
 
-    uptime_str = "0m"
-    try:
-        uptime_seconds = time.time() - psutil.boot_time()
-        hours, rem = divmod(uptime_seconds, 3600)
-        minutes, _ = divmod(rem, 60)
-        days, hours = divmod(hours, 24)
-        if days > 0:
-            uptime_str = f"{int(days)}d {int(hours)}h {int(minutes)}m"
-        elif hours > 0:
-            uptime_str = f"{int(hours)}h {int(minutes)}m"
+    uptime_str = "Stopped"
+    if is_running:
+        if start_time:
+            uptime_seconds = max(0, time.time() - start_time)
+            hours, rem = divmod(uptime_seconds, 3600)
+            minutes, seconds = divmod(rem, 60)
+            days, hours = divmod(hours, 24)
+            if days > 0:
+                uptime_str = f"{int(days)}d {int(hours)}h {int(minutes)}m"
+            elif hours > 0:
+                uptime_str = f"{int(hours)}h {int(minutes)}m {int(seconds)}s"
+            elif minutes > 0:
+                uptime_str = f"{int(minutes)}m {int(seconds)}s"
+            else:
+                uptime_str = f"{int(seconds)}s"
         else:
-            uptime_str = f"{int(minutes)}m"
-    except Exception:
-        uptime_str = "N/A"
+            uptime_str = "Active"
 
     return {
         "is_running": is_running,
@@ -159,7 +216,58 @@ def get_daemon_status():
     }
 
 
-SIMULATION_STATE_PATH = os.path.join(BASE_DIR, "simulation_state.json")
+def start_daemon_process():
+    """Starts cognios_as_daemon in the background."""
+    if get_daemon_status()["is_running"]:
+        return True, "Daemon is already running."
+    try:
+        script = os.path.join(BASE_DIR, "cognios_as_daemon.py")
+        log_path = os.path.join(BASE_DIR, "telemetry_daemon.log")
+        log_file = open(log_path, "a")
+        proc = subprocess.Popen(
+            [sys.executable, script],
+            stdout=log_file,
+            stderr=log_file,
+            cwd=BASE_DIR,
+            start_new_session=True,
+        )
+        time.sleep(0.5)
+        return True, f"Daemon started (PID {proc.pid})."
+    except Exception as e:
+        return False, str(e)
+
+
+def stop_daemon_process():
+    """Stops cognios_as_daemon process."""
+    killed = 0
+    pid_file = os.path.join(BASE_DIR, ".cognios_daemon.pid")
+    if os.path.exists(pid_file):
+        try:
+            with open(pid_file, "r") as f:
+                d = json.load(f)
+                p = d.get("pid")
+                if p and psutil.pid_exists(p):
+                    os.kill(p, signal.SIGTERM)
+                    killed += 1
+            os.remove(pid_file)
+        except Exception:
+            pass
+
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            cmd = " ".join(proc.info.get('cmdline') or [])
+            name = proc.info.get('name') or ''
+            if "cognios_as_daemon.py" in cmd or name == "cognios-daemon":
+                proc.terminate()
+                killed += 1
+        except Exception:
+            pass
+    return True, f"Stopped {killed} daemon process(es)."
+
+
+# =====================================================================
+# SECTION 2: SYSTEM TELEMETRY & PROCESS OBSERVABILITY (SYSTEM OVERVIEW)
+# =====================================================================
 
 def get_active_simulation():
     """Returns active simulation payload if enabled, otherwise None."""
@@ -173,13 +281,6 @@ def get_active_simulation():
             pass
     return None
 
-
-import math
-import random
-
-_sim_last_state_hash = None
-_sim_dynamic_history = []
-_last_sim_live_cpu = 20.0
 
 def _calculate_tick_fluctuation(workload, base_cpu, base_ram, base_read, base_write, t_sec):
     wl = str(workload).lower()
@@ -220,13 +321,11 @@ def _calculate_tick_fluctuation(workload, base_cpu, base_ram, base_read, base_wr
     return cpu, ram, d_r, d_w
 
 
-_telemetry_history_buffer = []
-
 def get_live_system_metrics():
     """Fetches real-time system metrics (CPU, RAM, Disk I/O, Network)."""
     global _last_io_counters, _telemetry_history_buffer, _sim_last_state_hash, _sim_dynamic_history, _last_sim_live_cpu
     
-    # Check if active simulation is broadcasting from test controller
+    # Check if active simulation is broadcasting
     sim = get_active_simulation()
     if sim:
         workload = sim.get("workload", "CODING")
@@ -240,7 +339,6 @@ def get_live_system_metrics():
         current_hash = f"{workload}_{base_cpu}_{base_ram}_{base_net_in}"
         now = time.time()
 
-        # Seed realistic history wave if newly activated or preset changed
         if _sim_last_state_hash != current_hash:
             _sim_last_state_hash = current_hash
             _sim_dynamic_history = []
@@ -256,11 +354,9 @@ def get_live_system_metrics():
                     "disk_write": dw_p
                 })
 
-        # Calculate current live tick with realistic fluctuations
         live_cpu, live_ram, live_read, live_write = _calculate_tick_fluctuation(workload, base_cpu, base_ram, base_read, base_write, now)
         _last_sim_live_cpu = live_cpu
 
-        # Realistic network fluctuations based on workload category
         wl_lower = workload.lower()
         if "browse" in wl_lower:
             burst = random.choices([1.0, random.uniform(2.5, 6.0)], weights=[0.75, 0.25])[0]
@@ -322,7 +418,8 @@ def get_live_system_metrics():
 
     now = time.time()
     dt = now - _last_io_counters["time"] if _last_io_counters["time"] > 0 else 1.0
-    if dt <= 0: dt = 1.0
+    if dt <= 0:
+        dt = 1.0
 
     disk_io = psutil.disk_io_counters()
     d_read = disk_io.read_bytes if disk_io else 0
@@ -342,7 +439,6 @@ def get_live_system_metrics():
         if disk_read_mb == 0.0 and disk_write_mb == 0.0:
             _last_io_counters["zero_disk_count"] = _last_io_counters.get("zero_disk_count", 0) + 1
             if _last_io_counters["zero_disk_count"] > 120:
-                print("[Warning] Disk I/O has been 0.0 for over 120 consecutive samples. /proc/diskstats might be unavailable or read is failing.")
                 _last_io_counters["zero_disk_count"] = 0
         else:
             _last_io_counters["zero_disk_count"] = 0
@@ -367,7 +463,6 @@ def get_live_system_metrics():
         except Exception:
             pass
 
-    # Dynamic Process RAM usage (2 decimal places for real-time responsiveness)
     mem_used_gb = round(mem.used / (1024**3), 2)
     mem_total_gb = round(mem.total / (1024**3), 1)
     mem_pct = mem.percent
@@ -409,7 +504,7 @@ def get_live_system_metrics():
 
 
 def get_telemetry_history(limit=60):
-    """Retrieves fresh history of CPU & RAM metrics from DB or live rolling ring-buffer."""
+    """Retrieves history of CPU & RAM metrics from DB or live ring-buffer."""
     sim = get_active_simulation()
     if sim and _sim_dynamic_history:
         return pd.DataFrame(_sim_dynamic_history[-limit:])
@@ -473,7 +568,7 @@ def get_top_processes_list(limit=10):
     try:
         procs = sample_top_processes(top_n=limit)
         return procs
-    except Exception as e:
+    except Exception:
         procs = []
         num_cores = psutil.cpu_count() or 1
         for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
@@ -499,632 +594,9 @@ def get_top_processes_list(limit=10):
         return procs[:limit]
 
 
-# --- FocusOS Data Methods ---
-
-def get_focusos_detected_workload():
-    """Returns current deterministic workload state from rule engine telemetry."""
-    state = get_latest_focusos_state()
-    if state and state.get("workload"):
-        return {
-            "workload": state["workload"].upper(),
-            "state": state.get("state", "OBSERVING"),
-            "cpu_attribution": state.get("cpu_attribution", 0.0),
-            "ram_attribution": state.get("ram_attribution", 0.0),
-            "score": state.get("score", 0.0),
-        }
-
-    return {
-        "workload": "IDLE",
-        "state": "IDLE",
-        "cpu_attribution": 0.0,
-        "ram_attribution": 0.0,
-        "score": 0.0,
-    }
-
-
-def get_latest_focusos_state():
-    """Fetches the most recent deterministic workload state snapshot from SQLite workload_events."""
-    sim = get_active_simulation()
-    if sim:
-        sim_cpu = float(_last_sim_live_cpu if _last_sim_live_cpu > 0 else (sim.get("cpu_pct") or sim.get("cpu") or 25.0))
-        sim_ram = float(sim.get("memory_pct") or sim.get("ram") or 30.0)
-        wl = sim.get("workload", "CODING").upper()
-        top_p = sim.get("top_process")
-        if not top_p or top_p == "system":
-            if "COD" in wl: top_p = "code"
-            elif "BROW" in wl: top_p = "chrome"
-            elif "VIDEO" in wl: top_p = "zoom"
-            elif "COMPIL" in wl: top_p = "gcc"
-            else: top_p = "systemd"
-
-        intensity = str(sim.get("intensity", "Medium")).lower()
-        if "heavy" in intensity:
-            default_cpu_attr, default_ram_attr = 0.88, 0.82
-        elif "light" in intensity:
-            default_cpu_attr, default_ram_attr = 0.62, 0.58
-        else:
-            default_cpu_attr, default_ram_attr = 0.78, 0.72
-
-        ev = sim.get("evidence")
-        if not ev:
-            ev = [
-                {"process": top_p, "signal": f"{top_p} active workload threads ({sim_cpu:.1f}% CPU)"},
-                {"signal": f"Calibrated synthetic simulation ({sim.get('intensity', 'Medium')} {wl})"}
-            ]
-
-        conf = sim.get("confidence", 95.0)
-        score_val = (float(conf) / 100.0) if float(conf) > 1.0 else float(conf)
-
-        return {
-            "workload": wl,
-            "state": sim.get("state", "CONFIRMED"),
-            "cpu_attribution": float(sim.get("cpu_attribution") or default_cpu_attr),
-            "ram_attribution": float(sim.get("ram_attribution") or default_ram_attr),
-            "score": score_val,
-            "system_cpu": sim_cpu,
-            "system_memory": sim_ram * 240.0,
-            "top_process": top_p,
-            "evidence": ev,
-            "consecutive_cycles": int(sim.get("consecutive_cycles", 10)),
-        }
-
-    try:
-        if os.path.exists(DB_PATH):
-            conn = sqlite3.connect(DB_PATH, timeout=2.0)
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-            row = cur.execute(
-                "SELECT * FROM workload_events ORDER BY rowid DESC LIMIT 1"
-            ).fetchone()
-            conn.close()
-            
-            if row:
-                row_dict = dict(row)
-                ts = row_dict.get("timestamp")
-                # Verify telemetry freshness (within last 15 seconds)
-                is_fresh = False
-                try:
-                    if ts and (time.time() - float(ts) < 15.0):
-                        is_fresh = True
-                except Exception:
-                    pass
-
-                if is_fresh:
-                    ev_raw = row_dict.get("evidence_json")
-                    try:
-                        evidence = json.loads(ev_raw) if ev_raw else []
-                    except Exception:
-                        evidence = []
-                    return {
-                        "workload": row_dict.get("workload", "IDLE"),
-                        "state": row_dict.get("state", "OBSERVING"),
-                        "cpu_attribution": float(row_dict.get("cpu_attribution") or 0.0),
-                        "ram_attribution": float(row_dict.get("ram_attribution") or 0.0),
-                        "score": float(row_dict.get("workload_score") or 0.0),
-                        "system_cpu": float(row_dict.get("system_cpu") or 0.0),
-                        "system_memory": float(row_dict.get("system_memory") or 0.0),
-                        "top_process": row_dict.get("top_process", "system"),
-                        "evidence": evidence,
-                        "consecutive_cycles": int(row_dict.get("persistence") or 0),
-                        "ml_confidence": float(row_dict.get("ml_confidence") or 0.0),
-                        "ml_workload": row_dict.get("ml_workload", "IDLE"),
-                    }
-    except Exception as e:
-        print(f"[get_latest_focusos_state] error: {e}")
-        pass
-    
-    # If no recent row in DB, evaluate live telemetry on the fly (Daemon offline mode)
-    try:
-        from focusos.models.classifier import predict_live_workload
-        from focusos.rules.rule_engine import evaluate
-        from focusos.state_manager import WorkloadStateManager
-        from collectors.layer1_system import collect_layer1_metrics
-
-        ml_result = predict_live_workload()
-        sys_metrics = collect_layer1_metrics()
-        
-        sys_metrics_norm = dict(sys_metrics)
-        mem_bytes = sys_metrics_norm.get("memory_used", 0)
-        sys_metrics_norm["memory_used"] = float(mem_bytes) / (1024 * 1024) if mem_bytes > 1024 else float(mem_bytes)
-
-        active_processes = get_top_processes_list(20)
-        if active_processes:
-            for p in active_processes:
-                p["cpu_percent"] = p.get("cpu", 0.0)
-                p["memory_rss_mb"] = p.get("rss_mb", 0.0)
-
-        scores = evaluate(active_processes, sys_metrics_norm)
-        sm = WorkloadStateManager()
-        state = sm.update(scores, sys_metrics_norm, ml_inference=ml_result)
-        
-        return {
-            "workload": state["workload"],
-            "state": state["state"],
-            "cpu_attribution": state["cpu_attribution"],
-            "ram_attribution": state["ram_attribution"],
-            "score": state["score"],
-            "system_cpu": sys_metrics.get("cpu_usage_percent", 0.0),
-            "system_memory": sys_metrics_norm.get("memory_used", 0.0),
-            "top_process": state["top_process"],
-            "evidence": state["evidence"],
-            "consecutive_cycles": state["consecutive_cycles"],
-            "ml_confidence": state.get("ml_confidence", 0.0),
-            "ml_workload": state.get("ml_workload", "IDLE"),
-        }
-    except Exception as e:
-        print(f"[get_latest_focusos_state] fallback live evaluation error: {e}")
-
-    live_cpu = psutil.cpu_percent(interval=None)
-    return {
-        "workload": "IDLE",
-        "state": "OBSERVING",
-        "cpu_attribution": 0.0,
-        "ram_attribution": 0.0,
-        "score": 0.0,
-        "system_cpu": float(live_cpu or 0.0),
-        "system_memory": float(live_mem_mb),
-        "top_process": top_p,
-        "evidence": [{"signal": "Host operating at baseline telemetry"}],
-        "consecutive_cycles": 1,
-    }
-
-
-def get_processor_affinity_matrix():
-    """Generates core allocation matrix and live utilization for Performance and Efficiency cores."""
-    try:
-        from collectors.cpu_topology import get_topology
-        topo = get_topology()
-        total_cpus = topo.logical_cpus
-        physical_cores = topo.physical_cores
-        is_hybrid = topo.is_hybrid
-        p_cores = topo.p_cores
-        e_cores = topo.e_cores
-        arch_type = topo.architecture_type
-        model_name = topo.model_name
-        raw_available = topo.raw_data_available
-        threads_per_core = topo.threads_per_core
-    except Exception:
-        total_cpus = psutil.cpu_count(logical=True) or 8
-        physical_cores = psutil.cpu_count(logical=False) or total_cpus
-        is_hybrid = False
-        p_cores = list(range(total_cpus))
-        e_cores = []
-        arch_type = "HOMOGENEOUS"
-        model_name = "Host CPU"
-        raw_available = False
-        threads_per_core = 1
-
-    sim = get_active_simulation()
-    if sim:
-        workload = sim.get("workload", "CODING").lower()
-        live_cpu = _last_sim_live_cpu if _last_sim_live_cpu > 0 else float(sim.get("cpu_pct", 20.0))
-        per_core = []
-        for i in range(total_cpus):
-            is_p = (i in p_cores)
-            if "coding" in workload:
-                core_load = (live_cpu * random.uniform(1.1, 1.5)) if is_p else (live_cpu * random.uniform(0.2, 0.5))
-            elif "video" in workload:
-                core_load = (live_cpu * 2.0) if i in p_cores[:3] else (live_cpu * 0.3)
-            elif "browse" in workload:
-                core_load = (live_cpu * 1.8) if i in p_cores[:2] else (live_cpu * 0.4)
-            else:  # Idle
-                core_load = random.uniform(0.2, 2.0)
-            per_core.append(round(max(0.2, min(100.0, core_load + random.gauss(0, 0.4))), 1))
-    else:
-        monitor = get_cpu_monitor()
-        last_measurement = monitor.get_last_measurement()
-        per_core = last_measurement.get("per_core_percent", [])
-        if not per_core or len(per_core) != total_cpus:
-            fresh = monitor.sample(min_interval_sec=0.05)
-            per_core = fresh.get("per_core_percent", [0.0] * total_cpus)
-
-    return {
-        "p_cores": p_cores,
-        "e_cores": e_cores,
-        "p_active": len(p_cores) if is_hybrid else total_cpus,
-        "e_active": len(e_cores) if is_hybrid else 0,
-        "is_hybrid": is_hybrid,
-        "per_core_load": per_core,
-        "total_cores": total_cpus,
-        "physical_cores": physical_cores,
-        "threads_per_core": threads_per_core,
-        "architecture_type": arch_type,
-        "model_name": model_name,
-        "raw_data_available": raw_available,
-    }
-
-
-def get_focusos_events():
-    """Returns optimization actions log dynamically from optimization_events table."""
-    try:
-        if os.path.exists(DB_PATH):
-            conn = sqlite3.connect(DB_PATH, timeout=2.0)
-            df = pd.read_sql(
-                "SELECT timestamp, pid, process_name, workload, action, old_value, new_value, reason, success "
-                "FROM optimization_events ORDER BY rowid DESC LIMIT 20",
-                conn
-            )
-            conn.close()
-            
-            if not df.empty:
-                events = []
-                for _, r in df.iterrows():
-                    ts = _parse_timestamp(r["timestamp"])
-                    p_name = r["process_name"] or "System"
-                    pid = r["pid"]
-                    act = r["action"]
-                    old_v = r["old_value"]
-                    new_v = r["new_value"]
-                    reason = r["reason"]
-                    workload = str(r.get("workload") or "SYSTEM").upper()
-                    success = bool(int(r["success"])) if pd.notna(r.get("success")) else True
-                    
-                    msg = f"{p_name} (PID {pid}): {act} [{old_v} -> {new_v}] — {reason}"
-                    evt_type = "PRIO" if "nice" in str(act).lower() else ("RESTORE" if "restore" in str(act).lower() else "SCHED")
-                    
-                    events.append({
-                        "time": ts,
-                        "type": evt_type,
-                        "pid": pid,
-                        "process_name": p_name,
-                        "workload": workload,
-                        "action": str(act or ""),
-                        "old_value": str(old_v or ""),
-                        "new_value": str(new_v or ""),
-                        "reason": str(reason or ""),
-                        "success": success,
-                        "message": msg
-                    })
-                return events
-    except Exception:
-        pass
-
-    return []
-
-
-# --- BlackBox Data Methods ---
-
-def get_blackbox_zscore_series(scrub_minutes=0):
-    """Calculates Z-score statistical deviations for CPU & Memory from real SQLite telemetry."""
-    try:
-        target_db = BLACKBOX_DB_PATH if os.path.exists(BLACKBOX_DB_PATH) else DB_PATH
-        if os.path.exists(target_db):
-            table_name = "blackbox_telemetry" if os.path.exists(BLACKBOX_DB_PATH) else "layer1_sys"
-            conn = sqlite3.connect(target_db, timeout=2.0)
-            
-            now = time.time()
-            end_time = now + (scrub_minutes * 60)
-            
-            # Query the telemetry window leading up to end_time
-            df = pd.read_sql(
-                f"SELECT * FROM {table_name} WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 60",
-                conn,
-                params=(end_time,)
-            )
-            if not df.empty:
-                df = df[::-1].reset_index(drop=True)
-            else:
-                # Fallback to earliest available records if scrub is past the retention window
-                df = pd.read_sql(f"SELECT * FROM {table_name} ORDER BY timestamp ASC LIMIT 60", conn)
-            conn.close()
-            
-            if not df.empty and len(df) >= 3:
-                col_cpu = "cpu_usage_percent" if "cpu_usage_percent" in df.columns else "cpu"
-                col_mem = "memory_percent" if "memory_percent" in df.columns else "memory"
-                
-                cpus = df[col_cpu].astype(float).fillna(0.0)
-                mems = df[col_mem].astype(float).fillna(0.0)
-                
-                base_len = max(3, len(df) // 5)
-                cpu_base_mean = cpus.iloc[:base_len].mean()
-                cpu_base_std = cpus.iloc[:base_len].std() if cpus.iloc[:base_len].std() > 0.01 else 1.0
-                
-                mem_base_mean = mems.iloc[:base_len].mean()
-                mem_base_std = mems.iloc[:base_len].std() if mems.iloc[:base_len].std() > 0.01 else 1.0
-                
-                cpu_z = ((cpus - cpu_base_mean) / cpu_base_std).round(2).tolist()
-                mem_z = ((mems - mem_base_mean) / mem_base_std).round(2).tolist()
-                
-                timestamps = [_parse_timestamp(r.get('timestamp')) for _, r in df.iterrows()]
-                max_cpu_z = max(abs(x) for x in cpu_z) if cpu_z else 0.0
-                max_mem_z = max(abs(x) for x in mem_z) if mem_z else 0.0
-
-                return {
-                    "timestamps": timestamps[-40:],
-                    "z_scores": cpu_z[-40:],
-                    "mem_z_scores": mem_z[-40:],
-                    "raw_cpu": cpus.round(1).tolist()[-40:],
-                    "raw_mem": mems.round(1).tolist()[-40:],
-                    "max_z": round(max(max_cpu_z, max_mem_z), 1),
-                    "cpu_baseline": round(cpu_base_mean, 1),
-                    "mem_baseline": round(mem_base_mean, 1)
-                }
-    except Exception:
-        pass
-
-    now = time.time()
-    times = [time.strftime("%H:%M:%S", time.localtime(now - i * 2)) for i in range(30, 0, -1)]
-    return {
-        "timestamps": times,
-        "z_scores": [0.0] * 30,
-        "mem_z_scores": [0.0] * 30,
-        "raw_cpu": [0.0] * 30,
-        "raw_mem": [0.0] * 30,
-        "max_z": 0.0,
-        "cpu_baseline": 0.0,
-        "mem_baseline": 0.0
-    }
-
-
-def get_forensic_event_chain(scrub_minutes=0):
-    """Generates real forensic event chain using BlackBox replay causal detection."""
-    events = []
-    try:
-        if os.path.exists(BLACKBOX_DB_PATH):
-            conn = get_blackbox_conn()
-            now = time.time()
-            end_time = now + (scrub_minutes * 60)
-            rep = replay(conn, crash_time=end_time, window_minutes=30)
-            conn.close()
-            
-            raw_events = rep.get('chain') or rep.get('events') or []
-            for ev in raw_events:
-                sev = ev.get('severity', 'medium')
-                ev_type = ev.get('type', 'incident')
-                color = "#ef4444" if sev == "high" else "#03ef55"
-                level = "CRIT" if sev == "high" else "EVENT"
-                events.append({
-                    "time": ev.get('time', '??:??'),
-                    "level": level,
-                    "color": color,
-                    "type": ev_type,
-                    "msg": ev.get('detail', 'Anomaly event detected'),
-                    "severity": sev
-                })
-            if events:
-                return events
-    except Exception:
-        pass
-
-    return []
-
-
-def get_blackbox_buffer_status():
-    """Fetches rolling buffer storage & retention metrics from blackbox.db."""
-    try:
-        if os.path.exists(BLACKBOX_DB_PATH):
-            conn = sqlite3.connect(BLACKBOX_DB_PATH, timeout=1.0)
-            row_count = conn.execute("SELECT count(*) FROM blackbox_telemetry").fetchone()[0]
-            oldest_row = conn.execute("SELECT min(timestamp), max(timestamp) FROM blackbox_telemetry").fetchone()
-            conn.close()
-            
-            size_kb = round(os.path.getsize(BLACKBOX_DB_PATH) / 1024, 1)
-            oldest_ts, newest_ts = oldest_row if oldest_row else (None, None)
-            
-            if oldest_ts and newest_ts:
-                span_min = round((newest_ts - oldest_ts) / 60, 1)
-                span_str = f"{span_min} min span"
-            else:
-                span_str = "Collecting..."
-                
-            return {
-                "exists": True,
-                "row_count": row_count,
-                "size_kb": size_kb,
-                "retention_min": 30,
-                "span_str": span_str,
-                "journal_mode": "WAL (Crash-safe)",
-                "status": "BUFFER ACTIVE" if row_count > 0 else "BUFFER INITIALIZING"
-            }
-    except Exception:
-        pass
-        
-    return {
-        "exists": False,
-        "row_count": 0,
-        "size_kb": 0.0,
-        "retention_min": 30,
-        "span_str": "Standby",
-        "journal_mode": "WAL",
-        "status": "STANDBY"
-    }
-
-
-def get_blackbox_incident_status(scrub_minutes=0):
-    """Calculates dynamic baseline metrics and active incident counts for BlackBox."""
-    try:
-        conn = get_blackbox_conn()
-        now = time.time()
-        end_time = now + (scrub_minutes * 60)
-        rep = replay(conn, crash_time=end_time, window_minutes=30)
-        conn.close()
-        
-        events = rep.get('events', [])
-        rows_count = rep.get('total_rows', 0)
-        trend_summary = rep.get('trend_summary', 'N/A')
-        has_incidents = len(events) > 0
-        
-        return {
-            "has_incidents": has_incidents,
-            "incident_count": len(events),
-            "trend_summary": trend_summary,
-            "total_rows": rows_count,
-            "status_label": f"{len(events)} INCIDENTS DETECTED" if has_incidents else "ALL BASELINES NOMINAL",
-            "status_color": "#ef4444" if has_incidents else "#00f5c4"
-        }
-    except Exception:
-        return {
-            "has_incidents": False,
-            "incident_count": 0,
-            "trend_summary": "System operating normally within baselines",
-            "total_rows": 0,
-            "status_label": "ALL BASELINES NOMINAL",
-            "status_color": "#00f5c4"
-        }
-
-
-import re
-
-
-def format_ai_response_to_html(md_text: str) -> str:
-    """Converts LLM markdown output into beautifully structured HTML for the terminal container."""
-    if not md_text:
-        return "<p style='color:#64748b;'>No AI analysis available.</p>"
-    
-    text = md_text.strip()
-    text = re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", text)
-    
-    lines = text.split("\n")
-    formatted_chunks = []
-    in_list = False
-    list_type = "ul"
-    
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            if in_list:
-                formatted_chunks.append(f"</{list_type}>")
-                in_list = False
-            continue
-        
-        is_header = False
-        header_title = ""
-        
-        if stripped.startswith("###"):
-            header_title = stripped.lstrip("#").strip()
-            is_header = True
-        else:
-            for kw in ["Executive Summary", "Key Observations", "Root Cause & Mitigation", "Recommendations", "Issue Overview", "Key Findings", "System Analysis", "Event Chain Reconstructed", "Diagnostic Recommendation"]:
-                if kw in stripped and (stripped.startswith(kw) or ":" in stripped or len(stripped) < 45):
-                    header_title = kw
-                    is_header = True
-                    break
-        
-        if is_header:
-            if in_list:
-                formatted_chunks.append(f"</{list_type}>")
-                in_list = False
-            clean_title = re.sub(r"^(⚡|🔍|🎯|💡|⚠️|📌|\*|:)*\s*", "", header_title).strip()
-            formatted_chunks.append(f"<h4 style='color:#00f5c4; font-size:13px; font-weight:800; font-family:\"JetBrains Mono\", monospace; text-transform:uppercase; letter-spacing:1px; margin-top:14px; margin-bottom:6px; border-bottom:1px solid rgba(0, 245, 196, 0.15); padding-bottom:4px;'>{clean_title}</h4>")
-            continue
-            
-        if stripped.startswith("- ") or stripped.startswith("* "):
-            if not in_list:
-                list_type = "ul"
-                formatted_chunks.append("<ul style='margin:4px 0 10px 0; padding-left:18px;'>")
-                in_list = True
-            content = stripped[2:]
-            formatted_chunks.append(f"<li style='margin-bottom:4px; color:#e2e8f0;'>{content}</li>")
-        elif re.match(r"^\d+\.\s", stripped):
-            if not in_list:
-                list_type = "ol"
-                formatted_chunks.append("<ol style='margin:4px 0 10px 0; padding-left:18px;'>")
-                in_list = True
-            content = re.sub(r"^\d+\.\s*", "", stripped)
-            formatted_chunks.append(f"<li style='margin-bottom:4px; color:#e2e8f0;'>{content}</li>")
-        else:
-            if in_list:
-                formatted_chunks.append(f"</{list_type}>")
-                in_list = False
-            clean_p = re.sub(r"^(⚡|🔍|🎯|💡|⚠️|📌)\s*", "", stripped)
-            if clean_p:
-                formatted_chunks.append(f"<p style='margin-bottom:8px; line-height:1.6;'>{clean_p}</p>")
-                
-    if in_list:
-        formatted_chunks.append(f"</{list_type}>")
-        
-    return "".join(formatted_chunks)
-
-
-def get_ai_post_mortem(user_query=None, scrub_minutes=0):
-    """Generates real-time AI post-mortem report using Groq / LLM query engine,
-    falling back to local deterministic analysis if API key is not configured."""
-    conn = None
-    try:
-        conn = get_blackbox_conn()
-        now = time.time()
-        target_time = now + (scrub_minutes * 60)
-        context = build_llm_context(conn, crash_time=target_time)
-        rep = replay(conn, crash_time=target_time, window_minutes=30)
-        
-        # Check if Groq API key is configured
-        groq_key = os.environ.get("GROQ_API_KEY")
-        try:
-            from config import GROQ_API_KEY as CFG_GROQ_KEY
-            if not groq_key:
-                groq_key = CFG_GROQ_KEY
-        except Exception:
-            pass
-            
-        groq_model = os.environ.get("GROQ_MODEL") or getattr(config, "GROQ_MODEL", "llama-3.3-70b-versatile")
-
-        if groq_key and groq_key != "your_groq_api_key_here" and len(groq_key) > 10:
-            prompt = f"Telemetry Context:\n{context}\n\nUser Query: {user_query or 'Provide a short executive post-mortem analysis of recent telemetry anomalies.'}"
-            sys_p = (
-                "You are CogniOS AI, an ultra-fast Linux kernel forensic & telemetry analyst.\n"
-                "Format your response with clean markdown headers:\n"
-                "### Executive Summary\n1-2 sentences\n\n"
-                "### Key Observations\n- Bullet points with bold metrics (**CPU 58%**, **RAM 76.5%**)\n\n"
-                "### Root Cause & Mitigation\n- Precise causal sequence and concrete action step\n"
-            )
-            ai_resp = ask_groq(user_content=prompt, system_prompt=sys_p, model=groq_model, stream=False, api_key=groq_key)
-            if ai_resp:
-                return ai_resp
-
-        # Deterministic local report from replay engine
-        timeline_str = rep.get('timeline_text', 'No significant events recorded in this window.')
-        trend_str = rep.get('trend_summary', 'N/A')
-        event_count = len(rep.get('events', []))
-        
-        # Clean and round unrounded floats (e.g. Load avg: 1.7236328125 -> 1.72)
-        trend_clean = re.sub(r'(\d+\.\d{2})\d+', r'\1', str(trend_str))
-        
-        # Parse trend segments into clean bullet points
-        trend_parts = [p.strip() for p in trend_clean.split('|') if p.strip()]
-        trend_bullets = "\n".join(
-            f"- **{p.split(':')[0].strip()}**: {p.split(':', 1)[1].strip()}" if ":" in p else f"- {p}"
-            for p in trend_parts
-        )
-        
-        summary = (
-            f"Incident scan detected {event_count} significant event(s) in the 30-minute window."
-            if event_count > 0
-            else "System parameters remained within steady-state dynamic baselines during this window."
-        )
-        
-        obs_block = f"{trend_bullets}\n- **Telemetry Window**: {rep.get('total_rows', 0)} data samples evaluated\n- **Anomaly Threshold**: Dynamic Z-score active (σ > 2.0)"
-        
-        return f"""### Executive Summary
-{summary}
-
-### Key Observations
-{obs_block}
-
-### Diagnostic Recommendation
-- Real-time telemetry operating against dynamic statistical baselines.
-- Configure `GROQ_API_KEY` in `.env` to enable live LLM reasoning (Model: `{groq_model}`)."""
-    except Exception as e:
-        metrics = get_live_system_metrics()
-        return f"""### Executive Summary
-System operating normally with active real-time telemetry streaming.
-
-### Key Observations
-- **CPU Load**: {metrics['cpu_pct']}% (Load Avg: {metrics['load_avg1']})
-- **Memory Footprint**: {metrics['memory_pct']}% ({metrics['memory_used_gb']}GB / {metrics['memory_total_gb']}GB)
-- **Active Threads**: {metrics['running_procs']} running processes
-
-### Recommendations
-- **BlackBox Active**: 30-minute rolling buffer and crash sentinel operational.
-- **Alert Thresholds**: Monitoring memory spikes above 85%."""
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-
-# --- OS Doctor Data Methods ---
+# =====================================================================
+# SECTION 3: OS DOCTOR AI ANOMALY DIAGNOSTICS (OS DOCTOR AI)
+# =====================================================================
 
 def get_os_doctor_anomaly_score():
     """Calculates dynamic Isolation Forest anomaly score (0-100) from alerts.db & live telemetry."""
@@ -1260,47 +732,8 @@ def get_process_drilldown(pid):
         }
 
 
-# --- Additional BlackBox Core Subsystems Data Methods ---
-
-def get_blackbox_heartbeat_status():
-    """Fetches real heartbeat & crash status from blackbox.db blackbox_heartbeat table."""
-    try:
-        db_path = BLACKBOX_DB_PATH if os.path.exists(BLACKBOX_DB_PATH) else DB_PATH
-        if os.path.exists(db_path):
-            conn = sqlite3.connect(db_path, timeout=1.0)
-            row = conn.execute("SELECT last_beat, graceful_shutdown FROM blackbox_heartbeat WHERE id = 1").fetchone()
-            conn.close()
-            if row:
-                last_beat, graceful = row
-                gap = round(time.time() - last_beat, 1)
-                is_crash = (graceful == 0 and gap > 15.0)
-                return {
-                    "last_beat": time.strftime("%H:%M:%S", time.localtime(last_beat)),
-                    "graceful_shutdown": bool(graceful),
-                    "is_crash": is_crash,
-                    "gap_sec": max(0.0, gap),
-                    "status_label": "UNGRACEFUL CRASH DETECTED" if is_crash else ("CLEAN SHUTDOWN" if graceful else "ACTIVE HEARTBEAT")
-                }
-    except Exception:
-        pass
-
-    return {
-        "last_beat": time.strftime("%H:%M:%S"),
-        "graceful_shutdown": True,
-        "is_crash": False,
-        "gap_sec": 1.2,
-        "status_label": "ACTIVE HEARTBEAT"
-    }
-
-
-
-# --- OS Doctor Human-Readable LLM Diagnoses Data Methods ---
-
 def get_os_doctor_diagnoses(limit=20, severity_filter=None, search_query=None):
-    """
-    Fetches human-readable LLM diagnostic explanations from os_doctor/alerts.db.
-    Joins 'diagnoses' table with 'alerts' table.
-    """
+    """Fetches human-readable LLM diagnostic explanations from os_doctor/alerts.db."""
     diagnoses = []
     try:
         if os.path.exists(ALERTS_DB_PATH):
@@ -1414,3 +847,650 @@ def get_os_doctor_summary_stats():
         
     return stats
 
+
+# =====================================================================
+# SECTION 4: FOCUSOS ENGINE & WORKLOAD ATTRIBUTION (FOCUSOS)
+# =====================================================================
+
+def get_focusos_detected_workload():
+    """Returns current deterministic workload state from rule engine telemetry."""
+    state = get_latest_focusos_state()
+    if state and state.get("workload"):
+        return {
+            "workload": state["workload"].upper(),
+            "state": state.get("state", "OBSERVING"),
+            "cpu_attribution": state.get("cpu_attribution", 0.0),
+            "ram_attribution": state.get("ram_attribution", 0.0),
+            "score": state.get("score", 0.0),
+        }
+
+    return {
+        "workload": "IDLE",
+        "state": "IDLE",
+        "cpu_attribution": 0.0,
+        "ram_attribution": 0.0,
+        "score": 0.0,
+    }
+
+
+def get_latest_focusos_state():
+    """Fetches the most recent deterministic workload state snapshot from SQLite workload_events."""
+    sim = get_active_simulation()
+    if sim:
+        sim_cpu = float(_last_sim_live_cpu if _last_sim_live_cpu > 0 else (sim.get("cpu_pct") or sim.get("cpu") or 25.0))
+        sim_ram = float(sim.get("memory_pct") or sim.get("ram") or 30.0)
+        wl = sim.get("workload", "CODING").upper()
+        top_p = sim.get("top_process")
+        if not top_p or top_p == "system":
+            if "COD" in wl: top_p = "code"
+            elif "BROW" in wl: top_p = "chrome"
+            elif "VIDEO" in wl: top_p = "zoom"
+            elif "COMPIL" in wl: top_p = "gcc"
+            else: top_p = "systemd"
+
+        intensity = str(sim.get("intensity", "Medium")).lower()
+        if "heavy" in intensity:
+            default_cpu_attr, default_ram_attr = 0.88, 0.82
+        elif "light" in intensity:
+            default_cpu_attr, default_ram_attr = 0.62, 0.58
+        else:
+            default_cpu_attr, default_ram_attr = 0.78, 0.72
+
+        ev = sim.get("evidence")
+        if not ev:
+            ev = [
+                {"process": top_p, "signal": f"{top_p} active workload threads ({sim_cpu:.1f}% CPU)"},
+                {"signal": f"Calibrated synthetic simulation ({sim.get('intensity', 'Medium')} {wl})"}
+            ]
+
+        conf = sim.get("confidence", 95.0)
+        score_val = (float(conf) / 100.0) if float(conf) > 1.0 else float(conf)
+
+        return {
+            "workload": wl,
+            "state": sim.get("state", "CONFIRMED"),
+            "cpu_attribution": float(sim.get("cpu_attribution") or default_cpu_attr),
+            "ram_attribution": float(sim.get("ram_attribution") or default_ram_attr),
+            "score": score_val,
+            "system_cpu": sim_cpu,
+            "system_memory": sim_ram * 240.0,
+            "top_process": top_p,
+            "evidence": ev,
+            "consecutive_cycles": int(sim.get("consecutive_cycles", 10)),
+        }
+
+    try:
+        if os.path.exists(DB_PATH):
+            conn = sqlite3.connect(DB_PATH, timeout=2.0)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            row = cur.execute(
+                "SELECT * FROM workload_events ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+            conn.close()
+            
+            if row:
+                row_dict = dict(row)
+                ts = row_dict.get("timestamp")
+                is_fresh = False
+                try:
+                    if ts and (time.time() - float(ts) < 15.0):
+                        is_fresh = True
+                except Exception:
+                    pass
+
+                if is_fresh:
+                    ev_raw = row_dict.get("evidence_json")
+                    try:
+                        evidence = json.loads(ev_raw) if ev_raw else []
+                    except Exception:
+                        evidence = []
+                    return {
+                        "workload": row_dict.get("workload", "IDLE"),
+                        "state": row_dict.get("state", "OBSERVING"),
+                        "cpu_attribution": float(row_dict.get("cpu_attribution") or 0.0),
+                        "ram_attribution": float(row_dict.get("ram_attribution") or 0.0),
+                        "score": float(row_dict.get("workload_score") or 0.0),
+                        "system_cpu": float(row_dict.get("system_cpu") or 0.0),
+                        "system_memory": float(row_dict.get("system_memory") or 0.0),
+                        "top_process": row_dict.get("top_process", "system"),
+                        "evidence": evidence,
+                        "consecutive_cycles": int(row_dict.get("persistence") or 0),
+                        "ml_confidence": float(row_dict.get("ml_confidence") or 0.0),
+                        "ml_workload": row_dict.get("ml_workload", "IDLE"),
+                    }
+    except Exception as e:
+        print(f"[get_latest_focusos_state] error: {e}")
+    
+    # If no recent row in DB, evaluate live telemetry on the fly (Daemon offline mode)
+    try:
+        from focusos.models.classifier import predict_live_workload
+        from focusos.rules.rule_engine import evaluate
+        from focusos.state_manager import WorkloadStateManager
+        from collectors.layer1_system import collect_layer1_metrics
+
+        ml_result = predict_live_workload()
+        sys_metrics = collect_layer1_metrics()
+        
+        sys_metrics_norm = dict(sys_metrics)
+        mem_bytes = sys_metrics_norm.get("memory_used", 0)
+        sys_metrics_norm["memory_used"] = float(mem_bytes) / (1024 * 1024) if mem_bytes > 1024 else float(mem_bytes)
+
+        active_processes = get_top_processes_list(20)
+        if active_processes:
+            for p in active_processes:
+                p["cpu_percent"] = p.get("cpu", 0.0)
+                p["memory_rss_mb"] = p.get("rss_mb", 0.0)
+
+        scores = evaluate(active_processes, sys_metrics_norm)
+        sm = WorkloadStateManager()
+        state = sm.update(scores, sys_metrics_norm, ml_inference=ml_result)
+        
+        return {
+            "workload": state["workload"],
+            "state": state["state"],
+            "cpu_attribution": state["cpu_attribution"],
+            "ram_attribution": state["ram_attribution"],
+            "score": state["score"],
+            "system_cpu": sys_metrics.get("cpu_usage_percent", 0.0),
+            "system_memory": sys_metrics_norm.get("memory_used", 0.0),
+            "top_process": state["top_process"],
+            "evidence": state["evidence"],
+            "consecutive_cycles": state["consecutive_cycles"],
+            "ml_confidence": state.get("ml_confidence", 0.0),
+            "ml_workload": state.get("ml_workload", "IDLE"),
+        }
+    except Exception as e:
+        print(f"[get_latest_focusos_state] fallback live evaluation error: {e}")
+
+    live_cpu = psutil.cpu_percent(interval=None) or 0.0
+    live_mem_mb = psutil.virtual_memory().used / (1024 * 1024)
+    top_p = "system"
+
+    return {
+        "workload": "IDLE",
+        "state": "OBSERVING",
+        "cpu_attribution": 0.0,
+        "ram_attribution": 0.0,
+        "score": 0.0,
+        "system_cpu": float(live_cpu),
+        "system_memory": float(live_mem_mb),
+        "top_process": top_p,
+        "evidence": [{"signal": "Host operating at baseline telemetry"}],
+        "consecutive_cycles": 1,
+    }
+
+
+def get_processor_affinity_matrix():
+    """Generates core allocation matrix and live utilization for Performance and Efficiency cores."""
+    try:
+        from collectors.cpu_topology import get_topology
+        topo = get_topology()
+        total_cpus = topo.logical_cpus
+        physical_cores = topo.physical_cores
+        is_hybrid = topo.is_hybrid
+        p_cores = topo.p_cores
+        e_cores = topo.e_cores
+        arch_type = topo.architecture_type
+        model_name = topo.model_name
+        raw_available = topo.raw_data_available
+        threads_per_core = topo.threads_per_core
+    except Exception:
+        total_cpus = psutil.cpu_count(logical=True) or 8
+        physical_cores = psutil.cpu_count(logical=False) or total_cpus
+        is_hybrid = False
+        p_cores = list(range(total_cpus))
+        e_cores = []
+        arch_type = "HOMOGENEOUS"
+        model_name = "Host CPU"
+        raw_available = False
+        threads_per_core = 1
+
+    sim = get_active_simulation()
+    if sim:
+        workload = sim.get("workload", "CODING").lower()
+        live_cpu = _last_sim_live_cpu if _last_sim_live_cpu > 0 else float(sim.get("cpu_pct", 20.0))
+        per_core = []
+        for i in range(total_cpus):
+            is_p = (i in p_cores)
+            if "coding" in workload:
+                core_load = (live_cpu * random.uniform(1.1, 1.5)) if is_p else (live_cpu * random.uniform(0.2, 0.5))
+            elif "video" in workload:
+                core_load = (live_cpu * 2.0) if i in p_cores[:3] else (live_cpu * 0.3)
+            elif "browse" in workload:
+                core_load = (live_cpu * 1.8) if i in p_cores[:2] else (live_cpu * 0.4)
+            else:  # Idle
+                core_load = random.uniform(0.2, 2.0)
+            per_core.append(round(max(0.2, min(100.0, core_load + random.gauss(0, 0.4))), 1))
+    else:
+        monitor = get_cpu_monitor()
+        last_measurement = monitor.get_last_measurement()
+        per_core = last_measurement.get("per_core_percent", [])
+        if not per_core or len(per_core) != total_cpus:
+            fresh = monitor.sample(min_interval_sec=0.05)
+            per_core = fresh.get("per_core_percent", [0.0] * total_cpus)
+
+    return {
+        "p_cores": p_cores,
+        "e_cores": e_cores,
+        "p_active": len(p_cores) if is_hybrid else total_cpus,
+        "e_active": len(e_cores) if is_hybrid else 0,
+        "is_hybrid": is_hybrid,
+        "per_core_load": per_core,
+        "total_cores": total_cpus,
+        "physical_cores": physical_cores,
+        "threads_per_core": threads_per_core,
+        "architecture_type": arch_type,
+        "model_name": model_name,
+        "raw_data_available": raw_available,
+    }
+
+
+def get_focusos_events():
+    """Returns optimization actions log dynamically from optimization_events table."""
+    try:
+        if os.path.exists(DB_PATH):
+            conn = sqlite3.connect(DB_PATH, timeout=2.0)
+            df = pd.read_sql(
+                "SELECT timestamp, pid, process_name, workload, action, old_value, new_value, reason, success "
+                "FROM optimization_events ORDER BY rowid DESC LIMIT 20",
+                conn
+            )
+            conn.close()
+            
+            if not df.empty:
+                events = []
+                for _, r in df.iterrows():
+                    ts = _parse_timestamp(r["timestamp"])
+                    p_name = r["process_name"] or "System"
+                    pid = r["pid"]
+                    act = r["action"]
+                    old_v = r["old_value"]
+                    new_v = r["new_value"]
+                    reason = r["reason"]
+                    workload = str(r.get("workload") or "SYSTEM").upper()
+                    success = bool(int(r["success"])) if pd.notna(r.get("success")) else True
+                    
+                    msg = f"{p_name} (PID {pid}): {act} [{old_v} -> {new_v}] — {reason}"
+                    evt_type = "PRIO" if "nice" in str(act).lower() else ("RESTORE" if "restore" in str(act).lower() else "SCHED")
+                    
+                    events.append({
+                        "time": ts,
+                        "type": evt_type,
+                        "pid": pid,
+                        "process_name": p_name,
+                        "workload": workload,
+                        "action": str(act or ""),
+                        "old_value": str(old_v or ""),
+                        "new_value": str(new_v or ""),
+                        "reason": str(reason or ""),
+                        "success": success,
+                        "message": msg
+                    })
+                return events
+    except Exception:
+        pass
+
+    return []
+
+
+# =====================================================================
+# SECTION 5: BLACKBOX FLIGHT RECORDER & AI FORENSICS (BLACKBOX)
+# =====================================================================
+
+def get_blackbox_buffer_status():
+    """Fetches rolling buffer storage & retention metrics from blackbox.db."""
+    try:
+        if os.path.exists(BLACKBOX_DB_PATH):
+            conn = sqlite3.connect(BLACKBOX_DB_PATH, timeout=1.0)
+            row_count = conn.execute("SELECT count(*) FROM blackbox_telemetry").fetchone()[0]
+            oldest_row = conn.execute("SELECT min(timestamp), max(timestamp) FROM blackbox_telemetry").fetchone()
+            conn.close()
+            
+            size_kb = round(os.path.getsize(BLACKBOX_DB_PATH) / 1024, 1)
+            oldest_ts, newest_ts = oldest_row if oldest_row else (None, None)
+            
+            if oldest_ts and newest_ts:
+                span_min = round((newest_ts - oldest_ts) / 60, 1)
+                span_str = f"{span_min} min span"
+            else:
+                span_str = "Collecting..."
+                
+            return {
+                "exists": True,
+                "row_count": row_count,
+                "size_kb": size_kb,
+                "retention_min": 30,
+                "span_str": span_str,
+                "journal_mode": "WAL (Crash-safe)",
+                "status": "BUFFER ACTIVE" if row_count > 0 else "BUFFER INITIALIZING"
+            }
+    except Exception:
+        pass
+        
+    return {
+        "exists": False,
+        "row_count": 0,
+        "size_kb": 0.0,
+        "retention_min": 30,
+        "span_str": "Standby",
+        "journal_mode": "WAL",
+        "status": "STANDBY"
+    }
+
+
+def get_blackbox_heartbeat_status():
+    """Fetches real heartbeat & crash status from blackbox.db blackbox_heartbeat table."""
+    try:
+        db_path = BLACKBOX_DB_PATH if os.path.exists(BLACKBOX_DB_PATH) else DB_PATH
+        if os.path.exists(db_path):
+            conn = sqlite3.connect(db_path, timeout=1.0)
+            row = conn.execute("SELECT last_beat, graceful_shutdown FROM blackbox_heartbeat WHERE id = 1").fetchone()
+            conn.close()
+            if row:
+                last_beat, graceful = row
+                gap = round(time.time() - last_beat, 1)
+                is_crash = (graceful == 0 and gap > 15.0)
+                return {
+                    "last_beat": time.strftime("%H:%M:%S", time.localtime(last_beat)),
+                    "graceful_shutdown": bool(graceful),
+                    "is_crash": is_crash,
+                    "gap_sec": max(0.0, gap),
+                    "status_label": "UNGRACEFUL CRASH DETECTED" if is_crash else ("CLEAN SHUTDOWN" if graceful else "ACTIVE HEARTBEAT")
+                }
+    except Exception:
+        pass
+
+    return {
+        "last_beat": time.strftime("%H:%M:%S"),
+        "graceful_shutdown": True,
+        "is_crash": False,
+        "gap_sec": 1.2,
+        "status_label": "ACTIVE HEARTBEAT"
+    }
+
+
+def get_blackbox_incident_status(scrub_minutes=0):
+    """Calculates dynamic baseline metrics and active incident counts for BlackBox."""
+    try:
+        conn = get_blackbox_conn()
+        now = time.time()
+        end_time = now + (scrub_minutes * 60)
+        rep = replay(conn, crash_time=end_time, window_minutes=30)
+        conn.close()
+        
+        events = rep.get('events', [])
+        rows_count = rep.get('total_rows', 0)
+        trend_summary = rep.get('trend_summary', 'N/A')
+        has_incidents = len(events) > 0
+        
+        return {
+            "has_incidents": has_incidents,
+            "incident_count": len(events),
+            "trend_summary": trend_summary,
+            "total_rows": rows_count,
+            "status_label": f"{len(events)} INCIDENTS DETECTED" if has_incidents else "ALL BASELINES NOMINAL",
+            "status_color": "#ef4444" if has_incidents else "#00f5c4"
+        }
+    except Exception:
+        return {
+            "has_incidents": False,
+            "incident_count": 0,
+            "trend_summary": "System operating normally within baselines",
+            "total_rows": 0,
+            "status_label": "ALL BASELINES NOMINAL",
+            "status_color": "#00f5c4"
+        }
+
+
+def get_blackbox_zscore_series(scrub_minutes=0):
+    """Calculates Z-score statistical deviations for CPU & Memory from real SQLite telemetry."""
+    try:
+        target_db = BLACKBOX_DB_PATH if os.path.exists(BLACKBOX_DB_PATH) else DB_PATH
+        if os.path.exists(target_db):
+            table_name = "blackbox_telemetry" if os.path.exists(BLACKBOX_DB_PATH) else "layer1_sys"
+            conn = sqlite3.connect(target_db, timeout=2.0)
+            
+            now = time.time()
+            end_time = now + (scrub_minutes * 60)
+            
+            df = pd.read_sql(
+                f"SELECT timestamp, cpu_percent, memory_percent FROM {table_name} "
+                f"WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 30",
+                conn,
+                params=(end_time,)
+            )
+            conn.close()
+            
+            if not df.empty and len(df) >= 3:
+                df = df.iloc[::-1].reset_index(drop=True)
+                timestamps = [_parse_timestamp(t) for t in df['timestamp']]
+                raw_cpu = [round(float(c), 1) for c in df['cpu_percent']]
+                raw_mem = [round(float(m), 1) for m in df['memory_percent']]
+                
+                cpu_mean = df['cpu_percent'].mean()
+                cpu_std = df['cpu_percent'].std()
+                mem_mean = df['memory_percent'].mean()
+                mem_std = df['memory_percent'].std()
+                
+                z_scores = []
+                for val in df['cpu_percent']:
+                    z = (val - cpu_mean) / cpu_std if cpu_std > 0.001 else 0.0
+                    z_scores.append(round(float(z), 2))
+                    
+                mem_z_scores = []
+                for val in df['memory_percent']:
+                    z = (val - mem_mean) / mem_std if mem_std > 0.001 else 0.0
+                    mem_z_scores.append(round(float(z), 2))
+                    
+                return {
+                    "timestamps": timestamps,
+                    "z_scores": z_scores,
+                    "mem_z_scores": mem_z_scores,
+                    "raw_cpu": raw_cpu,
+                    "raw_mem": raw_mem,
+                    "max_z": max(z_scores) if z_scores else 0.0,
+                    "cpu_baseline": round(cpu_mean, 1),
+                    "mem_baseline": round(mem_mean, 1)
+                }
+    except Exception:
+        pass
+
+    now = time.time()
+    dummy_ts = [time.strftime("%H:%M:%S", time.localtime(now - (30 - i) * 60)) for i in range(30)]
+    return {
+        "timestamps": dummy_ts,
+        "z_scores": [0.0] * 30,
+        "mem_z_scores": [0.0] * 30,
+        "raw_cpu": [0.0] * 30,
+        "raw_mem": [0.0] * 30,
+        "max_z": 0.0,
+        "cpu_baseline": 0.0,
+        "mem_baseline": 0.0
+    }
+
+
+def get_forensic_event_chain(scrub_minutes=0):
+    """Generates real forensic event chain using BlackBox replay causal detection."""
+    events = []
+    try:
+        if os.path.exists(BLACKBOX_DB_PATH):
+            conn = get_blackbox_conn()
+            now = time.time()
+            end_time = now + (scrub_minutes * 60)
+            rep = replay(conn, crash_time=end_time, window_minutes=30)
+            conn.close()
+            
+            raw_events = rep.get('chain') or rep.get('events') or []
+            for ev in raw_events:
+                sev = ev.get('severity', 'medium')
+                ev_type = ev.get('type', 'incident')
+                color = "#ef4444" if sev == "high" else "#03ef55"
+                level = "CRIT" if sev == "high" else "EVENT"
+                events.append({
+                    "time": ev.get('time', '??:??'),
+                    "level": level,
+                    "color": color,
+                    "type": ev_type,
+                    "msg": ev.get('detail', 'Anomaly event detected'),
+                    "severity": sev
+                })
+            if events:
+                return events
+    except Exception:
+        pass
+
+    return []
+
+
+def format_ai_response_to_html(md_text: str) -> str:
+    """Converts LLM markdown output into beautifully structured HTML for the terminal container."""
+    if not md_text:
+        return "<p style='color:#64748b;'>No AI analysis available.</p>"
+    
+    text = md_text.strip()
+    text = re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", text)
+    
+    lines = text.split("\n")
+    formatted_chunks = []
+    in_list = False
+    list_type = "ul"
+    
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if in_list:
+                formatted_chunks.append(f"</{list_type}>")
+                in_list = False
+            continue
+        
+        is_header = False
+        header_title = ""
+        
+        if stripped.startswith("###"):
+            header_title = stripped.lstrip("#").strip()
+            is_header = True
+        else:
+            for kw in ["Executive Summary", "Key Observations", "Root Cause & Mitigation", "Recommendations", "Issue Overview", "Key Findings", "System Analysis", "Event Chain Reconstructed", "Diagnostic Recommendation"]:
+                if kw in stripped and (stripped.startswith(kw) or ":" in stripped or len(stripped) < 45):
+                    header_title = kw
+                    is_header = True
+                    break
+        
+        if is_header:
+            if in_list:
+                formatted_chunks.append(f"</{list_type}>")
+                in_list = False
+            clean_title = re.sub(r"^(⚡|🔍|🎯|💡|⚠️|📌|\*|:)*\s*", "", header_title).strip()
+            formatted_chunks.append(f"<h4 style='color:#00f5c4; font-size:13px; font-weight:800; font-family:\"JetBrains Mono\", monospace; text-transform:uppercase; letter-spacing:1px; margin-top:14px; margin-bottom:6px; border-bottom:1px solid rgba(0, 245, 196, 0.15); padding-bottom:4px;'>{clean_title}</h4>")
+            continue
+            
+        if stripped.startswith("- ") or stripped.startswith("* "):
+            if not in_list:
+                list_type = "ul"
+                formatted_chunks.append("<ul style='margin:4px 0 10px 0; padding-left:18px;'>")
+                in_list = True
+            content = stripped[2:]
+            formatted_chunks.append(f"<li style='margin-bottom:4px; color:#e2e8f0;'>{content}</li>")
+        elif re.match(r"^\d+\.\s", stripped):
+            if not in_list:
+                list_type = "ol"
+                formatted_chunks.append("<ol style='margin:4px 0 10px 0; padding-left:18px;'>")
+                in_list = True
+            content = re.sub(r"^\d+\.\s*", "", stripped)
+            formatted_chunks.append(f"<li style='margin-bottom:4px; color:#e2e8f0;'>{content}</li>")
+        else:
+            if in_list:
+                formatted_chunks.append(f"</{list_type}>")
+                in_list = False
+            clean_p = re.sub(r"^(⚡|🔍|🎯|💡|⚠️|📌)\s*", "", stripped)
+            if clean_p:
+                formatted_chunks.append(f"<p style='margin-bottom:8px; line-height:1.6;'>{clean_p}</p>")
+                
+    if in_list:
+        formatted_chunks.append(f"</{list_type}>")
+        
+    return "".join(formatted_chunks)
+
+
+def get_ai_post_mortem(user_query=None, scrub_minutes=0):
+    """Generates real-time AI post-mortem report using Groq / LLM query engine,
+    falling back to local deterministic analysis if API key is not configured."""
+    conn = None
+    try:
+        conn = get_blackbox_conn()
+        now = time.time()
+        target_time = now + (scrub_minutes * 60)
+        context = build_llm_context(conn, crash_time=target_time)
+        rep = replay(conn, crash_time=target_time, window_minutes=30)
+        
+        groq_key = os.environ.get("GROQ_API_KEY")
+        try:
+            from config import GROQ_API_KEY as CFG_GROQ_KEY
+            if not groq_key:
+                groq_key = CFG_GROQ_KEY
+        except Exception:
+            pass
+            
+        groq_model = os.environ.get("GROQ_MODEL") or getattr(config, "GROQ_MODEL", "llama-3.3-70b-versatile")
+
+        if groq_key and groq_key != "your_groq_api_key_here" and len(groq_key) > 10:
+            prompt = f"Telemetry Context:\n{context}\n\nUser Query: {user_query or 'Provide a short executive post-mortem analysis of recent telemetry anomalies.'}"
+            sys_p = (
+                "You are CogniOS AI, an ultra-fast Linux kernel forensic & telemetry analyst.\n"
+                "Format your response with clean markdown headers:\n"
+                "### Executive Summary\n1-2 sentences\n\n"
+                "### Key Observations\n- Bullet points with bold metrics (**CPU 58%**, **RAM 76.5%**)\n\n"
+                "### Root Cause & Mitigation\n- Precise causal sequence and concrete action step\n"
+            )
+            ai_resp = ask_groq(user_content=prompt, system_prompt=sys_p, model=groq_model, stream=False, api_key=groq_key)
+            if ai_resp:
+                return ai_resp
+
+        # Deterministic local report from replay engine
+        trend_str = rep.get('trend_summary', 'N/A')
+        event_count = len(rep.get('events', []))
+        
+        trend_clean = re.sub(r'(\d+\.\d{2})\d+', r'\1', str(trend_str))
+        trend_parts = [p.strip() for p in trend_clean.split('|') if p.strip()]
+        trend_bullets = "\n".join(
+            f"- **{p.split(':')[0].strip()}**: {p.split(':', 1)[1].strip()}" if ":" in p else f"- {p}"
+            for p in trend_parts
+        )
+        
+        summary = (
+            f"Incident scan detected {event_count} significant event(s) in the 30-minute window."
+            if event_count > 0
+            else "System parameters remained within steady-state dynamic baselines during this window."
+        )
+        
+        obs_block = f"{trend_bullets}\n- **Telemetry Window**: {rep.get('total_rows', 0)} data samples evaluated\n- **Anomaly Threshold**: Dynamic Z-score active (σ > 2.0)"
+        
+        return f"""### Executive Summary
+{summary}
+
+### Key Observations
+{obs_block}
+
+### Diagnostic Recommendation
+- Real-time telemetry operating against dynamic statistical baselines.
+- Configure `GROQ_API_KEY` in `.env` to enable live LLM reasoning (Model: `{groq_model}`)."""
+    except Exception:
+        metrics = get_live_system_metrics()
+        return f"""### Executive Summary
+System operating normally with active real-time telemetry streaming.
+
+### Key Observations
+- **CPU Load**: {metrics['cpu_pct']}% (Load Avg: {metrics['load_avg1']})
+- **Memory Footprint**: {metrics['memory_pct']}% ({metrics['memory_used_gb']}GB / {metrics['memory_total_gb']}GB)
+- **Active Threads**: {metrics['running_procs']} running processes
+
+### Recommendations
+- **BlackBox Active**: 30-minute rolling buffer and crash sentinel operational.
+- **Alert Thresholds**: Monitoring memory spikes above 85%."""
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
