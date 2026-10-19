@@ -1,0 +1,142 @@
+
+[2026-10-12T00:59:37.161474]
+══════════════════════════════════════════════════════════════════
+  OS Doctor  ·  Alert #1  ·  Workload: gaming  ·  Severity: CRITICAL
+══════════════════════════════════════════════════════════════════
+  Confidence : 95.0%  (FocusOS: 90.0%, deviation: 100.0%)
+  Top deviation : 25.6111 IQR  (cap: 5.0 IQR = 100%)
+
+  Root cause
+  ────────────────────────────────────────────────────────────
+  CPU usage (%) deviated significantly during gaming.
+
+  What happened
+  ────────────────────────────────────────────────────────────
+  Groq LLM was unavailable, but telemetry indicates an anomaly driven by this metric.
+
+  Top 3 deviated features (vs gaming baseline)
+  ────────────────────────────────────────────────────────────
+  Feature                                        Measured    Baseline  Deviation (IQR)  Direction
+  ───────────────────────────────────────────────────────────────────────────────────────────────
+  [CPU          ]  CPU usage (%)                                      95.0         2.8          25.6111  above baseline
+  [MEMORY       ]  RAM usage (%)                                      80.0        71.5           3.6957  above baseline
+  [IO           ]  Disk write throughput (MB/s)                        0.0      0.0066           0.6600  below baseline
+
+  Top CPU processes at anomaly time
+  Name                       PID     PPID  Status          CPU peak
+  ─────────────────────────────────────────────────────────────────
+  python                    1234     None  None               95.0%
+
+  Top RAM processes at anomaly time
+  (no data)
+
+  Recommendations
+  ────────────────────────────────────────────────────────────
+  1. Check Activity Monitor for high resource consumers.
+══════════════════════════════════════════════════════════════════
+
+[2026-10-12T00:59:46.741336]
+══════════════════════════════════════════════════════════════════
+  OS Doctor  ·  Alert #2  ·  Workload: gaming  ·  Severity: CRITICAL
+══════════════════════════════════════════════════════════════════
+  Confidence : 95.0%  (FocusOS: 90.0%, deviation: 100.0%)
+  Top deviation : 25.6111 IQR  (cap: 5.0 IQR = 100%)
+
+  Root cause
+  ────────────────────────────────────────────────────────────
+  CPU usage (%) deviated significantly during gaming.
+
+  What happened
+  ────────────────────────────────────────────────────────────
+  Groq LLM was unavailable, but telemetry indicates an anomaly driven by this metric.
+
+  Top 3 deviated features (vs gaming baseline)
+  ────────────────────────────────────────────────────────────
+  Feature                                        Measured    Baseline  Deviation (IQR)  Direction
+  ───────────────────────────────────────────────────────────────────────────────────────────────
+  [CPU          ]  CPU usage (%)                                      95.0         2.8          25.6111  above baseline
+  [MEMORY       ]  RAM usage (%)                                      80.0        71.5           3.6957  above baseline
+  [IO           ]  Disk write throughput (MB/s)                        0.0      0.0066           0.6600  below baseline
+
+  Top CPU processes at anomaly time
+  Name                       PID     PPID  Status          CPU peak
+  ─────────────────────────────────────────────────────────────────
+  python                    1234     None  None               95.0%
+
+  Top RAM processes at anomaly time
+  (no data)
+
+  Recommendations
+  ────────────────────────────────────────────────────────────
+  1. Check Activity Monitor for high resource consumers.
+══════════════════════════════════════════════════════════════════
+
+[2026-10-12T01:01:12.925169]
+══════════════════════════════════════════════════════════════════
+  OS Doctor  ·  Alert #3  ·  Workload: gaming  ·  Severity: CRITICAL
+══════════════════════════════════════════════════════════════════
+  Confidence : 96.0%  (FocusOS: 92.0%, deviation: 100.0%)
+  Top deviation : 26.4444 IQR  (cap: 5.0 IQR = 100%)
+
+  ⚡ Served from Cache (Repeated Issue)
+
+  Root cause
+  ────────────────────────────────────────────────────────────
+  CPU usage (%) deviated significantly during gaming.
+
+  What happened
+  ────────────────────────────────────────────────────────────
+  Groq LLM was unavailable, but telemetry indicates an anomaly driven by this metric.
+
+  Top 3 deviated features (vs gaming baseline)
+  ────────────────────────────────────────────────────────────
+  Feature                                        Measured    Baseline  Deviation (IQR)  Direction
+  ───────────────────────────────────────────────────────────────────────────────────────────────
+  [CPU          ]  CPU usage (%)                                      98.0         2.8          26.4444  above baseline
+  [MEMORY       ]  RAM usage (%)                                      85.0        71.5           5.8696  above baseline
+  [IO           ]  Disk write throughput (MB/s)                        0.0      0.0066           0.6600  below baseline
+
+  Top CPU processes at anomaly time
+  Name                       PID     PPID  Status          CPU peak
+  ─────────────────────────────────────────────────────────────────
+  python                    1234     None  None               98.0%
+
+  Top RAM processes at anomaly time
+  (no data)
+
+  Recommendations
+  ────────────────────────────────────────────────────────────
+  1. Check Activity Monitor for high resource consumers.
+══════════════════════════════════════════════════════════════════
+
+[2026-10-12T02:57:59.790342]
+══════════════════════════════════════════════════════════════════
+  OS Doctor  ·  Alert #6  ·  Workload: gaming  ·  Severity: CRITICAL
+══════════════════════════════════════════════════════════════════
+  Confidence : 97.5%  (FocusOS: 95.0%, deviation: 100.0%)
+  Top deviation : 26.7222 IQR  (cap: 5.0 IQR = 100%)
+
+  Root cause
+  ────────────────────────────────────────────────────────────
+  CPU usage (%) deviated significantly during gaming.
+
+  What happened
+  ────────────────────────────────────────────────────────────
+  Groq LLM was unavailable, but telemetry indicates an anomaly driven by this metric.
+
+  Top 3 deviated features (vs gaming baseline)
+  ────────────────────────────────────────────────────────────
+  Feature                                        Measured    Baseline  Deviation (IQR)  Direction
+  ───────────────────────────────────────────────────────────────────────────────────────────────
+  [CPU          ]  CPU usage (%)                                      99.0         2.8          26.7222  above baseline
+  [MEMORY       ]  RAM usage (%)                                      85.0        71.5           5.8696  above baseline
+  [IO           ]  Disk write throughput (MB/s)                        0.0      0.0066           0.6600  below baseline
+
+  Top CPU processes at anomaly time
+  Name                       PID     PPID  Status          CPU peak
+  ─────────────────────────────────────────────────────────────────
+  python                    1234     None  None               99.0%
+
+  Top RAM processes at anomaly time
+  (no data)
+══════════════════════════════════════════════════════════════════
