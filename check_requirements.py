@@ -15,6 +15,7 @@ PACKAGE_TO_MODULE_MAP = {
     "scikit-learn": "sklearn",
     "python-dotenv": "dotenv",
     "streamlit-autorefresh": "streamlit_autorefresh",
+    "pyside6": "PySide6",
     "umap-learn": "umap",
     "google-genai": "google.genai",
     "pyyaml": "yaml",

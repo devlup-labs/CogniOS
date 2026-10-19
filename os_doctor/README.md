@@ -62,19 +62,13 @@ Isolation Forest Predictor (i_forest_predict.py)
 
 ```text
 os_doctor/
-├── __init__.py               # Marks directory as a Python package
-├── alerts.db                 # SQLite database storing raw alerts and LLM diagnoses
-├── alerts_db.py              # WAL-mode database interface & schema definitions
-├── featuring.py              # Feature engineering, scaling, and rolling window extraction
-├── i_forest_train.py         # Isolation Forest model training script
-├── i_forest_predict.py       # Live anomaly detection execution loop (Threshold: -0.1)
-├── iso_forest_model.joblib   # Persisted trained Isolation Forest model binary
-├── llm_layer.py              # LLM daemon engine (Ollama gemma2:2b + Gemini fallback)
-├── os_doctor_db.py         # Database query & helper functions
-└── README.md                 # Project documentation and guide
+│── _init_.py             # Marks the directory as a Python package
+│── featuring.py          # Feature engineering and preprocessing
+│── i_forest.py           # Isolation Forest model implementation
+│── groq_diagnosis.py     # LLM integration, baseline selection, and response generation
+│── streamlit.py          # Streamlit web application
+│── README.md             # Project overview and setup guide
 ```
-
----
 
 # `featuring.py`
 
@@ -104,8 +98,9 @@ This module bridges transactional database storage and in-memory multi-dimension
 
 ### 3. `build_unified_vectors`
 
-- **Description:** Combines system and process vectors into a single feature matrix formatted for the Isolation Forest model while preserving raw process metadata for the LLM layer.
-- **Input:** `sys_vec, ram_vec, cpu_vec` (pd.DataFrame)
+- **Description:** Combines the three individual vectors recieved above and handles what to feed into i_forest.py and what to feed to groq_diagnosis.
+- **Input:**
+  - `sys_vec, ram_vec, cpu_vec` (pd.DataFrame): Raw process telemetry DataFrame containing compressed or stringified JSON arrays.
 - **Output:**
   - `i_forest_features_df` (pd.DataFrame): Formatted DataFrame passed into Isolation Forest predictor.
   - `metadata_payload` (dict): Process metadata (`pid`, `name`, `ppid`, `user`).
@@ -114,103 +109,52 @@ This module bridges transactional database storage and in-memory multi-dimension
 
 ### 4. `get_inference_payload`
 
-- **Description:** Orchestrates extraction functions in sequence and enforces database buffer safety checks before feature calculation.
-- **Input:** `DB_PATH` (str)
-- **Output:** `i_forest_features_df, metadata_payload`
+- **Description:** It ties the entire file together, it handles safety buffer checks (ensuring we have enough database entries before calculating metrics) and orchestrates Functions 1, 2, and 3 in sequence.
+- **Input:**
+  - `DB_PATH` (str): Absolute path to the centralized SQLite database.
+- **Output:**
+  - `i_forest_features_df, metadata_payload`: smoothly executes featuring.py and outputs same as 'build_unified_vectors'
 
 ---
+
+
+# `i_forest_train.py`
+
+**Description:** Handles offline/batch training for OSDoctor's anomaly detection model. It queries historical telemetry datasets from SQLite, trains an unsupervised Isolation Forest model, and serializes the trained artifacts (scaler.joblib and iso_forest_model.joblib) for real-time inference.
+
+## 1. `train_isolation_forest_model()`
+**Description:** Connects to the local SQLite database to fetch the training telemetry dataset, preprocesses and scales feature vectors, fits an Isolation Forest model, and persists the model and scaler artifacts to disk.
+
+- **Inputs:** None (reads directly from os_doctor_train table in os_doctor.db).
+- **Outputs:** None (side-effect function: saves scaler.joblib and iso_forest_model.joblib files to disk).
+
+**Workflow:**
+- Establishes a database engine via sqlalchemy and loads os_doctor_train table into a Pandas DataFrame.
+- Applies explicit column naming matching expected_columns and removes non-feature metadata (id, timestamp).
+- Cleans missing values (dropna()).
+- Standardizes feature vectors using StandardScaler to ensure uniform feature weight distribution.Configures and fits IsolationForest hyperparameters ($n\_estimators=100$, $contamination=0.01$, $max\_samples=256$, $max\_features=7$).
+- Exports scaler.joblib and iso_forest_model.joblib using joblib.dump().
 
 # `i_forest_predict.py`
+**Description:** Implements the real-time inference loop for OSDoctor's anomaly detection engine. It continuously pulls engineered telemetry data from the database, applies feature scaling, evaluates system behavior using the pre-trained Isolation Forest model, and records detected performance anomalies for downstream diagnostic analysis.
 
-This module executes real-time anomaly detection by applying the trained Isolation Forest model to incoming feature vectors.
+## 1. `flag_anomaly()`
+**Description:** Runs an active monitoring loop (pulling every 5 seconds) that loads the saved Isolation Forest model and feature scaler to evaluate system health.
 
----
+- **Inputs:** None (fetches incoming inference payloads dynamically from the SQLite database via get_inference_payload_predict(DB_PATH)).
 
-### 1. `flag_anomaly(DB_PATH)`
+- **Outputs:** None (side-effect function: logs anomaly status to console and appends detected anomaly payloads to the database via write_to_alerts_table()).
 
-- **Description:** Loads `iso_forest_model.joblib` and `scaler.joblib`, standardizes incoming telemetry vectors, evaluates model decision score, and flags anomalies against an explicit decision threshold (`score <= -0.1`).
-- **Threshold Rule:**
-  - `score > -0.1`: System operating normally (no alert).
-  - `score <= -0.1`: Anomaly flagged and written to `alerts.db`.
-- **Output:** Inserts JSON payload into `alerts` table containing:
-  - `raw`: Unscaled human-readable metrics.
-  - `scaled`: Scaled feature array.
-  - `anomaly_score`: Float decision score.
+**Workflow:**
 
----
+- Loads iso_forest_model.joblib and scaler.joblib into memory.
 
-# `alerts_db.py`
+- Fetches incoming raw telemetry feature vectors and process metadata.
 
-Manages database connections, table creation, and transactional writes for `os_doctor/alerts.db` operating in WAL (Write-Ahead Logging) mode for concurrent access.
+- Preprocesses data and scales the feature set while preserving the original raw metrics.
 
----
+- Computes decision scores and checks for anomaly classification (predict == -1).
 
-### Database Schema
+Upon anomaly detection, packages both raw (human-readable) and scaled metric payloads into the alerts table for the LLM explanation layer and dashboard.
 
-1. **`alerts` table**:
-   - `id`: INTEGER PRIMARY KEY AUTOINCREMENT
-   - `timestamp`: DATETIME DEFAULT CURRENT_TIMESTAMP
-   - `metadata`: TEXT (JSON object with PID, process name, command)
-   - `data`: TEXT (JSON object with `raw`, `scaled`, and `anomaly_score`)
-
-2. **`diagnoses` table**:
-   - `id`: INTEGER PRIMARY KEY AUTOINCREMENT
-   - `alert_id`: INTEGER UNIQUE (Foreign Key -> `alerts.id`)
-   - `issue`: TEXT (Summary heading, e.g. "Memory pressure")
-   - `cause`: TEXT (Human-readable root cause explanation)
-   - `severity`: TEXT ("Low", "Medium", "High", "Critical")
-   - `suggested_action`: TEXT (Actionable remediation advice)
-   - `confidence`: REAL (AI confidence rating, 50.0% – 99.0%)
-   - `created_at`: DATETIME DEFAULT CURRENT_TIMESTAMP
-
----
-
-# `llm_layer.py`
-
-Integrates local Ollama (`gemma2:2b`) offline LLM inference with automatic fallback to Google Gemini Cloud API. Explains numerical anomaly alerts in human-understandable English.
-
----
-
-### 1. `call_gemma(prompt, system)`
-
-- **Description:** Tier-1 offline execution via local Ollama (`http://localhost:11434/api/generate` with model `gemma2:2b`). Automatically falls back to Google Gemini Cloud API if Ollama is unreachable.
-
----
-
-### 2. `compute_severity_and_confidence(anomaly_score, data_raw)`
-
-- **Description:** Computes dynamic AI confidence percentage (50% – 99%) based on Isolation Forest score magnitude:
-  $$\text{Confidence} = 50\% + \min(49, \text{abs}(\text{anomaly\_score}) \times 300)$$
-- **Output:** Returns severity string (`"Low"`, `"Medium"`, `"High"`, `"Critical"`) and confidence percentage.
-
----
-
-### 3. `run_llm_daemon()`
-
-- **Description:** Background daemon loop that continuously polls `alerts.db` for unanalyzed alerts, enforces a 5-minute explanation cooldown to prevent LLM spam, calls the LLM engine for structured root-cause explanations, and writes results into `diagnoses` table.
-
----
-
-# Frontend Integration (`dashboard/views/os_doctor_view.py`)
-
-The Streamlit dashboard view consumes `os_doctor` database tables via `dashboard/data_provider.py`.
-
----
-
-### Key UI Components & Data Methods
-
-1. **`get_os_doctor_anomaly_score()`**:
-   Calculates dynamic 0–100 radial gauge score from Isolation Forest `anomaly_score` in `alerts.db`:
-   $$\text{Score} = \min(99, \max(15, \text{int}(\text{abs}(\text{anomaly\_score}) \times 450)))$$
-
-2. **Top Resource Hogs Process Table**:
-   Renders a 5-column table (`PROCESS NAME`, `PID`, `CPU %`, `RAM %`, `STATUS`) sorting active processes by resource impact score (`cpu% + ram% * 1.5`).
-
-3. **`get_os_doctor_diagnoses(limit, severity_filter, search_query)`**:
-   Queries `diagnoses` table joined with `alerts` table to render human-readable LLM explanation cards, dynamic severity badges, confidence ratings, remediation pills, and expandable raw telemetry inspect accordions.
-
-4. **`get_os_doctor_summary_stats()`**:
-   Computes overall KPI stats (`TOTAL DIAGNOSES`, `HIGH / CRITICAL`, `AVG AI CONFIDENCE`, `LATEST ANOMALY`).
-
-5. **Layer 4 Process Drill-Down Panel**:
-   Queries `psutil.Process` for open file descriptors, context switches, CPU user/sys time, and active socket connections for deep kernel-level process inspection.
+# `groq_diagnosis.py`

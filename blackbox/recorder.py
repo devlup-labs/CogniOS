@@ -2,7 +2,7 @@
 import sqlite3
 import threading
 import time
-from config import BLACKBOX_DB_PATH, BLACKBOX_WINDOW_SEC
+from config import BLACKBOX_DB_PATH, BLACKBOX_WINDOW_SEC , BLACKBOX_PRUNE_INTERVAL_SEC
 from pathlib import Path
 
 _conn_locks: dict = {}
@@ -119,11 +119,33 @@ def prune_old_records(conn: sqlite3.Connection) -> None:
     with lock if lock else _noop_ctx():
         _prune_old_records(conn)
         conn.commit()
-
+        
+_last_prune_time = 0.0
 
 def _prune_old_records(conn: sqlite3.Connection, now: float | None = None) -> None:
-    # Delete expired telemetry while the caller holds the connection lock
-    cutoff = (time.time() if now is None else now) - BLACKBOX_WINDOW_SEC
+    global _last_prune_time
+    current_time = time.time() if now is None else now
+
+    # O(1) throttling check using the config constant
+    if current_time - _last_prune_time < BLACKBOX_PRUNE_INTERVAL_SEC:
+        return
+
+    _last_prune_time = current_time
+
+    # Fetch the persistent last_beat from the heartbeat table to survive shutdowns
+    try:
+        cursor = conn.execute("SELECT last_beat FROM blackbox_heartbeat WHERE id = 1")
+        row = cursor.fetchone()
+        latest_timestamp = row[0] if row and row[0] is not None else current_time
+    except sqlite3.OperationalError:
+        # Fallback if the heartbeat table hasn't been initialized yet
+        latest_timestamp = current_time
+
+    # Use min() so that during an offline gap, we anchor to the shutdown time 
+    # rather than jumping forward to the current live clock and deleting history.
+    base_time = min(current_time, latest_timestamp)
+    cutoff = base_time - BLACKBOX_WINDOW_SEC
+
     conn.execute("DELETE FROM blackbox_telemetry WHERE timestamp < ?", (cutoff,))
 
 
