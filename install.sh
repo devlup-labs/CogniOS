@@ -57,14 +57,13 @@ stop_user_daemon() {
 install_packages() {
     local manager="$1"
     shift
-    local package
-    for package in "$@"; do
-        if [[ "$manager" == dnf ]]; then
-            dnf install -y "$package" || warn "Could not install package: $package"
-        else
-            apt-get install -y --no-install-recommends "$package" || warn "Could not install package: $package"
-        fi
-    done
+    if [[ "$manager" == dnf ]]; then
+        dnf install -y --skip-unavailable "$@" 2>/dev/null || dnf install -y "$@" || warn "Some system packages could not be installed."
+    elif [[ "$manager" == pacman ]]; then
+        pacman -S --needed --noconfirm "$@" || warn "Some system packages could not be installed."
+    else
+        apt-get install -y --no-install-recommends "$@" || warn "Some system packages could not be installed."
+    fi
 }
 
 TEMP_DIR=""
@@ -102,13 +101,18 @@ if command -v dnf >/dev/null 2>&1; then
         python3 python3-pip libnotify rsync xcb-util-cursor mesa-libGL nss \
         libxkbcommon-x11 xcb-util-wm xcb-util-image xcb-util-keysyms xcb-util-renderutil \
         curl tar
+elif command -v pacman >/dev/null 2>&1; then
+    install_packages pacman \
+        python python-pip libnotify rsync xcb-util-cursor mesa nss \
+        libxkbcommon-x11 xcb-util-wm xcb-util-image xcb-util-keysyms xcb-util-renderutil \
+        curl tar
 elif command -v apt-get >/dev/null 2>&1; then
     install_packages apt-get \
         python3 python3-venv python3-pip libnotify-bin rsync libxcb-cursor0 libgl1 libnss3 \
         libxkbcommon-x11-0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
         libxcb-render-util0 libxcb-shape0 libxcb-xkb1 curl tar
 else
-    warn "Neither dnf nor apt-get was found; continuing without installing system packages."
+    warn "No supported package manager (dnf/apt/pacman) found; continuing without installing system packages."
 fi
 
 if [[ -f "$TARGET_HOME/.config/systemd/user/cognios.service" ]]; then
@@ -133,21 +137,30 @@ rsync -a --delete \
     --exclude='*.db-shm' \
     --exclude='*.db-wal' \
     --exclude='*.log' \
+    --exclude='dist' \
     "$SOURCE_DIR/" /opt/cognios/
 
 if [[ -f "$SOURCE_DIR/.env" && ! -e /opt/cognios/.env ]]; then
     cp -p "$SOURCE_DIR/.env" /opt/cognios/.env
 fi
 
-chown -R "$TARGET_USER:$TARGET_GROUP" /opt/cognios
-if [[ ! -x /opt/cognios/.venv/bin/python ]]; then
-    as_user python3 -m venv /opt/cognios/.venv
-fi
-as_user /opt/cognios/.venv/bin/python -m pip install -r /opt/cognios/requirements.txt
-
+# Always install the CLI wrapper first so 'cognios' is available in PATH
 cat > /usr/local/bin/cognios <<'COMMAND'
 #!/usr/bin/env bash
 set -euo pipefail
+APP_DIR="/opt/cognios"
+VENV_PYTHON="$APP_DIR/.venv/bin/python"
+
+ensure_deps() {
+    if [[ ! -x "$VENV_PYTHON" ]]; then
+        python3 -m venv "$APP_DIR/.venv"
+    fi
+    if ! "$VENV_PYTHON" -c "import psutil, streamlit" >/dev/null 2>&1; then
+        echo "CogniOS: Installing Python dependencies into $APP_DIR/.venv ..."
+        "$VENV_PYTHON" -m pip install -r "$APP_DIR/requirements.txt"
+    fi
+}
+
 usage() {
     printf '%s\n' \
         'Usage: cognios [--ui desktop|browser]' \
@@ -155,14 +168,17 @@ usage() {
 }
 case "${1:-}" in
     "")
-        cd /opt/cognios
-        exec .venv/bin/python main.py
+        ensure_deps
+        cd "$APP_DIR"
+        exec "$VENV_PYTHON" main.py
         ;;
     --ui)
-        cd /opt/cognios
-        exec .venv/bin/python main.py "$@"
+        ensure_deps
+        cd "$APP_DIR"
+        exec "$VENV_PYTHON" main.py "$@"
         ;;
     start|stop|restart|status)
+        ensure_deps
         exec systemctl --user "$1" cognios.service
         ;;
     update|upgrade)
@@ -189,6 +205,30 @@ case "${1:-}" in
 esac
 COMMAND
 chmod 755 /usr/local/bin/cognios
+ln -sf /usr/local/bin/cognios /usr/bin/cognios
+
+chown -R "$TARGET_USER:$TARGET_GROUP" /opt/cognios
+if [[ ! -x /opt/cognios/.venv/bin/python ]]; then
+    as_user python3 -m venv /opt/cognios/.venv
+fi
+
+if ! as_user /opt/cognios/.venv/bin/python -m pip install -r /opt/cognios/requirements.txt; then
+    warn "Online pip install failed (no internet or DNS unreachable). Trying local pip cache / source venv..."
+    if [[ -d "$TARGET_HOME/.cache/pip" ]]; then
+        as_user /opt/cognios/.venv/bin/python -m pip install --no-index --find-links="$TARGET_HOME/.cache/pip" -r /opt/cognios/requirements.txt 2>/dev/null || true
+    fi
+    if ! as_user /opt/cognios/.venv/bin/python -c "import psutil, streamlit" >/dev/null 2>&1; then
+        SRC_SITE="$(find "$SOURCE_DIR/.venv/lib" -maxdepth 2 -name site-packages -type d 2>/dev/null | head -n 1 || true)"
+        DST_SITE="$(find /opt/cognios/.venv/lib -maxdepth 2 -name site-packages -type d 2>/dev/null | head -n 1 || true)"
+        if [[ -n "$SRC_SITE" && -n "$DST_SITE" ]]; then
+            say "Copying pre-installed Python packages from $SOURCE_DIR/.venv ..."
+            cp -a "$SRC_SITE/." "$DST_SITE/"
+            chown -R "$TARGET_USER:$TARGET_GROUP" /opt/cognios/.venv
+        else
+            warn "Python packages will be installed automatically on first run when internet is connected."
+        fi
+    fi
+fi
 
 mkdir -p /usr/share/applications /usr/share/icons/hicolor/256x256/apps
 if [[ -f /opt/cognios/assets/image.png ]]; then
