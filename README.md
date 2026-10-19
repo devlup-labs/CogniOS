@@ -33,43 +33,83 @@ Modern operating systems expose vast amounts of telemetry (`/proc/stat`, `/proc/
 
 ## Architecture
 
+```text
++-----------------------------------------------------------------------+
+|                          LINUX SYSTEM LAYER                           |
+|            /proc Filesystem (stat, vmstat, PSI)  |  psutil            |
++------------------------------------+----------------------------------+
+                                     | 1s Telemetry Stream
+                                     v
++-----------------------------------------------------------------------+
+|                       COGNIOS BACKGROUND DAEMON                       |
+|             Layer 1 System Collector  &  Layer 2 Process Collector    |
+|                                    |                                  |
+|                                    v                                  |
+|      SQLite WAL Databases (cognios_telemetry | alerts | blackbox)     |
++-----------+------------------------+------------------------+---------+
+            |                        |                        |
+            v                        v                        v
++-----------------------+  +-----------------------+  +-----------------+
+|    FocusOS Engine     |  |     OS Doctor AI      |  | BlackBox Engine |
+|  XGBoost + Rule Attr  |->|   Workload-Specific   |  |  30m Circular   |
+|  Linux Nice Priority  |  |   Isolation Forests   |  |  Flight Buffer  |
++-----------+-----------+  +-----------+-----------+  +--------+--------+
+            |                          |                       |
+            |                          +-----------+-----------+
+            |                                      |
+            v                                      v
++-----------------------+              +--------------------------------+
+| Desktop Notifications |              |         Groq Cloud LLM         |
+|     (notify-send)     |              |  Root-Cause & Crash Synthesis  |
++-----------------------+              +---------------+----------------+
+                                                       |
+                                                       v
++-----------------------------------------------------------------------+
+|                       UNIFIED COGNIOS DASHBOARD                       |
+|          Streamlit Browser UI  &  Native PySide6 Desktop Shell        |
++-----------------------------------------------------------------------+
+```
+
 ```mermaid
-flowchart TD
-    subgraph OS["Linux System Layer"]
+graph TD
+    subgraph SystemLayer[Linux System Layer]
         PROC["/proc Filesystem & PSI"]
-        PS["psutil Process & Hardware Metrics"]
+        PS["psutil Metrics"]
     end
 
-    subgraph Core["CogniOS Background Daemon"]
+    subgraph DaemonLayer[CogniOS Background Daemon]
         COL["Telemetry Collectors (Layer 1 & Layer 2)"]
-        DB[("SQLite WAL Databases\n(Telemetry · Alerts · BlackBox)")]
+        DB[("SQLite WAL Databases")]
     end
 
-    subgraph Modules["Intelligent Engines"]
-        FO["FocusOS Engine\n(XGBoost Classifier & Nice Optimizer)"]
-        OD["OS Doctor AI\n(Isolation Forest Anomaly Detector)"]
-        BB["BlackBox Recorder\n(30m Rolling Buffer & Crash Replay)"]
+    subgraph EngineLayer[Intelligent Engines]
+        FO["FocusOS Engine (XGBoost & Nice Optimizer)"]
+        OD["OS Doctor AI (Isolation Forest Detector)"]
+        BB["BlackBox Recorder (30m Rolling Buffer)"]
     end
 
-    subgraph AI["AI & Alerting"]
-        GROQ["Groq LLM API\n(Root-Cause & Forensic Synthesis)"]
-        NOTIF["Desktop Notifications\n(notify-send)"]
+    subgraph AILayer[AI & Alerting]
+        GROQ["Groq LLM API (Root-Cause & Forensic Synthesis)"]
+        NOTIF["Desktop Notifications (notify-send)"]
     end
 
-    subgraph UI["User Interface"]
-        DASH["Unified Dashboard\n(Streamlit Browser & PySide6 Desktop App)"]
+    subgraph UILayer[User Interface]
+        DASH["Unified Dashboard (Browser & PySide6 Desktop)"]
     end
 
-    PROC & PS --> COL
-    COL -->|1s Live Stream| DB
+    PROC --> COL
+    PS --> COL
+    COL --> DB
 
-    DB <--> FO
-    DB <--> OD
-    DB <--> BB
+    DB --> FO
+    DB --> OD
+    DB --> BB
 
-    FO -->|Syncs Active Workload| OD
-    OD & BB <-->|AI Diagnosis| GROQ
-    FO & OD -->|Alerts| NOTIF
+    FO --> OD
+    OD --> GROQ
+    BB --> GROQ
+    FO --> NOTIF
+    OD --> NOTIF
 
     DB --> DASH
     GROQ --> DASH
