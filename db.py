@@ -1,1 +1,377 @@
 """Shared database schema and read/write interface."""
+import json
+import sqlite3
+import time
+from config import DB_PATH
+
+
+def _harden_connection(conn):
+    """Best-effort per-connection pragmas. journal_mode is a one-time, whole-file
+    switch — see ensure_wal_mode() for the race-free way to enable it up front."""
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+def ensure_wal_mode(db_path=DB_PATH):
+    """Switch the DB file to WAL mode once, via a single connection, before any
+    concurrent writers open their own connections. Doing this per-connection from
+    multiple threads/processes at once races on the initial (non-WAL -> WAL) file
+    header rewrite and can raise 'database is locked' even with busy_timeout set."""
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    try:
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(layer1_sys)")
+        columns = [row[1] for row in cursor.fetchall()]
+        needed = {"num_threads": "INTEGER", "udp_tcp_ratio": "REAL", **LAYER1_NEW_COLUMNS}
+        for col, col_type in needed.items():
+            if col not in columns:
+                cursor.execute(f"ALTER TABLE layer1_sys ADD COLUMN {col} {col_type}")
+        conn.commit()
+    except Exception:
+        pass
+    conn.close()
+
+# layer 2 db code starts here
+
+def create_layer2_connection(db_path=DB_PATH):
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    _harden_connection(conn)
+    return conn
+
+
+def init_layer2_db(conn):
+    """Initializes the unified layer2_proc table for Layer 2 telemetry."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS layer2_proc (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp           REAL    NOT NULL,
+            cpu_1_pid INTEGER, cpu_1_ppid INTEGER, cpu_1_name TEXT, cpu_1_status TEXT, cpu_1_cpu_peak REAL,
+            cpu_2_pid INTEGER, cpu_2_ppid INTEGER, cpu_2_name TEXT, cpu_2_status TEXT, cpu_2_cpu_peak REAL,
+            cpu_3_pid INTEGER, cpu_3_ppid INTEGER, cpu_3_name TEXT, cpu_3_status TEXT, cpu_3_cpu_peak REAL,
+            cpu_4_pid INTEGER, cpu_4_ppid INTEGER, cpu_4_name TEXT, cpu_4_status TEXT, cpu_4_cpu_peak REAL,
+            cpu_5_pid INTEGER, cpu_5_ppid INTEGER, cpu_5_name TEXT, cpu_5_status TEXT, cpu_5_cpu_peak REAL,
+            ram_1_pid INTEGER, ram_1_ppid INTEGER, ram_1_name TEXT, ram_1_status TEXT, ram_1_peak REAL, ram_1_open_fds REAL,
+            ram_2_pid INTEGER, ram_2_ppid INTEGER, ram_2_name TEXT, ram_2_status TEXT, ram_2_peak REAL, ram_2_open_fds REAL,
+            ram_3_pid INTEGER, ram_3_ppid INTEGER, ram_3_name TEXT, ram_3_status TEXT, ram_3_peak REAL, ram_3_open_fds REAL,
+            ram_4_pid INTEGER, ram_4_ppid INTEGER, ram_4_name TEXT, ram_4_status TEXT, ram_4_peak REAL, ram_4_open_fds REAL,
+            ram_5_pid INTEGER, ram_5_ppid INTEGER, ram_5_name TEXT, ram_5_status TEXT, ram_5_peak REAL, ram_5_open_fds REAL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_layer2_proc_timestamp ON layer2_proc (timestamp)")
+    conn.commit()
+
+
+def write_layer2(conn, top_cpu, top_mem):
+    """Store one fixed-width Layer 2 snapshot, padding short process lists."""
+    values = [time.time()]
+    for processes, fields in (
+        (top_cpu, ("pid", "ppid", "name", "status", "cpu_peak")),
+        (top_mem, ("pid", "ppid", "name", "status", "ram_peak", "open_fds")),
+    ):
+        for index in range(5):
+            process = processes[index] if index < len(processes) else {}
+            values.extend(
+                process.get(field, "") if field in {"name", "status"} else process.get(field)
+                for field in fields
+            )
+
+    placeholders = ", ".join("?" for _ in values)
+    conn.execute(f"INSERT INTO layer2_proc VALUES (NULL, {placeholders})", values)
+    conn.commit()
+
+def init_db():
+    """Initializes the unified process_snapshot table for Layer 2 telemetry."""
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS process_snapshot (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp           REAL    NOT NULL,
+                top_cpu_processes   TEXT    NOT NULL,
+                top_ram_processes   TEXT    NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_snapshot_ts
+            ON process_snapshot (timestamp)
+        """)
+        conn.commit()
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def insert_process_snapshot(top_cpu, top_ram):
+    """Writes one unified row per 5-second poll — timestamp + two compact JSON arrays."""
+    row = (
+        time.time(),
+        json.dumps(top_cpu, separators=(',', ':')),
+        json.dumps(top_ram, separators=(',', ':'))
+    )
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn.execute(
+            "INSERT INTO process_snapshot (timestamp, top_cpu_processes, top_ram_processes) VALUES (?, ?, ?)",
+            row
+        )
+        conn.commit()
+    finally:
+        if conn is not None:
+            conn.close()
+
+# layer 2 db code ends here
+
+# layer 1 db code starts here
+
+db_path = DB_PATH
+
+# New raw columns for the OS Doctor 24-feature vector.
+# The names here are ALSO the keys in collect_layer1_metrics()'s dict and the
+# keyword names accepted by write_layer1(), so one list controls all three.
+LAYER1_NEW_COLUMNS = {
+    "nr_running_per_core":             "REAL",     # /proc/stat procs_running / cores
+    "involuntary_context_switch_rate": "REAL",     # switches per second
+    "uninterruptible_d_state_count":   "INTEGER",  # processes in D state
+    "cpu_iowait_percent":              "REAL",     # % of CPU time in iowait
+    "cpu_psi_some_avg10":              "REAL",     # /proc/pressure/cpu
+    "memory_psi_full_avg10":           "REAL",     # /proc/pressure/memory
+    "io_psi_some_avg10":               "REAL",     # /proc/pressure/io
+    "io_psi_full_avg10":               "REAL",     # /proc/pressure/io
+    "direct_reclaim_rate":             "REAL",     # allocstall_* per second
+    "major_page_fault_rate":           "REAL",     # pgmajfault per second
+    "swap_out_rate":                   "REAL",     # MB/s swapped out
+    "io_latency":                      "REAL",     # ms per disk operation
+    "system_open_fds":                 "INTEGER",  # /proc/sys/fs/file-nr
+    "thermal_throttling_events":       "REAL",     # throttle events per second
+    "tcp_retrans_rate":                "REAL",     # TCP retransmits per second
+}
+
+def create_connection(db_path):
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    _harden_connection(conn)
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS layer1_sys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+
+            cpu_usage_percent REAL,
+            cpu_freq REAL,
+            cpu_user_time REAL,
+            cpu_system_time REAL,
+            cpu_idle_time REAL,
+            cpu_iowait_time REAL,
+            cpu_busy_time REAL,
+            cpu_ctx_switches REAL,
+
+            memory_percent REAL,
+            memory_used INTEGER,
+            memory_available INTEGER,
+            memory_cached INTEGER,
+            memory_buffers INTEGER,
+            swap_percent REAL,
+            swap_sin INTEGER,
+            swap_sout INTEGER,
+
+            disk_usage_percent REAL,
+            disk_read_mb_s REAL,
+            disk_write_mb_s REAL,
+            disk_read_time INTEGER,
+            disk_write_time INTEGER,
+
+            net_rate_mb_s REAL,
+            net_bytes_sent INTEGER,
+            net_bytes_recv INTEGER,
+            net_packets_sent INTEGER,
+            net_packets_recv INTEGER,
+            net_errs INTEGER,
+            net_drops INTEGER,
+
+            load_avg_1 REAL,
+            load_avg_5 REAL,
+            load_avg_15 REAL,
+            total_processes INTEGER,
+            running_processes INTEGER,
+            sleeping_processes INTEGER,
+            zombie_processes INTEGER,
+
+            avg_temp REAL,
+            max_temp REAL,
+            battery_percent REAL,
+            process_data TEXT,
+            num_threads INTEGER
+        )
+    ''')
+
+    # CREATE TABLE IF NOT EXISTS does nothing on an existing DB, so add any
+    # missing columns here (num_threads + the OS Doctor columns + udp_tcp_ratio).
+    cursor.execute("PRAGMA table_info(layer1_sys)")
+    columns = [row[1] for row in cursor.fetchall()]
+    needed = {"num_threads": "INTEGER", "udp_tcp_ratio": "REAL", **LAYER1_NEW_COLUMNS}
+    for col, col_type in needed.items():
+        if col not in columns:
+            try:
+                cursor.execute(f"ALTER TABLE layer1_sys ADD COLUMN {col} {col_type}")
+            except sqlite3.OperationalError:
+                pass
+
+    conn.commit()
+    return conn
+
+# Function to write the collected metrics into the database
+
+def write_layer1(conn, timestamp, cpu_usage_percent, cpu_freq, cpu_user_time, cpu_system_time, cpu_idle_time, cpu_iowait_time, cpu_busy_time, cpu_ctx_switches, memory_percent, memory_used, memory_available, memory_cached, memory_buffers, swap_percent, swap_sin, swap_sout, disk_usage_percent, disk_read_mb_s, disk_write_mb_s, disk_read_time, disk_write_time, load_avg_1, load_avg_5, load_avg_15, total_processes, running_processes, sleeping_processes, zombie_processes, avg_temp, max_temp, battery_percent, net_rate_mb_s, net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, net_errs, net_drops, process_data, num_threads, **new_columns):
+    # new_columns: the OS Doctor values + udp_tcp_ratio, passed by name.
+    # Missing ones are stored as NULL. An unknown name is a typo, so fail loudly.
+    _all_extra_columns = {**LAYER1_NEW_COLUMNS, "udp_tcp_ratio": "REAL"}
+    unknown = set(new_columns) - set(_all_extra_columns)
+    if unknown:
+        raise ValueError(f"write_layer1: unknown column(s) {sorted(unknown)}")
+
+    column_names = [
+        "timestamp", "cpu_usage_percent", "cpu_freq", "cpu_user_time", "cpu_system_time",
+        "cpu_idle_time", "cpu_iowait_time", "cpu_busy_time", "cpu_ctx_switches", "memory_percent",
+        "memory_used", "memory_available", "memory_cached", "memory_buffers", "swap_percent",
+        "swap_sin", "swap_sout", "disk_usage_percent", "disk_read_mb_s", "disk_write_mb_s",
+        "disk_read_time", "disk_write_time", "load_avg_1", "load_avg_5", "load_avg_15",
+        "total_processes", "running_processes", "sleeping_processes", "zombie_processes", "avg_temp",
+        "max_temp", "battery_percent", "net_rate_mb_s", "net_bytes_sent", "net_bytes_recv",
+        "net_packets_sent", "net_packets_recv", "net_errs", "net_drops", "process_data",
+        "num_threads",
+    ] + list(_all_extra_columns)
+
+    values = (timestamp,
+          cpu_usage_percent, 
+          cpu_freq, cpu_user_time, 
+          cpu_system_time, 
+          cpu_idle_time, 
+          cpu_iowait_time,
+          cpu_busy_time, 
+          cpu_ctx_switches, 
+          memory_percent, 
+          memory_used, 
+          memory_available, 
+          memory_cached, 
+          memory_buffers, 
+          swap_percent, 
+          swap_sin, 
+          swap_sout,
+          disk_usage_percent,
+          disk_read_mb_s,
+          disk_write_mb_s,
+          disk_read_time,
+          disk_write_time,
+          load_avg_1,
+          load_avg_5,
+          load_avg_15,
+          total_processes,
+          running_processes,
+          sleeping_processes,
+          zombie_processes,
+          avg_temp,
+          max_temp,
+          battery_percent,
+          net_rate_mb_s,
+          net_bytes_sent,
+          net_bytes_recv,
+          net_packets_sent,
+          net_packets_recv,
+          net_errs,
+          net_drops,
+          process_data,
+          num_threads) + tuple(new_columns.get(col) for col in _all_extra_columns)
+
+    placeholders = ", ".join("?" for _ in column_names)
+    cursor = conn.cursor()
+    cursor.execute(
+        f"INSERT INTO layer1_sys ({', '.join(column_names)}) VALUES ({placeholders})",
+        values,
+    )
+    conn.commit()
+
+
+# Rule Engine database functions
+
+def init_workload_events_table(conn):
+    """Initializes the workload_events table for deterministic rule engine telemetry."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS workload_events (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp        REAL    NOT NULL,
+            workload         TEXT    NOT NULL,
+            state            TEXT    NOT NULL,
+            cpu_attribution  REAL,
+            ram_attribution  REAL,
+            workload_score   REAL,
+            system_cpu       REAL,
+            system_memory    REAL,
+            top_process      TEXT,
+            evidence_json    TEXT,
+            persistence      INTEGER,
+            ml_confidence    REAL,
+            ml_workload      TEXT,
+            ml_probabilities TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_workload_events_ts ON workload_events (timestamp)")
+
+    # Ensure backwards compatibility for existing databases by safely adding new columns
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(workload_events)")
+    existing_cols = {c[1] for c in cursor.fetchall()}
+    for col, col_type in [("ml_confidence", "REAL"), ("ml_workload", "TEXT"), ("ml_probabilities", "TEXT")]:
+        if col not in existing_cols:
+            try:
+                conn.execute(f"ALTER TABLE workload_events ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
+    conn.commit()
+
+
+def write_workload_event(conn, timestamp, workload, state, cpu_attribution, ram_attribution, workload_score, system_cpu, system_memory, top_process, evidence_json, persistence, ml_confidence=0.0, ml_workload="IDLE", ml_probabilities="{}"):
+    """Writes a workload evaluation snapshot to workload_events."""
+    conn.execute("""
+        INSERT INTO workload_events (
+            timestamp, workload, state, cpu_attribution, ram_attribution,
+            workload_score, system_cpu, system_memory, top_process, evidence_json, persistence,
+            ml_confidence, ml_workload, ml_probabilities
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (timestamp, workload, state, cpu_attribution, ram_attribution, workload_score, system_cpu, system_memory, top_process, evidence_json, persistence, ml_confidence, ml_workload, ml_probabilities))
+    conn.commit()
+
+
+def init_optimization_events_table(conn):
+    """Initializes the optimization_events table for safe resource attribution actions."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS optimization_events (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp        REAL    NOT NULL,
+            pid              INTEGER,
+            process_name     TEXT,
+            workload         TEXT,
+            action           TEXT,
+            old_value        TEXT,
+            new_value        TEXT,
+            reason           TEXT,
+            success          INTEGER
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_opt_events_ts ON optimization_events (timestamp)")
+    conn.commit()
+
+
+def write_optimization_event(conn, timestamp, pid, process_name, workload, action, old_value, new_value, reason, success):
+    """Writes an optimization action log to optimization_events."""
+    conn.execute("""
+        INSERT INTO optimization_events (
+            timestamp, pid, process_name, workload, action, old_value, new_value, reason, success
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (timestamp, pid, process_name, workload, action, old_value, new_value, reason, int(success)))
+    conn.commit()
+

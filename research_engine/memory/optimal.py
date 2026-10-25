@@ -1,1 +1,0 @@
-"""Optimal page replacement simulation."""
