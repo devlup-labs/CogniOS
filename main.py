@@ -88,8 +88,34 @@ def _daemon_running():
     return False
 
 
+def _ensure_streamlit_theme():
+    """Guarantees that .streamlit/config.toml exists with dark theme configuration."""
+    st_dir = os.path.join(BASE_DIR, ".streamlit")
+    cfg_file = os.path.join(st_dir, "config.toml")
+    theme_cfg = (
+        "[theme]\n"
+        'base = "dark"\n'
+        'primaryColor = "#00f5c4"\n'
+        'backgroundColor = "#070a11"\n'
+        'secondaryBackgroundColor = "#0d121c"\n'
+        'textColor = "#e2e8f0"\n'
+        'font = "sans serif"\n\n'
+        "[server]\n"
+        "headless = true\n"
+        "gatherUsageStats = false\n"
+    )
+    try:
+        if not os.path.exists(cfg_file):
+            os.makedirs(st_dir, exist_ok=True)
+            with open(cfg_file, "w") as f:
+                f.write(theme_cfg)
+    except Exception:
+        pass
+
+
 def main(ui_mode="desktop"):
     _ensure_environment()
+    _ensure_streamlit_theme()
 
     print("\n=======================================================")
     print(" Starting CogniOS System...")
@@ -106,10 +132,24 @@ def main(ui_mode="desktop"):
 
     # 2. Start the existing dashboard so localhost and launcher use one UI.
     dashboard_log = open(dashboard_log_path, 'w')
+    streamlit_cmd = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        dashboard_script,
+        "--server.headless=true",
+        "--theme.base=dark",
+        "--theme.primaryColor=#00f5c4",
+        "--theme.backgroundColor=#070a11",
+        "--theme.secondaryBackgroundColor=#0d121c",
+        "--theme.textColor=#e2e8f0",
+    ]
     dashboard_process = subprocess.Popen(
-        [sys.executable, "-m", "streamlit", "run", dashboard_script, "--server.headless=true"],
+        streamlit_cmd,
         stdout=dashboard_log,
         stderr=dashboard_log,
+        cwd=BASE_DIR,
     )
     print(f"[✔] CogniOS Dashboard started (PID: {dashboard_process.pid})")
 

@@ -75,4 +75,11 @@ cognios_telemetry.db-wal
 blackbox.db-shm
 blackbox.db-wal
 /Evolution of Blackbox
-.streamlit
+.streamlit/*
+!.streamlit/config.toml
+dist/
+*.pkg.tar.zst
+*.rpm
+*.deb
+/packaging
+docs/CORE_SYSTEM_EXPLAINED.md

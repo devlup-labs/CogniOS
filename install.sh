@@ -131,7 +131,6 @@ rsync -a --delete \
     --exclude='.venv' \
     --exclude='.git' \
     --exclude='__pycache__' \
-    --exclude='.streamlit' \
     --exclude='.env' \
     --exclude='*.db' \
     --exclude='*.db-shm' \
@@ -139,6 +138,11 @@ rsync -a --delete \
     --exclude='*.log' \
     --exclude='dist' \
     "$SOURCE_DIR/" /opt/cognios/
+
+if [[ -d "$SOURCE_DIR/.streamlit" ]]; then
+    mkdir -p /opt/cognios/.streamlit
+    cp -a "$SOURCE_DIR/.streamlit/config.toml" /opt/cognios/.streamlit/ 2>/dev/null || true
+fi
 
 if [[ -f "$SOURCE_DIR/.env" && ! -e /opt/cognios/.env ]]; then
     cp -p "$SOURCE_DIR/.env" /opt/cognios/.env

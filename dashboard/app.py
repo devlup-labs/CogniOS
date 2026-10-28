@@ -18,6 +18,32 @@ try:
 except Exception:
     pass
 
+def _ensure_streamlit_theme():
+    """Guarantees that .streamlit/config.toml exists with dark theme configuration."""
+    st_dir = os.path.join(BASE_DIR, ".streamlit")
+    cfg_file = os.path.join(st_dir, "config.toml")
+    theme_cfg = (
+        "[theme]\n"
+        'base = "dark"\n'
+        'primaryColor = "#00f5c4"\n'
+        'backgroundColor = "#070a11"\n'
+        'secondaryBackgroundColor = "#0d121c"\n'
+        'textColor = "#e2e8f0"\n'
+        'font = "sans serif"\n\n'
+        "[server]\n"
+        "headless = true\n"
+        "gatherUsageStats = false\n"
+    )
+    try:
+        if not os.path.exists(cfg_file):
+            os.makedirs(st_dir, exist_ok=True)
+            with open(cfg_file, "w") as f:
+                f.write(theme_cfg)
+    except Exception:
+        pass
+
+_ensure_streamlit_theme()
+
 import streamlit as st
 
 st.set_page_config(
@@ -1320,6 +1346,227 @@ st.markdown("""
         .cognios-metrics-quad {
             grid-template-columns: 1fr !important;
         }
+    }
+
+    /* =========================================================================
+       MODAL DIALOGS (st.dialog / BaseWeb Modal) - FULL DARK CYBERPUNK OVERRIDE
+       Ensures dialogs render consistently across all machines, desktop & web
+       ========================================================================= */
+
+    /* Modal Backdrop / Overlay */
+    div[data-testid="stDialog"],
+    div[role="dialog"][aria-modal="true"],
+    div[data-baseweb="modal"],
+    div[data-baseweb="backdrop"] {
+        background-color: rgba(5, 8, 14, 0.82) !important;
+        backdrop-filter: blur(8px) !important;
+        -webkit-backdrop-filter: blur(8px) !important;
+    }
+
+    /* Modal Main Container / Window Card */
+    div[data-testid="stDialog"] > div,
+    div[data-testid="stDialog"] div[role="dialog"],
+    div[data-baseweb="modal"] > div,
+    div[data-baseweb="modal-body"],
+    div[data-testid="stModal"] {
+        background: linear-gradient(180deg, #0d121c 0%, #070a11 100%) !important;
+        background-color: #070a11 !important;
+        color: #e2e8f0 !important;
+        border: 1px solid rgba(0, 245, 196, 0.35) !important;
+        border-radius: 16px !important;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85), 0 0 35px rgba(0, 245, 196, 0.16) !important;
+    }
+
+    /* Modal Header & Titles */
+    div[data-testid="stDialog"] h1,
+    div[data-testid="stDialog"] h2,
+    div[data-testid="stDialog"] h3,
+    div[data-testid="stDialog"] h4,
+    div[data-testid="stDialog"] [data-testid="stHeadingWithActionElements"] {
+        color: #ffffff !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-weight: 700 !important;
+    }
+
+    div[data-testid="stDialog"] p,
+    div[data-testid="stDialog"] span,
+    div[data-testid="stDialog"] label,
+    div[data-testid="stDialog"] div[data-testid="stMarkdownContainer"] {
+        color: #cbd5e1 !important;
+    }
+
+    /* Close (X) Button */
+    div[data-testid="stDialog"] button[aria-label="Close"],
+    div[role="dialog"] button[aria-label="Close"],
+    div[data-baseweb="modal"] button[aria-label="Close"] {
+        color: #94a3b8 !important;
+        background: rgba(255, 255, 255, 0.04) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 8px !important;
+        transition: all 0.2s ease !important;
+    }
+    div[data-testid="stDialog"] button[aria-label="Close"]:hover,
+    div[role="dialog"] button[aria-label="Close"]:hover {
+        background: rgba(0, 245, 196, 0.15) !important;
+        color: #00f5c4 !important;
+        border-color: rgba(0, 245, 196, 0.4) !important;
+    }
+    div[data-testid="stDialog"] button[aria-label="Close"] svg,
+    div[role="dialog"] button[aria-label="Close"] svg {
+        fill: currentColor !important;
+        color: currentColor !important;
+    }
+
+    /* Tabs inside Dialog */
+    div[data-testid="stDialog"] div[data-baseweb="tab-list"] {
+        background-color: transparent !important;
+        border-bottom: 1px solid #1a273b !important;
+        gap: 8px !important;
+    }
+
+    div[data-testid="stDialog"] button[data-baseweb="tab"] {
+        background: transparent !important;
+        color: #94a3b8 !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-size: 13.5px !important;
+        font-weight: 600 !important;
+        border: none !important;
+        padding: 8px 14px !important;
+        transition: color 0.2s ease !important;
+    }
+
+    div[data-testid="stDialog"] button[data-baseweb="tab"]:hover {
+        color: #00f5c4 !important;
+    }
+
+    div[data-testid="stDialog"] button[data-baseweb="tab"][aria-selected="true"] {
+        color: #00f5c4 !important;
+        font-weight: 700 !important;
+    }
+
+    div[data-testid="stDialog"] div[data-baseweb="tab-highlight"] {
+        background-color: #00f5c4 !important;
+        height: 2px !important;
+    }
+
+    div[data-testid="stDialog"] div[data-baseweb="tab-border"] {
+        background-color: #1a273b !important;
+    }
+
+    /* Sliders inside Dialog (prevent Streamlit red #ff4b4b glitch) */
+    div[data-testid="stDialog"] div[data-testid="stSlider"] div[role="slider"],
+    div[data-testid="stDialog"] div[data-baseweb="slider"] div[role="slider"] {
+        background-color: #00f5c4 !important;
+        border: 2px solid #070a11 !important;
+        box-shadow: 0 0 12px rgba(0, 245, 196, 0.6) !important;
+    }
+
+    /* Filled Track Bar in Sliders */
+    div[data-testid="stDialog"] div[data-baseweb="slider"] div[style*="background-color: rgb(255, 75, 75)"],
+    div[data-testid="stDialog"] div[data-baseweb="slider"] div[style*="#ff4b4b"],
+    div[data-testid="stDialog"] div[data-baseweb="slider"] > div > div:first-child {
+        background-color: #00f5c4 !important;
+        background: #00f5c4 !important;
+    }
+
+    /* Unfilled Track */
+    div[data-testid="stDialog"] div[data-baseweb="slider"] > div {
+        background-color: #151e2d !important;
+    }
+
+    /* Slider Value Bubble / Text */
+    div[data-testid="stDialog"] div[data-testid="stSlider"] div[data-testid="stThumbValue"],
+    div[data-testid="stDialog"] div[data-testid="stSlider"] [data-testid="stThumbValue"] {
+        color: #00f5c4 !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-weight: 700 !important;
+    }
+
+    /* Slider Min/Max Tick Labels */
+    div[data-testid="stDialog"] div[data-testid="stSlider"] div[data-testid="stTickBarMin"],
+    div[data-testid="stDialog"] div[data-testid="stSlider"] div[data-testid="stTickBarMax"] {
+        color: #64748b !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 11px !important;
+    }
+
+    /* Number Inputs, Text Inputs & Select Boxes inside Dialog */
+    div[data-testid="stDialog"] div[data-baseweb="input"],
+    div[data-testid="stDialog"] div[data-baseweb="base-input"],
+    div[data-testid="stDialog"] div[data-baseweb="select"] > div {
+        background-color: #0e1522 !important;
+        border: 1px solid #1a273b !important;
+        border-radius: 8px !important;
+        color: #ffffff !important;
+    }
+
+    div[data-testid="stDialog"] div[data-baseweb="input"]:focus-within,
+    div[data-testid="stDialog"] div[data-baseweb="base-input"]:focus-within,
+    div[data-testid="stDialog"] div[data-baseweb="select"] > div:focus-within {
+        border-color: #00f5c4 !important;
+        box-shadow: 0 0 10px rgba(0, 245, 196, 0.25) !important;
+    }
+
+    div[data-testid="stDialog"] input {
+        background-color: transparent !important;
+        color: #ffffff !important;
+        font-family: 'JetBrains Mono', monospace !important;
+    }
+
+    /* Number Input Increment/Decrement Buttons */
+    div[data-testid="stDialog"] div[data-testid="stNumberInput"] button,
+    div[data-testid="stDialog"] button[data-testid="stNumberInputStepUp"],
+    div[data-testid="stDialog"] button[data-testid="stNumberInputStepDown"] {
+        background-color: #141c2b !important;
+        color: #00f5c4 !important;
+        border: 1px solid #1a273b !important;
+        border-radius: 6px !important;
+        transition: all 0.2s ease !important;
+    }
+
+    div[data-testid="stDialog"] div[data-testid="stNumberInput"] button:hover,
+    div[data-testid="stDialog"] button[data-testid="stNumberInputStepUp"]:hover,
+    div[data-testid="stDialog"] button[data-testid="stNumberInputStepDown"]:hover {
+        background-color: #1e293b !important;
+        color: #38bdf8 !important;
+        border-color: #00f5c4 !important;
+    }
+
+    /* Select Dropdown Menus */
+    div[data-baseweb="popover"],
+    div[data-baseweb="menu"],
+    ul[role="listbox"] {
+        background-color: #0d121c !important;
+        border: 1px solid #1a273b !important;
+        border-radius: 8px !important;
+        color: #ffffff !important;
+    }
+
+    li[role="option"] {
+        background-color: #0d121c !important;
+        color: #cbd5e1 !important;
+    }
+
+    li[role="option"]:hover,
+    li[role="option"][aria-selected="true"] {
+        background-color: #141f32 !important;
+        color: #00f5c4 !important;
+    }
+
+    /* Code Blocks inside Dialog */
+    div[data-testid="stDialog"] pre,
+    div[data-testid="stDialog"] code {
+        background-color: #060a12 !important;
+        color: #38bdf8 !important;
+        border: 1px solid #1a273b !important;
+        border-radius: 8px !important;
+        font-family: 'JetBrains Mono', monospace !important;
+    }
+
+    /* Tooltip icons */
+    div[data-testid="stDialog"] div[data-testid="stTooltipIcon"] svg {
+        fill: #64748b !important;
+        color: #64748b !important;
     }
 </style>
 """, unsafe_allow_html=True)
