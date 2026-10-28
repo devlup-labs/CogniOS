@@ -5,18 +5,44 @@ import hashlib
 import sqlite3
 from typing import Any, Dict, Optional
 
-from google import genai
-from google.genai import types
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None
+
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    genai = None
+    types = None
 
 from os_doctor.alerts_db import create_connection, ensure_wal_mode, init_alerts_db
+import config
 from config import ALERTS_DB_PATH, ALERTS_TABLE_NAME
 
 from dotenv import load_dotenv
 load_dotenv()
 
+try:
+    from notifier import notify, notify_critical
+except ImportError:
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from notifier import notify, notify_critical
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
+
+GROQ_API_KEY = (
+    os.environ.get("GROQ_API_KEY")
+    or getattr(config, "GROQ_API_KEY", "")
+)
+GROQ_MODEL = (
+    os.environ.get("GROQ_MODEL")
+    or getattr(config, "GROQ_MODEL", "llama-3.3-70b-versatile")
+)
 
 GEMMA_API_KEY = (
     os.environ.get("GEMMA_API_KEY")
@@ -27,7 +53,7 @@ GEMMA_MODEL = os.environ.get("GEMMA_MODEL", "gemma-4-26b-a4b-it")
 
 REQUEST_TIMEOUT_MS = 15_000        # fail fast rather than block the daemon loop
 POLL_INTERVAL_S = 10
-TOP_N_METRICS = 4                  # extra deviant metrics given to Gemma for context
+TOP_N_METRICS = 4                  # extra deviant metrics given to Groq for context
 COOLDOWN_SECONDS = 300             # skip re-calling the API for a near-identical anomaly
 
 DIAGNOSES_TABLE_NAME = "diagnoses"
@@ -264,18 +290,98 @@ Respond with the JSON object described in your instructions."""
 
 
 # ---------------------------------------------------------------------------
-# Gemma call (cloud, via Gemini API) — swapped from Ollama
+# LLM Diagnosis: Groq API (Primary) with multi-model fallback & optional Gemini
 # ---------------------------------------------------------------------------
 
 import requests
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
-def call_gemma(user_prompt: str, model: str = GEMMA_MODEL, retries: int = 2) -> Optional[str]:
+def call_llm(user_prompt: str, retries: int = 2) -> Optional[str]:
     """
-    Calls local Ollama (gemma2:2b) first, falling back to hosted Gemini API if needed.
+    Calls Groq API as primary engine, with fallback models and optional Gemini/Ollama.
     """
-    # 1. Try local Ollama server (no API key required)
+    # 1. Primary: Groq API
+    effective_groq_key = (
+        os.environ.get("GROQ_API_KEY")
+        or getattr(config, "GROQ_API_KEY", "")
+    )
+    if effective_groq_key and effective_groq_key != "your_groq_api_key_here" and Groq is not None:
+        configured_model = (
+            os.environ.get("GROQ_MODEL")
+            or getattr(config, "GROQ_MODEL", "llama-3.3-70b-versatile")
+        )
+        models_to_try = [configured_model]
+        for fallback in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
+            if fallback not in models_to_try:
+                models_to_try.append(fallback)
+
+        try:
+            client = Groq(api_key=effective_groq_key, timeout=15.0)
+            for m in models_to_try:
+                try:
+                    completion = client.chat.completions.create(
+                        model=m,
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        temperature=0.2,
+                        max_tokens=300,
+                        response_format={"type": "json_object"},
+                    )
+                    text = completion.choices[0].message.content
+                    if text and text.strip():
+                        return text.strip()
+                except Exception as exc:
+                    err_s = str(exc).lower()
+                    if "response_format" in err_s or "json_object" in err_s:
+                        try:
+                            completion = client.chat.completions.create(
+                                model=m,
+                                messages=[
+                                    {"role": "system", "content": SYSTEM_PROMPT},
+                                    {"role": "user", "content": user_prompt},
+                                ],
+                                temperature=0.2,
+                                max_tokens=300,
+                            )
+                            text = completion.choices[0].message.content
+                            if text and text.strip():
+                                return text.strip()
+                        except Exception:
+                            pass
+                    print(f"[llm_layer] Groq attempt with '{m}' failed: {exc}")
+                    continue
+        except Exception as exc:
+            print(f"[llm_layer] Groq initialization error: {exc}")
+
+    # 2. Secondary fallback: Gemini API if GEMMA_API_KEY is configured
+    if GEMMA_API_KEY and genai is not None:
+        last_error = None
+        for attempt in range(retries + 1):
+            try:
+                client = genai.Client(
+                    api_key=GEMMA_API_KEY,
+                    http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS),
+                )
+                response = client.models.generate_content(
+                    model=GEMMA_MODEL,
+                    contents=user_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        response_mime_type="application/json",
+                        temperature=0.2,
+                        max_output_tokens=200,
+                    ),
+                )
+                return getattr(response, "text", None)
+            except Exception as e:
+                last_error = e
+                time.sleep(1.5 * (attempt + 1))
+        print(f"[llm_layer] Gemini fallback failed: {last_error}")
+
+    # 3. Tertiary fallback: local Ollama server if running
     try:
         payload = {
             "model": "gemma2:2b",
@@ -284,7 +390,7 @@ def call_gemma(user_prompt: str, model: str = GEMMA_MODEL, retries: int = 2) -> 
             "stream": False,
             "options": {"temperature": 0.2},
         }
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=15)
+        resp = requests.post(OLLAMA_URL, json=payload, timeout=5)
         if resp.status_code == 200:
             text = resp.json().get("response", "")
             if text:
@@ -292,41 +398,18 @@ def call_gemma(user_prompt: str, model: str = GEMMA_MODEL, retries: int = 2) -> 
     except Exception:
         pass
 
-    # 2. Fallback to Gemini API if GEMMA_API_KEY is configured
-    if not GEMMA_API_KEY:
-        print("[llm_layer] Local Ollama call failed and GEMMA_API_KEY is not set.")
-        return None
-
-    last_error = None
-    for attempt in range(retries + 1):
-        try:
-            client = genai.Client(
-                api_key=GEMMA_API_KEY,
-                http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS),
-            )
-            response = client.models.generate_content(
-                model=model,
-                contents=user_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    response_mime_type="application/json",
-                    temperature=0.2,
-                    max_output_tokens=200,
-                ),
-            )
-            return getattr(response, "text", None)
-        except Exception as e:
-            last_error = e
-            time.sleep(1.5 * (attempt + 1))
-
-    print(f"[llm_layer] Gemma call failed after {retries + 1} attempts: {last_error}")
     return None
+
+# Alias for backward compatibility
+call_gemma = call_llm
 
 
 def parse_llm_response(raw_text: Optional[str]) -> dict:
     if not raw_text or not raw_text.strip():
-        return {"cause": "Anomaly detected, but the explanation model returned no output.",
-                "suggested_action": "Check your GEMMA_API_KEY and network connection."}
+        return {
+            "cause": "Anomaly detected, but the explanation model returned no output.",
+            "suggested_action": "Check your GROQ_API_KEY and network connection.",
+        }
 
     cleaned = raw_text.strip()
     if cleaned.startswith("```"):
@@ -360,7 +443,21 @@ def init_diagnoses_table(conn):
             FOREIGN KEY (alert_id) REFERENCES {ALERTS_TABLE_NAME}(id)
         )
     ''')
+    cursor = conn.cursor()
+    cursor.execute(f"PRAGMA table_info({DIAGNOSES_TABLE_NAME})")
+    cols = {row[1] for row in cursor.fetchall()}
+    for col, col_type in [("issue", "TEXT"), ("cause", "TEXT"), ("severity", "TEXT"),
+                          ("suggested_action", "TEXT"), ("confidence", "REAL"),
+                          ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP")]:
+        if col not in cols:
+            try:
+                conn.execute(f"ALTER TABLE {DIAGNOSES_TABLE_NAME} ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
     conn.commit()
+
+
+_last_doctor_alert_time = 0.0
 
 
 def write_diagnosis(conn, alert_id, diagnosis):
@@ -378,6 +475,30 @@ def write_diagnosis(conn, alert_id, diagnosis):
         ),
     )
     conn.commit()
+
+    try:
+        global _last_doctor_alert_time
+        sev = str(diagnosis.get("severity") or "Normal").capitalize()
+        # Only notify desktop for Critical and High severity anomalies to prevent alert spam
+        if sev not in ("Critical", "High"):
+            return
+
+        now = time.monotonic()
+        cooldown = 60 if sev == "Critical" else 300
+        if now - _last_doctor_alert_time < cooldown:
+            return
+
+        _last_doctor_alert_time = now
+        issue = diagnosis.get("issue") or "Anomaly Diagnosed"
+        cause = diagnosis.get("cause") or ""
+        msg = f"{issue}: {cause}" if cause else issue
+        action = diagnosis.get("suggested_action")
+        if action:
+            msg += f" (Action: {action})"
+
+        notify_critical(f"OS Doctor [{sev}] {msg}")
+    except Exception:
+        pass
 
 
 def fetch_undiagnosed_alerts(conn):

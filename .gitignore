@@ -35,6 +35,12 @@ data/models/*.pt
 data/traces/*
 !data/traces/.gitkeep
 !data/models/.gitkeep
+simulation_state.json
+ui-overhead-results/
+hist.md
+.cognios_daemon.pid
+
+config_overrides.json
 
 # Logs
 logs/
@@ -47,3 +53,33 @@ dashboard.log
 .vscode/
 .idea/
 
+# Ignore SQLite database files
+*.db
+*.sqlite3
+*.sqlite
+
+# Logs
+logs/
+
+# Environment and secret files
+.env
+.env.local 
+*.env 
+
+.DS_Store
+*.db-shm
+*.db-wal
+# -shm, -wal files
+cognios_telemetry.db-shm
+cognios_telemetry.db-wal
+blackbox.db-shm
+blackbox.db-wal
+/Evolution of Blackbox
+.streamlit/*
+!.streamlit/config.toml
+dist/
+*.pkg.tar.zst
+*.rpm
+*.deb
+/packaging
+docs/CORE_SYSTEM_EXPLAINED.md
