@@ -1,6 +1,6 @@
 # CogniOS
 
-> **Disclaimer:** Non-commercial student project by DevlUp Labs, IIT Jodhpur. Not affiliated with [cognios.ai](https://cognios.ai) or its owner (see notice at the end).
+> **Disclaimer:** Non-commercial student project by DevlUp Labs, IIT Jodhpur. (see notice at the end).
 
 ### Intelligent OS Observability, Anomaly Diagnosis, Dynamic Workload Prioritization & Crash Forensics Platform
 
