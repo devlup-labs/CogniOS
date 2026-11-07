@@ -1,5 +1,7 @@
 # CogniOS
 
+> **Disclaimer:** Non-commercial student project by DevlUp Labs, IIT Jodhpur. Not affiliated with [cognios.ai](https://cognios.ai) or its owner (see notice at the end).
+
 ### Intelligent OS Observability, Anomaly Diagnosis, Dynamic Workload Prioritization & Crash Forensics Platform
 
 > **CogniOS** is an AI-assisted Linux system observability and adaptive workload optimization platform that operates entirely in user space without kernel patches. It combines 1-second `/proc` + Pressure Stall Information (PSI) telemetry, workload-aware **Isolation Forest** anomaly detection, **XGBoost + Deterministic Rule Engine** process prioritization (`nice` scheduling with automatic state rollback), a 30-minute **BlackBox** flight recorder with Z-score causal chains, and **Groq LLM** natural-language root-cause synthesis.
