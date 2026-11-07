@@ -302,3 +302,9 @@ PYTHONPATH=. .venv/bin/python -m unittest discover tests
 ## License
 
 This project is released under the **MIT License**.
+
+---
+>
+> CogniOS is a **non-commercial student educational project** developed within [DevlUp Labs](https://github.com/devlup-labs), an open-source society at IIT Jodhpur, India. This repository is kept as a record of academic work.
+>
+> This project has **no affiliation with, and is not endorsed by or connected to, [cognios.ai](https://cognios.ai) or its owner**. The name is used here solely to identify this student project and not for any commercial product or service.
